@@ -181,3 +181,28 @@ test("last30days probe reports an explicit setup boundary without attempting an 
   assert.equal(result.consecutiveFailures, 2);
   assert.match(result.detail, /不会读取浏览器 Cookie/);
 });
+
+test("X source probe validates the bearer-backed account query instead of the public profile page", async () => {
+  const result = await probeSource(rssSource({
+    id: "x-ai-official",
+    name: "AI 官方账号（X）",
+    kind: "x",
+    url: undefined,
+    homepageUrl: "https://x.com/",
+    query: "OpenAI, AnthropicAI",
+    role: "official",
+  }), {
+    now: () => new Date("2026-08-30T12:00:00.000Z"),
+    xClient: {
+      searchRecent: async ({ accounts }) => {
+        assert.deepEqual(accounts, ["OpenAI", "AnthropicAI"]);
+        return { data: [{ id: "500", author_id: "openai", text: "Official" }] };
+      },
+    },
+  });
+
+  assert.equal(result.status, "healthy");
+  assert.equal(result.itemCount, 1);
+  assert.equal(result.targetUrl, "https://api.x.com/2/tweets/search/recent");
+  assert.match(result.detail, /2 个官方账号/);
+});

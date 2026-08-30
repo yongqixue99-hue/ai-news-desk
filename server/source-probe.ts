@@ -2,6 +2,8 @@ import { fetchRemote, readResponseBuffer } from "./remote-url.js";
 import { getLast30DaysStatus } from "./last30days-adapter.js";
 import { googleNewsFeed, routedFeedsForSource, sourceTopicIds } from "./source-routing.js";
 import { repositoriesForGitHubSource } from "./github-community.js";
+import { getXBearerToken } from "./secrets.js";
+import { accountsForXSource, createXApiClient, type XRecentSearchClient } from "./x-official.js";
 import type { SourceConfig, SourceProbeResult } from "./types.js";
 
 const MAXIMUM_PROBE_BYTES = 2 * 1024 * 1024;
@@ -15,6 +17,7 @@ export interface SourceProbeOptions {
   last30DaysStatus?: typeof getLast30DaysStatus;
   now?: () => Date;
   timeoutMs?: number;
+  xClient?: XRecentSearchClient;
 }
 
 export const applySourceProbeResult = (
@@ -99,6 +102,39 @@ export const probeSource = async (
         itemCount: 0,
         detail: `last30days 状态检查失败：${error instanceof Error ? error.message : String(error)}`,
         targetUrl: "",
+      };
+    }
+  }
+  if (source.kind === "x") {
+    const targetUrl = "https://api.x.com/2/tweets/search/recent";
+    try {
+      const accounts = accountsForXSource(source);
+      if (!accounts.length) throw new Error("X 来源没有配置有效的官方账号");
+      const response = await (options.xClient ?? createXApiClient({ getBearerToken: getXBearerToken })).searchRecent({
+        accounts,
+        sinceId: source.cursor,
+      });
+      return {
+        sourceId: source.id,
+        status: "healthy",
+        checkedAt,
+        successfulAt: checkedAt,
+        consecutiveFailures: 0,
+        itemCount: response.data?.length ?? 0,
+        detail: `X API 连接正常，正在监控 ${accounts.length} 个官方账号`,
+        targetUrl,
+        httpStatus: 200,
+      };
+    } catch (error) {
+      return {
+        sourceId: source.id,
+        status: "error",
+        checkedAt,
+        successfulAt: previousSuccess,
+        consecutiveFailures: previousFailures + 1,
+        itemCount: 0,
+        detail: error instanceof Error ? error.message : String(error),
+        targetUrl,
       };
     }
   }

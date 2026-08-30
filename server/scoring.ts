@@ -178,6 +178,17 @@ const cleanExcerpt = (content: string | undefined, maximum = 360) =>
     .trim()
     .slice(0, maximum);
 
+const canonicalUrlForItem = (item: RawHorizonItem) => {
+  const value = item.metadata?.canonical_url;
+  if (typeof value !== "string") return undefined;
+  try {
+    const url = new URL(value);
+    return /^https?:$/u.test(url.protocol) ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const shanghaiBoundary = (date: string, endExclusive = false) => {
   const value = new Date(`${date}T00:00:00+08:00`);
   if (endExclusive) value.setDate(value.getDate() + 1);
@@ -223,6 +234,7 @@ export const rawItemToCandidate = (
     author: item.author,
     title: item.title,
     url: item.url,
+    canonicalUrl: canonicalUrlForItem(item),
     // Community writing is valuable evidence in its own right. Preserve
     // enough of the discussion for a separate community synthesis instead of
     // squeezing it into the news-summary-sized 360-character window.

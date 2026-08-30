@@ -79,6 +79,15 @@ test("a connector-specific failure is reported without marking unrelated sources
   assert.doesNotMatch(results[1].detail, /知乎/);
 });
 
+test("X adapter output remains attributable when optional feed metadata is absent", () => {
+  const target = source("x-ai", "AI 官方账号（X）", "x");
+  const [result] = sourceResultsForRun([target], [item("x:200", "x")], [candidate("x:200")]);
+
+  assert.equal(result.rawCount, 1);
+  assert.equal(result.candidateCount, 1);
+  assert.equal(result.status, "healthy");
+});
+
 test("neutral collection yield preserves health while explicit failures change the streak", () => {
   const target = source("microsoft", "Microsoft 官方博客", "rss");
   target.health = "healthy";

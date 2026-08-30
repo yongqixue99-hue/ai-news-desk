@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { createSourceDesk } from "./source-desk.js";
 import { collectPortableStructuredSources } from "./structured-collector.js";
+import {
+  applyXSourceCursors,
+  collectXOfficialSources,
+  createXApiClient,
+} from "./x-official.js";
+import { getXBearerToken } from "./secrets.js";
 import { isCommunityCandidate } from "./community-feed.js";
 import { buildCandidateBriefingEvidence } from "./candidate-briefing.js";
 import { generateCandidateBriefings } from "./candidate-briefing-service.js";
@@ -114,7 +120,7 @@ export const buildHorizonConfig = (
 
 export const horizonSourceKindsFor = (sources: SourceConfig[]) => [...new Set(
   sources.flatMap((source) => {
-    if (source.kind === "zhihu" || source.kind === "last30days" || source.kind === "github") return [];
+    if (source.kind === "zhihu" || source.kind === "last30days" || source.kind === "github" || source.kind === "x") return [];
     return [source.kind === "google_news" ? "rss" : source.kind];
   }),
 )];
@@ -455,6 +461,10 @@ export const executeCollection = async (runId: string) => {
     const sourceDesk = createSourceDesk({
       collectStructured: (structuredSources, request) =>
         collectPortableStructuredSources(structuredSources, request, { signal: controller.signal }),
+      collectXOfficial: (xSources, options) => collectXOfficialSources(xSources, {
+        client: createXApiClient({ getBearerToken: getXBearerToken }),
+        signal: options.signal,
+      }),
     });
     const batch = await sourceDesk.collect({
       sources: selectedSources,
@@ -528,6 +538,7 @@ export const executeCollection = async (runId: string) => {
         if (!source) continue;
         applySourceRunResult(source, resultItem, checkedAt);
       }
+      applyXSourceCursors(current.sources, batch.sourceCursors ?? {});
     });
     await appendLog(
       runId,

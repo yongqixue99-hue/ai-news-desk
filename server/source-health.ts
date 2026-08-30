@@ -10,6 +10,7 @@ const belongsToSource = (item: RawHorizonItem, source: SourceConfig) => {
   if (source.kind === "google_news") return item.source_type === "google_news";
   if (source.kind === "last30days") return item.source_type === "last30days";
   if (source.kind === "github") return item.source_type === "github";
+  if (source.kind === "x") return item.source_type === "x";
   return false;
 };
 

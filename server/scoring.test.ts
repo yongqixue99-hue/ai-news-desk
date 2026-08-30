@@ -59,6 +59,21 @@ test("candidate mapping preserves provenance and sorting keeps high-value items 
   assert.equal(high.sourceName, "OpenAI 官方");
 });
 
+test("candidate mapping keeps an adapter-provided canonical URL for cross-source Story deduplication", () => {
+  const candidate = rawItemToCandidate(item({
+    id: "x:200",
+    source_type: "x",
+    url: "https://x.com/OpenAI/status/200",
+    metadata: {
+      feed_name: "AI 官方账号（X）",
+      source_role: "official",
+      canonical_url: "https://openai.com/index/model-x",
+    },
+  }), 24);
+
+  assert.equal(candidate.canonicalUrl, "https://openai.com/index/model-x");
+});
+
 test("topic selection changes relevance instead of forcing every run through AI keywords", () => {
   const gamingItem = item({
     title: "Nintendo announces a new game and Switch release date",

@@ -1180,6 +1180,20 @@ const configuredDefaultSources: SourceConfig[] = [
     discoveryOnly: false,
     note: "官方网站 · 游戏 / 电竞",
   },
+  {
+    id: "x-ai-official",
+    name: "AI 官方账号（X）",
+    kind: "x",
+    homepageUrl: "https://x.com/",
+    query: "OpenAI, AnthropicAI, GoogleDeepMind",
+    topicIds: ["ai", "technology", "science"],
+    enabled: false,
+    selected: false,
+    category: "ai-official",
+    role: "official",
+    discoveryOnly: false,
+    note: "X API v2 · 官方账号原帖 · 需配置 Bearer Token",
+  },
 ];
 
 const localSkillPath = (skillDirectory: string) =>
@@ -1198,6 +1212,7 @@ export const defaultSourcePresets: SourcePreset[] = [
     name: "AI 日常完整包",
     sourceIds: [
       "openai-official",
+      "x-ai-official",
       "anthropic-official",
       "deepmind-official",
       "microsoft-official",
@@ -1484,7 +1499,7 @@ const normalizeProviderHealth = (
 
 export const upgradeState = (state: WorkflowState): WorkflowState => {
   const previousVersion = Number(state.version || 0);
-  state.version = 12;
+  state.version = 13;
   state.settings = { ...defaultSettings, ...state.settings };
   state.settings.wechat = {
     ...defaultSettings.wechat,
@@ -1636,6 +1651,13 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
       storedPreset.updatedAt = presetTimestamp;
     }
   }
+  if (previousVersion < 13) {
+    const dailyPreset = state.sourcePresets.find((preset) => preset.id === "preset_ai_daily");
+    if (dailyPreset) {
+      dailyPreset.sourceIds = [...new Set([...dailyPreset.sourceIds, "x-ai-official"])];
+      dailyPreset.updatedAt = presetTimestamp;
+    }
+  }
   const availableSourceIds = new Set(state.sources.map((source) => source.id));
   state.sourcePresets = state.sourcePresets.flatMap((preset) => {
     if (!preset || typeof preset.id !== "string" || typeof preset.name !== "string") return [];
@@ -1733,7 +1755,7 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
 };
 
 export const createDefaultState = (): WorkflowState => ({
-  version: 12,
+  version: 13,
   settings: { ...defaultSettings, wechat: { ...defaultSettings.wechat } },
   editorialSystem: { profile: defaultEditorialProfile(), suggestionDecisions: [] },
   aiSettings: defaultAiSettings(),

@@ -40,6 +40,13 @@ interface SourcesPageProps {
 
 type PurposeFilter = "all" | SourceRole;
 type HealthFilter = "all" | NonNullable<SourceConfig["health"]>;
+type XCredentialStatus = { configured: boolean; hint?: string };
+
+const responseJson = async <T,>(response: Response): Promise<T> => {
+  const body = await response.json().catch(() => ({})) as T & { error?: string };
+  if (!response.ok) throw new Error(body.error || `请求失败（HTTP ${response.status}）`);
+  return body;
+};
 
 const sourceRoleLabels: Record<SourceRole, string> = {
   official: "官方一手",
@@ -106,6 +113,10 @@ export function SourcesPage({
   const [presetName, setPresetName] = useState("");
   const [presetBusyId, setPresetBusyId] = useState<string>();
   const [creatingPreset, setCreatingPreset] = useState(false);
+  const [xCredential, setXCredential] = useState<XCredentialStatus>({ configured: false });
+  const [xToken, setXToken] = useState("");
+  const [xCredentialBusy, setXCredentialBusy] = useState(false);
+  const [xCredentialError, setXCredentialError] = useState("");
   const sourceNameInputRef = useRef<HTMLInputElement>(null);
   const closeSourceModal = () => setAdding(false);
   const sourceDialogRef = useDialogA11y<HTMLElement>({
@@ -122,6 +133,15 @@ export function SourcesPage({
       return new Set([...current].filter((sourceId) => available.has(sourceId)));
     });
   }, [sourceIdKey]);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/x/status")
+      .then((response) => responseJson<XCredentialStatus>(response))
+      .then((status) => { if (active) setXCredential(status); })
+      .catch((error) => { if (active) setXCredentialError(error instanceof Error ? error.message : String(error)); });
+    return () => { active = false; };
+  }, []);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredSources = useMemo(() => sources.filter((source) => {
@@ -211,6 +231,44 @@ export function SourcesPage({
     setDraft({ ...draft, topicIds: next });
   };
 
+  const saveXCredential = async () => {
+    if (xCredentialBusy || xToken.trim().length < 16) return;
+    setXCredentialBusy(true);
+    setXCredentialError("");
+    try {
+      const status = await responseJson<XCredentialStatus>(await fetch("/api/x/token", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bearerToken: xToken.trim() }),
+      }));
+      setXCredential(status);
+      setXToken("");
+      const defaultXSource = sources.find((source) => source.id === "x-ai-official");
+      if (defaultXSource && (!defaultXSource.enabled || !defaultXSource.selected)) {
+        await onSave(defaultXSource, { enabled: true, selected: true });
+      }
+    } catch (error) {
+      setXCredentialError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setXCredentialBusy(false);
+    }
+  };
+
+  const clearXCredential = async () => {
+    if (xCredentialBusy) return;
+    setXCredentialBusy(true);
+    setXCredentialError("");
+    try {
+      const status = await responseJson<XCredentialStatus>(await fetch("/api/x/token", { method: "DELETE" }));
+      setXCredential(status);
+      setXToken("");
+    } catch (error) {
+      setXCredentialError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setXCredentialBusy(false);
+    }
+  };
+
   const submit = async () => {
     try {
       await onAdd(draft);
@@ -232,6 +290,31 @@ export function SourcesPage({
         <Radio size={20} />
         <div><strong>官网入口与采集接口分开</strong><span>单源测试只检查 RSS、索引接口或官网可达性，不会启动成稿；采集时仍会回到原文核验。</span></div>
       </div>
+
+      <section className="x-credential-panel" aria-labelledby="x-credential-heading">
+        <div className="x-credential-copy">
+          <strong id="x-credential-heading">X 官方账号采集</strong>
+          <span>通过 X API v2 读取账号白名单中的公开原帖；不读取私信、不执行点赞，也不会代你发帖。</span>
+          <small>Bearer Token 仅保存在当前 Windows 用户的 DPAPI 安全存储。X 开发者访问可能按用量计费，请留意自己的套餐和额度。</small>
+        </div>
+        <div className="x-credential-form">
+          <input
+            type="password"
+            value={xToken}
+            onChange={(event) => setXToken(event.target.value)}
+            placeholder={xCredential.configured ? `已配置 ${xCredential.hint ?? ""}` : "粘贴 X API Bearer Token"}
+            aria-label="X API Bearer Token"
+            autoComplete="off"
+          />
+          <button type="button" onClick={saveXCredential} disabled={xCredentialBusy || xToken.trim().length < 16}>
+            {xCredentialBusy ? <LoaderCircle className="spin" size={14} /> : <Save size={14} />}
+            保存并启用 X 官方源
+          </button>
+          {xCredential.configured ? <button type="button" className="secondary-button" onClick={() => window.confirm("确定删除本机保存的 X Bearer Token 吗？") && clearXCredential()} disabled={xCredentialBusy}>删除 Token</button> : null}
+        </div>
+        <span className={`x-credential-state ${xCredential.configured ? "configured" : ""}`}>{xCredential.configured ? `已安全配置 ${xCredential.hint ?? ""}` : "尚未配置，X 来源默认停用"}</span>
+        {xCredentialError ? <span className="x-credential-error" role="alert">{xCredentialError}</span> : null}
+      </section>
 
       <section className="source-presets" aria-labelledby="source-presets-heading">
         <div className="source-presets-heading">
@@ -292,7 +375,7 @@ export function SourcesPage({
               <label className="source-row-select"><input type="checkbox" checked={checkedIds.has(source.id)} onChange={() => toggleChecked(source.id)} aria-label={`勾选新闻源 ${source.name}`} /></label>
               <label className="switch"><input type="checkbox" checked={source.enabled} onChange={(event) => void onSave(source, { enabled: event.target.checked })} /><span /></label>
               <div className="managed-source-name"><strong>{source.name}</strong><span>{topicSummary}{source.note ? ` · ${source.note}` : ""}</span></div>
-              <span className="source-kind">{source.kind === "rss" ? "RSS" : source.kind === "hackernews" ? "HN" : source.kind === "zhihu" ? "知乎 CLI" : source.kind === "last30days" ? "30 天社区" : source.kind === "github" ? "GitHub" : "新闻检索"}</span>
+              <span className="source-kind">{source.kind === "rss" ? "RSS" : source.kind === "hackernews" ? "HN" : source.kind === "zhihu" ? "知乎 CLI" : source.kind === "last30days" ? "30 天社区" : source.kind === "github" ? "GitHub" : source.kind === "x" ? "X 官方" : "新闻检索"}</span>
               <span className={`source-role-badge ${role}`}>{sourceRoleLabels[role]}</span>
               <span className={`source-health ${health}`} title={source.lastHealthDetail}>
                 {healthIcon}<span><strong>{healthLabel} · 检查 {formatTimestamp(source.lastCheckedAt, "尚未")}</strong><small>最后成功 {formatTimestamp(source.lastSuccessfulAt, "尚无")}{failureCount ? ` · 连续失败 ${failureCount} 次` : ""}</small></span>
@@ -323,18 +406,20 @@ export function SourcesPage({
               setDraft({
                 ...draft,
                 kind,
+                ...(kind === "x" ? { homepageUrl: "https://x.com/", role: "official" as const, discoveryOnly: false } : {}),
                 ...(community ? { role: "community" as const, discoveryOnly: true } : {}),
               });
-            }}><option value="rss">RSS</option><option value="google_news">Google News 查询</option><option value="hackernews">Hacker News</option><option value="zhihu">知乎 CLI</option><option value="last30days">Last30days 社区趋势</option><option value="github">GitHub 项目动态</option></select></label>
+            }}><option value="rss">RSS</option><option value="google_news">Google News 查询</option><option value="hackernews">Hacker News</option><option value="x">X 官方账号</option><option value="zhihu">知乎 CLI</option><option value="last30days">Last30days 社区趋势</option><option value="github">GitHub 项目动态</option></select></label>
             {draft.kind === "rss" ? <label><span>采集接口</span><input value={draft.url ?? ""} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://example.com/feed.xml" /></label> : null}
             {draft.kind === "google_news" ? <label><span>检索式</span><input value={draft.query ?? ""} onChange={(event) => setDraft({ ...draft, query: event.target.value })} placeholder="AI OpenAI Anthropic" /></label> : null}
             {draft.kind === "zhihu" ? <label><span>知乎检索词</span><input value={draft.query ?? ""} onChange={(event) => setDraft({ ...draft, query: event.target.value })} placeholder="人工智能 大模型 科技" /></label> : null}
             {draft.kind === "last30days" ? <label><span>趋势领域（可选）</span><input value={draft.query ?? ""} onChange={(event) => setDraft({ ...draft, query: event.target.value })} placeholder="留空则跟随工作台频道和关键词" /></label> : null}
             {draft.kind === "github" ? <label><span>仓库列表</span><input value={draft.query ?? ""} onChange={(event) => setDraft({ ...draft, query: event.target.value })} placeholder="owner/repo, owner/repo" /></label> : null}
-            <label><span>来源分类</span><select value={draft.role ?? "verification"} onChange={(event) => { const role = event.target.value as SourceRole; setDraft({ ...draft, role, discoveryOnly: role === "discovery" || role === "community" ? true : draft.discoveryOnly }); }}>{Object.entries(sourceRoleLabels).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>
+            {draft.kind === "x" ? <label><span>官方账号白名单</span><input value={draft.query ?? ""} onChange={(event) => setDraft({ ...draft, query: event.target.value })} placeholder="OpenAI, AnthropicAI, GoogleDeepMind" /></label> : null}
+            <label><span>来源分类</span><select disabled={draft.kind === "x"} value={draft.role ?? "verification"} onChange={(event) => { const role = event.target.value as SourceRole; setDraft({ ...draft, role, discoveryOnly: role === "discovery" || role === "community" ? true : draft.discoveryOnly }); }}>{Object.entries(sourceRoleLabels).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>
             <div className="source-topic-field"><span>适用频道</span><div className="source-topic-picker">{collectionTopics.map((topic) => <button type="button" key={topic.id} className={draft.topicIds?.includes(topic.id) ? "selected" : undefined} aria-pressed={draft.topicIds?.includes(topic.id)} onClick={() => toggleDraftTopic(topic.id)}>{draft.topicIds?.includes(topic.id) ? <Check size={12} /> : null}{topic.label}</button>)}</div></div>
-            <label className="inline-check"><input type="checkbox" checked={draft.discoveryOnly} onChange={(event) => setDraft({ ...draft, discoveryOnly: event.target.checked })} /><span>仅作选题发现，成稿时必须另找一手来源</span></label>
-            <div className="modal-actions"><button type="button" className="secondary-button" onClick={closeSourceModal}>取消</button><button type="button" className="primary-button" onClick={submit} disabled={!draft.name || !draft.homepageUrl || (draft.kind === "rss" && !draft.url)}><Save size={16} />保存新闻源</button></div>
+            <label className="inline-check"><input type="checkbox" disabled={draft.kind === "x"} checked={draft.discoveryOnly} onChange={(event) => setDraft({ ...draft, discoveryOnly: event.target.checked })} /><span>{draft.kind === "x" ? "白名单账号按官方一手来源处理" : "仅作选题发现，成稿时必须另找一手来源"}</span></label>
+            <div className="modal-actions"><button type="button" className="secondary-button" onClick={closeSourceModal}>取消</button><button type="button" className="primary-button" onClick={submit} disabled={!draft.name || !draft.homepageUrl || (draft.kind === "rss" && !draft.url) || (draft.kind === "x" && !draft.query?.trim())}><Save size={16} />保存新闻源</button></div>
           </section>
         </div>
       ) : null}

@@ -7,7 +7,9 @@ import { workflowRoot } from "./workspace-paths.js";
 const execFileAsync = promisify(execFile);
 const serviceName = "cn.ai-news-desk.provider-api-key";
 const weChatServiceName = "cn.ai-news-desk.wechat-app-secret";
+const xBearerServiceName = "cn.ai-news-desk.x-bearer-token";
 const weChatAccountName = "primary";
+const xBearerAccountName = "primary";
 const windowsSecretPath = path.join(workflowRoot, "secrets.windows.json");
 
 interface WindowsSecretStore {
@@ -199,4 +201,32 @@ export const deleteWeChatAppSecret = async () => {
   ensureSupportedSecretStore();
   if (process.platform === "win32") await deleteWindowsSecret("wechat:primary");
   else await deleteMacSecret(weChatAccountName, weChatServiceName);
+};
+
+export const xBearerTokenHint = (value: string) => {
+  const token = value.trim();
+  return token.length >= 4 ? `••••••${token.slice(-4)}` : "••••••••";
+};
+
+export const setXBearerToken = async (bearerToken: string) => {
+  ensureSupportedSecretStore();
+  const value = bearerToken.trim();
+  if (value.length < 16) throw new Error("X API Bearer Token 格式不正确");
+  if (process.platform === "win32") await setWindowsSecret("x:bearer", value);
+  else await setMacSecret(xBearerAccountName, xBearerServiceName, value);
+  return xBearerTokenHint(value);
+};
+
+export const getXBearerToken = async () => {
+  ensureSupportedSecretStore();
+  const missingMessage = "尚未在本机安全存储中找到 X API Bearer Token";
+  return process.platform === "win32"
+    ? getWindowsSecret("x:bearer", missingMessage)
+    : getMacSecret(xBearerAccountName, xBearerServiceName, missingMessage);
+};
+
+export const deleteXBearerToken = async () => {
+  ensureSupportedSecretStore();
+  if (process.platform === "win32") await deleteWindowsSecret("x:bearer");
+  else await deleteMacSecret(xBearerAccountName, xBearerServiceName);
 };

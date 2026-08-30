@@ -8,12 +8,35 @@ const source = (id: string, kind: SourceConfig["kind"]): SourceConfig => ({
   name: id,
   kind,
   homepageUrl: "https://example.com",
-  query: kind === "github" ? "openai/codex" : undefined,
+  query: kind === "github" ? "openai/codex" : kind === "x" ? "OpenAI" : undefined,
   topicIds: ["ai"],
   enabled: true,
   selected: true,
   category: "technology",
   discoveryOnly: kind !== "rss",
+});
+
+test("SourceDesk keeps X official posts and their incremental cursor separate from community adapters", async () => {
+  const desk = createSourceDesk({
+    collectStructured: async () => ({ items: [] }),
+    collectXOfficial: async (sources) => {
+      assert.deepEqual(sources.map((entry) => entry.id), ["x-official"]);
+      return {
+        items: [item("x:400", "x")],
+        failures: {},
+        cursors: { "x-official": "400" },
+      };
+    },
+  });
+
+  const batch = await desk.collect({
+    sources: [source("x-official", "x")],
+    topicIds: ["ai"],
+  });
+
+  assert.deepEqual(batch.adapterCounts, { x: 1 });
+  assert.deepEqual(batch.sourceCursors, { "x-official": "400" });
+  assert.deepEqual(batch.failures, {});
 });
 
 const item = (id: string, sourceType: string): RawHorizonItem => ({

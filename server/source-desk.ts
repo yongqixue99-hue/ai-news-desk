@@ -11,6 +11,7 @@ export interface SignalBatch {
   failures: Record<string, string>;
   adapterCounts: Record<string, number>;
   horizonRunId?: string;
+  sourceCursors?: Record<string, string>;
 }
 
 export interface SourceCollectRequest {
@@ -37,6 +38,10 @@ interface SourceDeskDependencies {
     filters: Pick<CollectionRequest, "keywords">,
     options: { signal?: AbortSignal },
   ) => Promise<CommunityCollectionResult>;
+  collectXOfficial?: (
+    sources: SourceConfig[],
+    options: { signal?: AbortSignal },
+  ) => Promise<{ items: RawHorizonItem[]; failures: Record<string, string>; cursors: Record<string, string> }>;
 }
 
 const isCommunityAdapter = (source: SourceConfig) =>
@@ -50,8 +55,9 @@ const isCommunityAdapter = (source: SourceConfig) =>
  */
 export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
   async collect(request: SourceCollectRequest): Promise<SignalBatch> {
-    const structuredSources = request.sources.filter((source) => !isCommunityAdapter(source));
+    const structuredSources = request.sources.filter((source) => !isCommunityAdapter(source) && source.kind !== "x");
     const communitySources = request.sources.filter(isCommunityAdapter);
+    const xSources = request.sources.filter((source) => source.kind === "x");
     const failures: Record<string, string> = {};
     const structuredPromise = structuredSources.length
       ? dependencies.collectStructured(structuredSources, request).catch((error) => {
@@ -72,12 +78,32 @@ export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
         return { items: [], failures: {} };
       })
       : Promise.resolve({ items: [], failures: {} });
-    const [structured, community] = await Promise.all([structuredPromise, communityPromise]);
+    const xPromise = xSources.length
+      ? dependencies.collectXOfficial
+        ? dependencies.collectXOfficial(xSources, { signal: request.signal }).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          for (const source of xSources) failures[source.id] = message;
+          return { items: [], failures: {}, cursors: {} };
+        })
+        : Promise.resolve({
+          items: [],
+          failures: Object.fromEntries(xSources.map((source) => [source.id, "X 官方来源适配器尚未配置"])),
+          cursors: {},
+        })
+      : Promise.resolve({ items: [], failures: {}, cursors: {} });
+    const [structured, community, xOfficial] = await Promise.all([structuredPromise, communityPromise, xPromise]);
     Object.assign(failures, structured.failures);
     Object.assign(failures, community.failures);
-    const items = [...structured.items, ...community.items];
+    Object.assign(failures, xOfficial.failures);
+    const items = [...structured.items, ...community.items, ...xOfficial.items];
     const adapterCounts: Record<string, number> = {};
     for (const item of items) adapterCounts[item.source_type] = (adapterCounts[item.source_type] ?? 0) + 1;
-    return { items, failures, adapterCounts, horizonRunId: structured.horizonRunId };
+    return {
+      items,
+      failures,
+      adapterCounts,
+      horizonRunId: structured.horizonRunId,
+      sourceCursors: xOfficial.cursors,
+    };
   },
 });

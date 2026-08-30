@@ -95,11 +95,16 @@ import { startScheduler } from "./scheduler.js";
 import { startOwnedServer } from "./startup.js";
 import {
   deleteProviderApiKey,
+  deleteXBearerToken,
   deleteWeChatAppSecret,
+  getXBearerToken,
   getWeChatAppSecret,
   setProviderApiKey,
+  setXBearerToken,
   setWeChatAppSecret,
 } from "./secrets.js";
+import { readXCredentialStatus } from "./x-credentials.js";
+import { accountsForXSource } from "./x-official.js";
 import { importArticleSkill } from "./skill-registry.js";
 import { createWeChatDraftDesk } from "./wechat-draft.js";
 import { createWeChatHttpGateway } from "./wechat-http.js";
@@ -179,7 +184,7 @@ const validDateInput = (value: string) => {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 };
 
-const sourceKinds = new Set(["rss", "hackernews", "google_news", "zhihu", "last30days", "github"]);
+const sourceKinds = new Set(["rss", "hackernews", "google_news", "zhihu", "last30days", "github", "x"]);
 const sourceRoles = new Set(["official", "verification", "research", "discovery", "community"]);
 const draftableAssignmentModes = new Set<Exclude<AssignmentMode, "watch" | "skip">>([
   "brief",
@@ -798,6 +803,36 @@ app.get(
   }),
 );
 
+app.get(
+  "/api/x/status",
+  asyncRoute(async (_request, response) => {
+    response.json(await readXCredentialStatus({ getBearerToken: getXBearerToken }));
+  }),
+);
+
+app.put(
+  "/api/x/token",
+  asyncRoute(async (request, response) => {
+    const bearerToken = typeof request.body?.bearerToken === "string"
+      ? request.body.bearerToken.trim()
+      : "";
+    if (bearerToken.length < 16) {
+      response.status(400).json({ error: "X API Bearer Token 格式不正确" });
+      return;
+    }
+    const hint = await setXBearerToken(bearerToken);
+    response.json({ configured: true, hint });
+  }),
+);
+
+app.delete(
+  "/api/x/token",
+  asyncRoute(async (_request, response) => {
+    await deleteXBearerToken();
+    response.json({ configured: false });
+  }),
+);
+
 app.patch(
   "/api/settings",
   asyncRoute(async (request, response) => {
@@ -1168,6 +1203,10 @@ app.post(
       response.status(400).json({ error: "RSS 新闻源必须填写地址" });
       return;
     }
+    if (body.kind === "x" && !accountsForXSource(body).length) {
+      response.status(400).json({ error: "X 官方来源必须填写至少一个有效账号，例如 OpenAI" });
+      return;
+    }
     for (const candidateUrl of [body.homepageUrl, body.url]) {
       if (!candidateUrl) continue;
       try {
@@ -1181,15 +1220,15 @@ app.post(
       id: `source_${randomUUID().slice(0, 8)}`,
       name: body.name.trim(),
       kind: body.kind,
-      homepageUrl: body.homepageUrl?.trim(),
+      homepageUrl: body.homepageUrl?.trim() || (body.kind === "x" ? "https://x.com/" : undefined),
       url: body.url?.trim(),
       query: body.query?.trim(),
       topicIds: normalizeTopicIds(body.topicIds),
       enabled: true,
       selected: true,
       category: body.category?.trim() || "ai-news",
-      role: sourceRoles.has(body.role ?? "") ? body.role : undefined,
-      discoveryOnly: Boolean(body.discoveryOnly),
+      role: body.kind === "x" ? "official" : sourceRoles.has(body.role ?? "") ? body.role : undefined,
+      discoveryOnly: body.kind === "x" ? false : Boolean(body.discoveryOnly),
       note: body.note?.trim(),
     };
     source.role ??= sourceRoleFor(source);
@@ -1260,6 +1299,11 @@ app.patch(
       response.status(400).json({ error: "RSS 新闻源必须填写地址" });
       return;
     }
+    const nextQuery = typeof patch.query === "string" ? patch.query.trim() : existing.query;
+    if (nextKind === "x" && !accountsForXSource({ query: nextQuery }).length) {
+      response.status(400).json({ error: "X 官方来源必须填写至少一个有效账号，例如 OpenAI" });
+      return;
+    }
     const nextHomepageUrl = typeof patch.homepageUrl === "string"
       ? patch.homepageUrl.trim()
       : existing.homepageUrl;
@@ -1281,6 +1325,11 @@ app.patch(
     if (patch.role !== undefined && !sourceRoles.has(patch.role)) {
       response.status(400).json({ error: "不支持的来源分类" });
       return;
+    }
+    if (nextKind === "x") {
+      patch.role = "official";
+      patch.discoveryOnly = false;
+      if (!nextHomepageUrl) patch.homepageUrl = "https://x.com/";
     }
     if (typeof patch.note === "string") patch.note = patch.note.trim();
     const source = await updateState((state) => {

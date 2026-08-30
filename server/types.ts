@@ -19,7 +19,7 @@ export type RunStatus =
   | "failed"
   | "cancelled";
 
-export type SourceKind = "rss" | "hackernews" | "google_news" | "zhihu" | "last30days" | "github";
+export type SourceKind = "rss" | "hackernews" | "google_news" | "zhihu" | "last30days" | "github" | "x";
 export type SourceRole = "official" | "verification" | "research" | "discovery" | "community";
 export type SourceHealthStatus = "unknown" | "healthy" | "warning" | "error";
 export type CollectionTopicId =
@@ -59,6 +59,8 @@ export interface SourceConfig {
   homepageUrl?: string;
   url?: string;
   query?: string;
+  /** Opaque incremental cursor owned by the source adapter. */
+  cursor?: string;
   topicIds?: CollectionTopicId[];
   routes?: SourceRoute[];
   enabled: boolean;
@@ -969,7 +971,7 @@ export interface WorkflowNotification {
 }
 
 export interface WorkflowState {
-  version: 12;
+  version: 13;
   settings: Settings;
   editorialSystem: EditorialSystemState;
   aiSettings: AiSettings;
