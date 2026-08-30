@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.workflow/
+.prototype/
+.artifacts/
+*.log
+.DS_Store
+playwright-report/
+test-results/

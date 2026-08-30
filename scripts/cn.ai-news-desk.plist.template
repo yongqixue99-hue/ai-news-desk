@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>cn.ai-news-desk</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_PATH__</string>
+    <string>__PROJECT_PATH__/node_modules/tsx/dist/cli.mjs</string>
+    <string>__PROJECT_PATH__/server/index.ts</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__PROJECT_PATH__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <key>AI_NEWS_DESK_PORT</key>
+    <string>4317</string>
+    <key>PATH</key>
+    <string>__PATH_VALUE__</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__PROJECT_PATH__/.workflow/logs/service.log</string>
+  <key>StandardErrorPath</key>
+  <string>__PROJECT_PATH__/.workflow/logs/service-error.log</string>
+</dict>
+</plist>
+

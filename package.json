@@ -1,0 +1,40 @@
+{
+  "name": "ai-news-desk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx server/index.ts",
+    "build": "tsc --noEmit && vite build",
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "test": "node --test --import tsx server/**/*.test.ts"
+  },
+  "dependencies": {
+    "@tiptap/extension-image": "^3.29.2",
+    "@tiptap/extension-link": "^3.29.2",
+    "@tiptap/extension-placeholder": "^3.29.2",
+    "@tiptap/react": "^3.29.2",
+    "@tiptap/starter-kit": "^3.29.2",
+    "@types/sanitize-html": "^2.16.1",
+    "@vitejs/plugin-react": "latest",
+    "cheerio": "latest",
+    "express": "latest",
+    "lucide-react": "latest",
+    "playwright-core": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-resizable-panels": "^4.12.2",
+    "sanitize-html": "^2.17.6",
+    "sharp": "^0.35.3",
+    "simple-icons": "^16.28.0",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/express": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
