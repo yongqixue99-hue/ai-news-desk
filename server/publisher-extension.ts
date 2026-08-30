@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -8,6 +7,7 @@ import {
   publisherBodyHtml,
   publisherImageCaptions,
 } from "./article-html.js";
+import { openRegularChrome } from "./chrome-launch.js";
 import { readState, updateState, workspacePath } from "./storage.js";
 import type {
   ArticleDraft,
@@ -222,11 +222,7 @@ const prepareJob = async (draft: ArticleDraft, editorUrl: string): Promise<Exten
 export const extensionPublisherStatus = () => extensionPublisherBridge.status();
 
 export const openRegularChromePublisher = async (editorUrl: string) => {
-  const child = spawn("open", ["-a", "Google Chrome", editorUrl], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  await openRegularChrome(editorUrl);
   return extensionPublisherStatus();
 };
 

@@ -9,6 +9,7 @@ import type {
 } from "./product-types.js";
 import { assignStory } from "./editorial-desk.js";
 import { isCommunityCandidate } from "./community-feed.js";
+import { interleaveBySource } from "./source-diversity.js";
 import type { Candidate, CollectionTopicId, SourceConfig, WorkflowState } from "./types.js";
 
 interface CandidateRecord {
@@ -430,8 +431,13 @@ const diagnosticsFor = (sources: SourceConfig[]) => sources
 
 export const buildTodayView = (state: WorkflowState, now = new Date().toISOString()): TodayView => {
   const stories = buildStories(state, now);
-  const active = stories.filter((story) => story.ageHours <= 7 * 24 && !story.ignored && !story.published);
-  const ready = active.filter((story) => story.assignment.canDraft && !story.drafted);
+  const active = stories.filter((story) => story.ageHours <= 48 && !story.ignored && !story.published);
+  const ready = interleaveBySource(
+    active.filter((story) => story.assignment.canDraft && !story.drafted),
+    (story) => story.signals.find((signal) => !signal.isCommunity)?.sourceName
+      ?? story.signals[0]?.sourceName
+      ?? "未知来源",
+  );
   const watching = active.filter((story) => story.assignment.mode === "watch").slice(0, 6);
   const drafts = state.drafts;
   return {

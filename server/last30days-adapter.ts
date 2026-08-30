@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { access, mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { workspacePath } from "./storage.js";
+import { workflowRoot } from "./storage.js";
 
 const MINIMUM_PYTHON = [3, 12] as const;
 const DEFAULT_TIMEOUT_MS = 240_000;
@@ -304,7 +304,7 @@ export const discoverLast30Days = async (
   const normalized = normalizedOptions(options);
   const status = await getLast30DaysStatus(normalized);
   if (!status.ready || !status.pythonPath) throw new Error(status.detail);
-  const saveDir = workspacePath(".workflow", "last30days");
+  const saveDir = path.join(workflowRoot, "last30days");
   await mkdir(saveDir, { recursive: true });
   const scriptPath = path.join(status.skillDir, "scripts", "last30days.py");
   const output = await normalized.runCommand(status.pythonPath, [

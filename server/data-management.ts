@@ -165,10 +165,25 @@ export const createPortableWorkflowArchive = async (input: {
     const fileName = `ai-news-desk-full-${createdAt.replace(/[:.]/gu, "-")}.tar.gz`;
     const archivePath = path.join(backupsRoot, fileName);
     await execFileAsync("tar", ["-czf", archivePath, "-C", staging, "."], { maxBuffer: 1024 * 1024 });
+    await prunePortableArchives(backupsRoot, 5);
     return { archivePath, fileName, manifest };
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
+};
+
+export const prunePortableArchives = async (backupsRoot: string, keep = 5) => {
+  const entries = await readdir(backupsRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  const archives = entries
+    .filter((entry) => entry.isFile() && /^ai-news-desk-full-.+\.tar\.gz$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => right.localeCompare(left));
+  const removedPaths = archives.slice(Math.max(0, Math.floor(keep))).map((name) => path.join(backupsRoot, name));
+  await Promise.all(removedPaths.map((target) => rm(target, { force: true })));
+  return { removed: removedPaths.length, removedPaths };
 };
 
 export const storageUsageFor = async (workflowRoot: string): Promise<StorageUsage> => {

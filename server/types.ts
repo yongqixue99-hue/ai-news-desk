@@ -244,7 +244,7 @@ export interface WeChatChannelSettings {
   accountName: string;
   appId: string;
   defaultAuthor: string;
-  /** The secret itself lives in macOS Keychain and is never serialized here. */
+  /** The secret lives in the operating system's protected local store and is never serialized here. */
   appSecretConfigured: boolean;
   appSecretHint?: string;
 }

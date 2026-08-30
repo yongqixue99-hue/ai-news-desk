@@ -3,9 +3,9 @@ import path from "node:path";
 import { createDefaultState, upgradeState } from "./defaults.js";
 import { LocalDatabase } from "./local-database.js";
 import type { WorkflowState } from "./types.js";
+import { workflowRoot, workspaceRoot } from "./workspace-paths.js";
 
-const workspaceRoot = process.cwd();
-export const workflowRoot = path.join(workspaceRoot, ".workflow");
+export { workflowRoot };
 export const workflowMediaRoot = path.join(workflowRoot, "media");
 export const workflowJobsRoot = path.join(workflowRoot, "jobs");
 export const workflowMaterialsRoot = path.join(workflowRoot, "materials");

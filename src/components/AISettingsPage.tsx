@@ -486,7 +486,7 @@ export function AISettingsPage({
         </div>
         <div className="skill-import-row">
           <div><Plus size={16} /><span><strong>导入本地 Skill</strong><small>填写 Skill 文件夹或 SKILL.md 的绝对路径</small></span></div>
-          <label><input value={skillPath} onChange={(event) => setSkillPath(event.target.value)} placeholder="/Users/…/.codex/skills/my-skill" /><button type="button" className="secondary-button compact" disabled={!skillPath.trim() || skillBusy === "import"} onClick={() => void submitSkill()}>{skillBusy === "import" ? <LoaderCircle className="spin" size={14} /> : <Upload size={14} />}导入</button></label>
+          <label><input value={skillPath} onChange={(event) => setSkillPath(event.target.value)} placeholder="选择本机 .codex/skills 下的 Skill 路径" /><button type="button" className="secondary-button compact" disabled={!skillPath.trim() || skillBusy === "import"} onClick={() => void submitSkill()}>{skillBusy === "import" ? <LoaderCircle className="spin" size={14} /> : <Upload size={14} />}导入</button></label>
         </div>
       </section>
 
@@ -527,7 +527,7 @@ export function AISettingsPage({
                 <small>请按真实授权范围分别勾选；勾选一个平台不会自动推断另一个平台也可用。</small>
               </fieldset>
               <label className="material-evidence-note"><span>授权／来源证据说明</span><textarea rows={3} value={materialMetadata.evidenceNote || ""} onChange={(event) => setMaterialMetadata((current) => ({ ...current, evidenceNote: event.target.value }))} placeholder="如：品牌媒体包许可条款、拍摄者授权说明，或官方发布页中的来源说明" /></label>
-              <label><span>证据文件路径</span><input value={materialMetadata.evidencePath || ""} onChange={(event) => setMaterialMetadata((current) => ({ ...current, evidencePath: event.target.value }))} placeholder="/Users/…/license.pdf（可选）" /></label>
+              <label><span>证据文件路径</span><input value={materialMetadata.evidencePath || ""} onChange={(event) => setMaterialMetadata((current) => ({ ...current, evidencePath: event.target.value }))} placeholder="本机授权文件路径（可选）" /></label>
             </div>
             <div className="material-form-actions"><button type="button" className="secondary-button" onClick={() => { resetMaterialForm(); setMaterialComposerOpen(false); }}>取消</button><button type="button" className="primary-button" disabled={materialBusy || !materialMetadata.title.trim() || (materialMode === "file" ? !materialFile : !materialUrl.trim())} onClick={() => void submitMaterial()}>{materialBusy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />}加入素材库</button></div>
           </div>
@@ -574,7 +574,7 @@ export function AISettingsPage({
             <button type="button" className="modal-close" aria-label={`关闭 ${providerModal.name} API 配置`} disabled={providerBusy} onClick={closeProvider}><X size={17} /></button>
             <span className="provider-modal-icon"><ProviderBrandIcon provider={providerModal} /></span>
             <h2 id="provider-modal-title">配置 {providerModal.name}</h2>
-            <p id="provider-modal-description">{providerModal.kind === "codex-cli" ? "这里使用 Codex CLI 的 ChatGPT 登录态，不需要 API Key。" : "保存后密钥会进入 macOS 钥匙串，项目状态里只记录是否已配置。"}</p>
+            <p id="provider-modal-description">{providerModal.kind === "codex-cli" ? "这里使用 Codex CLI 的 ChatGPT 登录态，不需要 API Key。" : "保存后密钥会进入本机受保护存储，项目状态里只记录是否已配置。"}</p>
             <label><span>文本模型</span><input ref={providerModelInputRef} value={providerModel} onChange={(event) => setProviderModel(event.target.value)} placeholder="模型名称" /></label>
             {providerModal.supportsVision ? <label><span>视觉模型</span><input value={providerVisionModel} onChange={(event) => setProviderVisionModel(event.target.value)} placeholder="为截图成稿入口预留（可选）" /></label> : null}
             {providerModal.kind !== "codex-cli" ? (

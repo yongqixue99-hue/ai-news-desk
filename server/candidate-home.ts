@@ -1,4 +1,5 @@
 import type { Candidate } from "./types.js";
+import { interleaveBySource } from "./source-diversity.js";
 
 export interface CandidateHomeOptions {
   now?: string;
@@ -40,12 +41,13 @@ export const composeCandidateHome = (
   }
 
   const secondaryCount = Math.max(0, Math.floor(options.secondaryCount ?? 4));
-  const active = [...current, ...protectedStale];
+  const diversifiedCurrent = interleaveBySource(current, (candidate) => candidate.sourceName);
+  const active = [...diversifiedCurrent, ...protectedStale];
   return {
     active,
-    featured: current[0],
-    recommended: current.slice(1, secondaryCount + 1),
-    others: [...current.slice(secondaryCount + 1), ...protectedStale],
+    featured: diversifiedCurrent[0],
+    recommended: diversifiedCurrent.slice(1, secondaryCount + 1),
+    others: [...diversifiedCurrent.slice(secondaryCount + 1), ...protectedStale],
     expired,
   };
 };

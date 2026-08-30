@@ -828,6 +828,48 @@ export class LocalDatabase {
     }));
   }
 
+  pruneOperationalHistory(input: {
+    terminalJobsOlderThan: string;
+    workflowEventsOlderThan: string;
+    maxTerminalJobs?: number;
+    maxWorkflowEvents?: number;
+  }) {
+    const maxTerminalJobs = Math.max(0, Math.floor(input.maxTerminalJobs ?? 1_000));
+    const maxWorkflowEvents = Math.max(0, Math.floor(input.maxWorkflowEvents ?? 5_000));
+    let terminalJobs = 0;
+    let workflowEvents = 0;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      terminalJobs += Number(this.db.prepare(`
+        DELETE FROM workflow_jobs
+        WHERE status IN ('complete','failed','cancelled') AND updated_at < ?
+      `).run(input.terminalJobsOlderThan).changes);
+      terminalJobs += Number(this.db.prepare(`
+        DELETE FROM workflow_jobs WHERE id IN (
+          SELECT id FROM workflow_jobs
+          WHERE status IN ('complete','failed','cancelled')
+          ORDER BY updated_at DESC, rowid DESC
+          LIMIT -1 OFFSET ?
+        )
+      `).run(maxTerminalJobs).changes);
+      workflowEvents += Number(this.db.prepare(`
+        DELETE FROM workflow_events WHERE created_at < ?
+      `).run(input.workflowEventsOlderThan).changes);
+      workflowEvents += Number(this.db.prepare(`
+        DELETE FROM workflow_events WHERE id IN (
+          SELECT id FROM workflow_events
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT -1 OFFSET ?
+        )
+      `).run(maxWorkflowEvents).changes);
+      this.db.exec("COMMIT");
+      return { terminalJobs, workflowEvents };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   /** Create a transactionally consistent, WAL-independent SQLite snapshot. */
   createSnapshot(destinationPath: string) {
     this.db.prepare("VACUUM INTO ?").run(destinationPath);

@@ -60,3 +60,20 @@ test("a protected stale story stays below today's featured and secondary recomme
   assert.deepEqual(home.recommended.map((item) => item.id), ["second"]);
   assert.deepEqual(home.others.map((item) => item.id), ["selected-stale"]);
 });
+
+test("featured and secondary recommendations show each available source before repeating one", () => {
+  const now = "2026-08-27T12:00:00.000Z";
+  const ranked = [
+    candidate("a-1", "2026-08-27T11:00:00.000Z", { sourceName: "Source A" }),
+    candidate("a-2", "2026-08-27T10:00:00.000Z", { sourceName: "Source A" }),
+    candidate("a-3", "2026-08-27T09:00:00.000Z", { sourceName: "Source A" }),
+    candidate("b-1", "2026-08-27T08:00:00.000Z", { sourceName: "Source B" }),
+    candidate("c-1", "2026-08-27T07:00:00.000Z", { sourceName: "Source C" }),
+  ];
+
+  const home = composeCandidateHome(ranked, { now, expiryHours: 48, secondaryCount: 3 });
+  const visible = [home.featured, ...home.recommended].filter(Boolean);
+
+  assert.deepEqual(visible.map((item) => item?.sourceName), ["Source A", "Source B", "Source C", "Source A"]);
+  assert.deepEqual(visible.map((item) => item?.id), ["a-1", "b-1", "c-1", "a-2"]);
+});

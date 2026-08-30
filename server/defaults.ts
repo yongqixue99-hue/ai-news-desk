@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import path from "node:path";
 import type {
   AiProviderConfig,
   AiSettings,
@@ -1180,6 +1182,9 @@ const configuredDefaultSources: SourceConfig[] = [
   },
 ];
 
+const localSkillPath = (skillDirectory: string) =>
+  path.join(homedir(), ".codex", "skills", skillDirectory, "SKILL.md");
+
 export const defaultSources: SourceConfig[] = configuredDefaultSources.map((source) => ({
   ...source,
   role: sourceRoleFor(source),
@@ -1329,7 +1334,7 @@ export const defaultProviders: AiProviderConfig[] = [
     id: "codex-cli",
     name: "Codex（ChatGPT 登录）",
     vendor: "OpenAI",
-    description: "使用这台 Mac 上的 ChatGPT 登录态，无需另填 API Key。",
+    description: "使用这台电脑上的 ChatGPT 登录态，无需另填 API Key。",
     kind: "codex-cli",
     model: "gpt-5.4",
     supportsVision: true,
@@ -1387,7 +1392,7 @@ export const defaultSkills: ArticleSkillConfig[] = [
     id: "news-desk",
     name: "news-desk",
     description: "核验新闻时间窗、一手来源、证据与图片。",
-    sourcePath: "/Users/xueyongqi/.codex/skills/news-desk/SKILL.md",
+    sourcePath: localSkillPath("news-desk"),
     enabled: true,
     builtIn: true,
     compatibility: "codex-native",
@@ -1398,7 +1403,7 @@ export const defaultSkills: ArticleSkillConfig[] = [
     id: "agent-reach",
     name: "agent-reach",
     description: "跨站搜索并回到原始来源核验。",
-    sourcePath: "/Users/xueyongqi/.codex/skills/agent-reach/SKILL.md",
+    sourcePath: localSkillPath("agent-reach"),
     enabled: true,
     builtIn: true,
     compatibility: "codex-native",
@@ -1409,7 +1414,7 @@ export const defaultSkills: ArticleSkillConfig[] = [
     id: "lieflat-less-ai-tone",
     name: "lieflat-less-ai-tone",
     description: "默认白名单式去 AI 味审计：只改明确命中的句式，保留结构、事实与未命中文字。",
-    sourcePath: "/Users/xueyongqi/.codex/skills/lieflat-less-ai-tone/SKILL.md",
+    sourcePath: localSkillPath("lieflat-less-ai-tone"),
     enabled: true,
     builtIn: true,
     compatibility: "prompt-compatible",
@@ -1420,7 +1425,7 @@ export const defaultSkills: ArticleSkillConfig[] = [
     id: "ra-renhua",
     name: "ra-人话",
     description: "需要更强个人表达时才启用；自动模式仅在评论稿中叠加。",
-    sourcePath: "/Users/xueyongqi/.codex/skills/ra-人话/SKILL.md",
+    sourcePath: localSkillPath("ra-人话"),
     enabled: true,
     builtIn: true,
     compatibility: "prompt-compatible",
@@ -1655,6 +1660,7 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
     providers: defaultProviders.map((provider) => ({
       ...provider,
       ...storedProviders.find((stored) => stored.id === provider.id),
+      description: provider.description,
     })),
     latestProviderHealth: {},
     skills: [
@@ -1663,6 +1669,8 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
         return {
           ...skill,
           ...stored,
+          description: skill.description,
+          sourcePath: skill.sourcePath,
           scopes: Array.isArray(stored?.scopes) && stored.scopes.length
             ? [...stored.scopes]
             : skill.scopes ? [...skill.scopes] : undefined,

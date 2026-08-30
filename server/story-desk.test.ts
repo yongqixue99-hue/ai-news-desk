@@ -149,6 +149,78 @@ test("legacy fixed-field explanations remain readable but request a v2 editorial
   assert.equal(story?.explanation.readerBrief, "Acme 发布了 Model X，并开放 API。");
 });
 
+test("today excludes unhandled stories after the 48-hour editorial window", () => {
+  const state = createDefaultState();
+  state.runs = [run("run-1", [
+    candidate("recent", {
+      title: "Acme ships a recent model update",
+      url: "https://acme.example/recent",
+      canonicalUrl: "https://acme.example/recent",
+      publishedAt: "2026-08-30T01:00:00.000Z",
+      briefing: {
+        titleZh: "Acme 发布近期模型更新",
+        summaryZh: "Acme 刚刚发布了一次模型更新。",
+        basis: "full-source",
+        generatedAt: "2026-08-30T01:10:00.000Z",
+        providerId: "codex",
+      },
+    }),
+    candidate("stale", {
+      title: "Acme old model announcement",
+      url: "https://acme.example/stale",
+      canonicalUrl: "https://acme.example/stale",
+      publishedAt: "2026-08-28T00:00:00.000Z",
+      briefing: {
+        titleZh: "Acme 两天前的模型消息",
+        summaryZh: "这是一条已经超过编辑窗口的旧消息。",
+        basis: "full-source",
+        generatedAt: "2026-08-28T00:10:00.000Z",
+        providerId: "codex",
+      },
+    }),
+  ])];
+
+  const today = buildTodayView(state, "2026-08-30T02:00:00.000Z");
+  const visibleTitles = [...today.mustReads, ...today.secondary].map((story) => story.originalTitle);
+
+  assert.deepEqual(visibleTitles, ["Acme ships a recent model update"]);
+  assert.equal(today.coverage.activeStoryCount, 1);
+});
+
+test("today recommendations show each available source before repeating one", () => {
+  const state = createDefaultState();
+  const storyCandidate = (id: string, sourceName: string, recommendationScore: number, publishedAt: string) => candidate(id, {
+    sourceName,
+    title: `Unique story ${id}`,
+    url: `https://${id}.example/story`,
+    canonicalUrl: `https://${id}.example/story`,
+    recommendationScore,
+    publishedAt,
+    briefing: {
+      titleZh: `独立新闻 ${id}`,
+      summaryZh: `这是 ${id} 的独立新闻摘要。`,
+      basis: "full-source",
+      generatedAt: publishedAt,
+      providerId: "codex",
+    },
+  });
+  state.runs = [run("run-1", [
+    storyCandidate("a-1", "Source A", 100, "2026-08-30T01:50:00.000Z"),
+    storyCandidate("a-2", "Source A", 99, "2026-08-30T01:40:00.000Z"),
+    storyCandidate("a-3", "Source A", 98, "2026-08-30T01:30:00.000Z"),
+    storyCandidate("b-1", "Source B", 90, "2026-08-30T01:20:00.000Z"),
+    storyCandidate("c-1", "Source C", 80, "2026-08-30T01:10:00.000Z"),
+  ])];
+
+  const today = buildTodayView(state, "2026-08-30T02:00:00.000Z");
+  const visible = [...today.mustReads, ...today.secondary];
+
+  assert.deepEqual(
+    visible.slice(0, 4).map((story) => story.signals[0]?.sourceName),
+    ["Source A", "Source B", "Source C", "Source A"],
+  );
+});
+
 test("Story id remains stable when extraction adds a canonical URL", () => {
   const state = createDefaultState();
   state.runs = [run("run-1", [candidate("official", {

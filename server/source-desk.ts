@@ -23,6 +23,7 @@ export interface SourceCollectRequest {
 interface StructuredCollectionResult {
   items: RawHorizonItem[];
   horizonRunId?: string;
+  failures?: Record<string, string>;
 }
 
 interface SourceDeskDependencies {
@@ -56,9 +57,9 @@ export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
       ? dependencies.collectStructured(structuredSources, request).catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         for (const source of structuredSources) failures[source.id] = message;
-        return { items: [], horizonRunId: undefined } satisfies StructuredCollectionResult;
+        return { items: [], horizonRunId: undefined, failures: {} } satisfies StructuredCollectionResult;
       })
-      : Promise.resolve({ items: [], horizonRunId: undefined } satisfies StructuredCollectionResult);
+      : Promise.resolve({ items: [], horizonRunId: undefined, failures: {} } satisfies StructuredCollectionResult);
     const communityPromise = communitySources.length
       ? (dependencies.collectCommunity ?? collectCommunitySources)(
         communitySources,
@@ -72,6 +73,7 @@ export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
       })
       : Promise.resolve({ items: [], failures: {} });
     const [structured, community] = await Promise.all([structuredPromise, communityPromise]);
+    Object.assign(failures, structured.failures);
     Object.assign(failures, community.failures);
     const items = [...structured.items, ...community.items];
     const adapterCounts: Record<string, number> = {};

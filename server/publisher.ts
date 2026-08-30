@@ -1,8 +1,8 @@
-import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Browser, type Locator, type Page } from "playwright-core";
 import { insertedMediaIds, publisherBodyHtml } from "./article-html.js";
+import { openDebugChrome } from "./chrome-launch.js";
 import { updateState, workflowRoot } from "./storage.js";
 import type { ArticleDraft, PublisherResult, PublisherStep } from "./types.js";
 
@@ -84,19 +84,7 @@ export const launchPublisherChrome = async (editorUrl: string, port: number) => 
     await page.bringToFront();
     return current;
   }
-  const child = spawn(
-    "open",
-    [
-      "-na",
-      "Google Chrome",
-      "--args",
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${chromeProfile}`,
-      editorUrl,
-    ],
-    { detached: true, stdio: "ignore" },
-  );
-  child.unref();
+  await openDebugChrome(editorUrl, port, chromeProfile);
   await new Promise((resolve) => setTimeout(resolve, 1_800));
   return publisherStatus(port);
 };

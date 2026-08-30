@@ -13,6 +13,7 @@ import { extractPage } from "./extractor.js";
 import { generateCandidateDraft } from "./generator.js";
 import { analyzeScreenshotEvidence } from "./intake.js";
 import { skillsForArticleTask } from "./skill-registry.js";
+import { retainWorkflowRuns } from "./run-retention.js";
 import { readState, updateState, workflowMediaRoot } from "./storage.js";
 import type {
   AiProviderConfig,
@@ -168,7 +169,7 @@ const claimReviewGeneration = async (reviewId: string, selection: EvidenceReview
     record.draftId = draftId;
     record.updatedAt = timestamp;
     state.runs.unshift(run);
-    state.runs = state.runs.slice(0, 30);
+    retainWorkflowRuns(state);
     result = { record: structuredClone(record), provider: structuredClone(provider), skills: generationSkills.map((skill) => structuredClone(skill)), run: structuredClone(run) };
   });
   if (!result) throw new Error("证据复核任务创建失败");

@@ -257,7 +257,7 @@ function App() {
       setNotice({
         kind: "success",
         message: patch.clearAppSecret
-          ? "微信公众号 AppSecret 已从 macOS 钥匙串移除。"
+          ? "微信公众号 AppSecret 已从本机安全存储移除。"
           : "微信公众号连接信息已保存；AppSecret 只保存在本机钥匙串。",
       });
       return wechat;
@@ -719,7 +719,7 @@ function App() {
       setState((current) => current ? { ...current, aiSettings } : current);
       setNotice({
         kind: "success",
-        message: patch.active ? "已切换成稿引擎；下一篇文章会使用这个 AI。" : patch.clearApiKey ? "API Key 已从 macOS 钥匙串移除。" : "AI 配置已保存。",
+        message: patch.active ? "已切换成稿引擎；下一篇文章会使用这个 AI。" : patch.clearApiKey ? "API Key 已从本机安全存储移除。" : "AI 配置已保存。",
       });
     } catch (error) {
       reportError(error);

@@ -209,9 +209,17 @@ test("a symlink cannot escape the managed draft media directory", async () => {
   const outsideDirectory = await mkdtemp(path.join(os.tmpdir(), "promotion-outside-"));
   try {
     const outsideFile = path.join(outsideDirectory, "outside.png");
-    const linkedFile = path.join(managedDirectory, "linked.png");
     await writeFile(outsideFile, Buffer.from("not-a-real-image"));
-    await symlink(outsideFile, linkedFile);
+    const linkedFile = process.platform === "win32"
+      ? path.join(managedDirectory, "linked-directory", "outside.png")
+      : path.join(managedDirectory, "linked.png");
+    if (process.platform === "win32") {
+      // Directory junctions exercise the same realpath escape boundary without
+      // requiring Windows Developer Mode or an elevated test process.
+      await symlink(outsideDirectory, path.dirname(linkedFile), "junction");
+    } else {
+      await symlink(outsideFile, linkedFile);
+    }
     const linkedPlacement = placement();
     linkedPlacement.image.localPath = linkedFile;
 

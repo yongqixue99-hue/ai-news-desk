@@ -7,6 +7,7 @@ import { extractPage } from "./extractor.js";
 import { generateCandidateDraft } from "./generator.js";
 import { saveUploadedDraftImage } from "./media.js";
 import { runGenerationProvider } from "./provider-runtime.js";
+import { retainWorkflowRuns } from "./run-retention.js";
 import { readSkillInstructions, skillsForArticleTask } from "./skill-registry.js";
 import {
   readState,
@@ -161,7 +162,7 @@ const createIntakeClaim = async (
       },
     };
     state.runs.unshift(run);
-    state.runs = state.runs.slice(0, 30);
+    retainWorkflowRuns(state);
     claim = {
       run,
       draftId,

@@ -133,8 +133,15 @@ export const generateCandidateBriefings = async (
   runId: string,
   provider: AiProviderConfig,
   inputs: CandidateBriefingEvidenceInput[],
+  options: { signal?: AbortSignal } = {},
 ): Promise<CandidateBriefingGenerationResult> => {
-  const results = await Promise.all(chunked(inputs, 30).map(async (batch, index) => {
+  const results: Array<{
+    items: ParsedCandidateBriefing[];
+    trace: AiRunTrace;
+    failure?: string;
+  }> = [];
+  for (const [index, batch] of chunked(inputs, 30).entries()) {
+    if (options.signal?.aborted) throw new DOMException("请求已取消", "AbortError");
     const nonce = randomUUID().slice(0, 8);
     const baseName = `${runId}-candidate-briefing-${index + 1}-${nonce}`;
     const jobPath = path.join(workflowJobsRoot, `${baseName}.json`);
@@ -175,6 +182,7 @@ export const generateCandidateBriefings = async (
         outputPath,
         codexReasoningEffort: "low",
         codexTimeoutMs: 240_000,
+        signal: options.signal,
       });
       items = parseCandidateBriefings(observed.output, batch, {
         generatedAt: observed.meta.completedAt,
@@ -188,6 +196,7 @@ export const generateCandidateBriefings = async (
         tokens: observed.meta.tokens,
       });
     } catch (error) {
+      if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
       const failedAttemptId = trace.activeAttemptId;
       trace = appendAiError(trace, { error });
       trace = completeAiRunTrace(trace, {
@@ -197,8 +206,8 @@ export const generateCandidateBriefings = async (
       });
       failure = error instanceof Error ? error.message : String(error);
     }
-    return { items, trace: sanitizeAiRunTrace(trace), failure };
-  }));
+    results.push({ items, trace: sanitizeAiRunTrace(trace), failure });
+  }
 
   return {
     items: results.flatMap((result) => result.items),

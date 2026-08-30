@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createDefaultState } from "./defaults.js";
-import { createPortableWorkflowArchive, createWorkflowBackup, verifyWorkflowBackup } from "./data-management.js";
+import { createPortableWorkflowArchive, createWorkflowBackup, prunePortableArchives, verifyWorkflowBackup } from "./data-management.js";
 import { LocalDatabase } from "./local-database.js";
 
 test("workflow backups are checksummed and round-trip the complete state", () => {
@@ -20,6 +20,26 @@ test("a modified backup is rejected instead of silently restoring partial data",
   const backup = createWorkflowBackup(createDefaultState());
   backup.state.settings.scheduleTime = "09:00";
   assert.throws(() => verifyWorkflowBackup(backup), /校验失败/);
+});
+
+test("portable backup retention removes only old portable archives", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-backup-retention-"));
+  try {
+    await Promise.all([
+      writeFile(path.join(root, "ai-news-desk-full-2026-08-27.tar.gz"), "1"),
+      writeFile(path.join(root, "ai-news-desk-full-2026-08-28.tar.gz"), "2"),
+      writeFile(path.join(root, "ai-news-desk-full-2026-08-29.tar.gz"), "3"),
+      writeFile(path.join(root, "state-before-sqlite-v2.json"), "keep"),
+    ]);
+    assert.equal((await prunePortableArchives(root, 2)).removed, 1);
+    assert.deepEqual((await readdir(root)).sort(), [
+      "ai-news-desk-full-2026-08-28.tar.gz",
+      "ai-news-desk-full-2026-08-29.tar.gz",
+      "state-before-sqlite-v2.json",
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("portable archive contains a consistent database, media, materials and checksummed manifest", async () => {

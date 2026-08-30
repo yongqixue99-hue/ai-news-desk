@@ -1,8 +1,6 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { createSourceDesk } from "./source-desk.js";
+import { collectPortableStructuredSources } from "./structured-collector.js";
 import { isCommunityCandidate } from "./community-feed.js";
 import { buildCandidateBriefingEvidence } from "./candidate-briefing.js";
 import { generateCandidateBriefings } from "./candidate-briefing-service.js";
@@ -17,9 +15,11 @@ import {
   routedFeedsForSource,
   sourceRoleFor,
 } from "./source-routing.js";
-import { getLocalDatabase, readState, updateState, workflowJobsRoot, workspacePath } from "./storage.js";
+import { getLocalDatabase, readState, updateState } from "./storage.js";
 import { normalizeTopicIds, topicLabels } from "./topics.js";
 import { appendWorkflowNotification } from "./notifications.js";
+import { canApplyCollectionResult, markCollectionReady } from "./collection-lifecycle.js";
+import { retainWorkflowRuns } from "./run-retention.js";
 import {
   clearResolvedCollectionFailures,
   clearRetriedCollectionFailures,
@@ -33,9 +33,6 @@ import type {
   SourceConfig,
   WorkflowRun,
 } from "./types.js";
-
-const horizonRoot = workspacePath(".prototype", "horizon");
-const horizonFetcher = "/Users/xueyongqi/.codex/skills/news-desk/scripts/horizon_fetch.py";
 
 const now = () => new Date().toISOString();
 const runControllers = new Map<string, AbortController>();
@@ -122,41 +119,6 @@ export const horizonSourceKindsFor = (sources: SourceConfig[]) => [...new Set(
   }),
 )];
 
-const runProcess = (command: string, args: string[], timeoutMs: number, signal?: AbortSignal) =>
-  new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: process.cwd(),
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    const stop = () => child.kill("SIGTERM");
-    if (signal?.aborted) {
-      stop();
-      reject(new Error("采集已取消"));
-      return;
-    }
-    signal?.addEventListener("abort", stop, { once: true });
-    const timeout = setTimeout(() => {
-      stop();
-      reject(new Error("Horizon 采集超时"));
-    }, timeoutMs);
-    child.stdout.on("data", (chunk) => (stdout += String(chunk)));
-    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      clearTimeout(timeout);
-      signal?.removeEventListener("abort", stop);
-      if (signal?.aborted) {
-        reject(new Error("采集已取消"));
-        return;
-      }
-      if (code === 0) resolve({ stdout, stderr });
-      else reject(new Error(stderr.trim() || `Horizon 退出码 ${code}`));
-    });
-  });
-
 const probeImages = async (runId: string, signal?: AbortSignal) => {
   const extractedSourceText = new Map<string, string>();
   const state = await updateState((current) => current);
@@ -199,6 +161,7 @@ const executeCandidateBriefingEnrichment = async (
   extractedSourceText: ReadonlyMap<string, string>,
   force: boolean,
   candidateIds?: ReadonlySet<string>,
+  signal?: AbortSignal,
 ): Promise<CandidateBriefingEnrichmentResult> => {
   const state = await readState();
   const run = state.runs.find((entry) => entry.id === runId);
@@ -216,11 +179,12 @@ const executeCandidateBriefingEnrichment = async (
   if (!provider) throw new Error("没有可用的中文速读模型，请先配置 AI");
 
   const evidence = buildCandidateBriefingEvidence(candidates, extractedSourceText);
-  const generated = await generateCandidateBriefings(runId, provider, evidence);
+  const generated = await generateCandidateBriefings(runId, provider, evidence, { signal });
   const generatedById = new Map(generated.items.map((item) => [item.candidateId, item]));
   const updatedRun = await updateState((current) => {
     const target = current.runs.find((entry) => entry.id === runId);
     if (!target) throw new Error("运行记录不存在");
+    if (!canApplyCollectionResult(target, signal)) return target;
     for (const candidate of target.candidates) {
       const generatedCandidate = generatedById.get(candidate.id);
       if (generatedCandidate) {
@@ -270,6 +234,7 @@ export const enrichCandidateBriefings = (
     extractedSourceText?: ReadonlyMap<string, string>;
     force?: boolean;
     candidateIds?: string[];
+    signal?: AbortSignal;
   } = {},
 ) => {
   const selectedIds = options.candidateIds?.length
@@ -283,6 +248,7 @@ export const enrichCandidateBriefings = (
     options.extractedSourceText ?? new Map(),
     Boolean(options.force),
     selectedIds ? new Set(selectedIds) : undefined,
+    options.signal,
   ).finally(() => briefingJobs.delete(jobKey));
   briefingJobs.set(jobKey, job);
   return job;
@@ -355,7 +321,7 @@ export const createCollectionRun = async (
       }],
     };
     state.runs.unshift(next);
-    state.runs = state.runs.slice(0, 30);
+    retainWorkflowRuns(state);
     if (options.scheduledDate) state.settings.lastScheduledDate = options.scheduledDate;
     created = true;
     return next;
@@ -487,49 +453,8 @@ export const executeCollection = async (runId: string) => {
     const topicIds = normalizeTopicIds(run.topicIds);
     const filters = { dateFrom: run.dateFrom, dateTo: run.dateTo, keywords: run.keywords };
     const sourceDesk = createSourceDesk({
-      collectStructured: async (horizonSources) => {
-        const configPath = path.join(workflowJobsRoot, `${runId}-horizon-config.json`);
-        const resultPath = path.join(workflowJobsRoot, `${runId}-horizon-result.json`);
-        await writeFile(
-          configPath,
-          `${JSON.stringify(buildHorizonConfig(
-            horizonSources,
-            run.windowHours,
-            topicIds,
-            filters,
-          ), null, 2)}\n`,
-          "utf8",
-        );
-        const sourceKinds = horizonSourceKindsFor(horizonSources).join(",");
-        await runProcess(
-          path.join(horizonRoot, ".venv", "bin", "python"),
-          [
-            horizonFetcher,
-            "--horizon-path",
-            horizonRoot,
-            "--config",
-            configPath,
-            "--hours",
-            String(run.windowHours),
-            "--sources",
-            sourceKinds,
-            "--output",
-            resultPath,
-          ],
-          240_000,
-          controller.signal,
-        );
-        if (controller.signal.aborted) throw new Error("采集已取消");
-        const result = JSON.parse(await readFile(resultPath, "utf8")) as {
-          ok?: boolean;
-          data?: { run_id?: string; fetched?: number; artifact?: string };
-        };
-        if (!result.ok || !result.data?.artifact) throw new Error("Horizon 没有返回原始数据文件");
-        return {
-          horizonRunId: result.data.run_id,
-          items: JSON.parse(await readFile(result.data.artifact, "utf8")) as RawHorizonItem[],
-        };
-      },
+      collectStructured: (structuredSources, request) =>
+        collectPortableStructuredSources(structuredSources, request, { signal: controller.signal }),
     });
     const batch = await sourceDesk.collect({
       sources: selectedSources,
@@ -615,7 +540,7 @@ export const executeCollection = async (runId: string) => {
     if (candidates.length) {
       await patchRun(runId, { stage: "生成中文速读" });
       try {
-        await enrichCandidateBriefings(runId, { extractedSourceText });
+        await enrichCandidateBriefings(runId, { extractedSourceText, signal: controller.signal });
       } catch (error) {
         await appendLog(
           runId,
@@ -629,10 +554,7 @@ export const executeCollection = async (runId: string) => {
     await updateState((current) => {
       const targetRun = current.runs.find((entry) => entry.id === runId);
       if (!targetRun) return;
-      targetRun.status = "ready";
-      targetRun.stage = "等待选择";
-      targetRun.completedAt = completedAt;
-      targetRun.updatedAt = completedAt;
+      if (!markCollectionReady(targetRun, completedAt)) return;
       clearResolvedCollectionFailures(current, runId);
       clearRetriedCollectionFailures(current, runId);
       appendWorkflowNotification(current, {

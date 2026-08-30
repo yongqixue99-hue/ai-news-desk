@@ -92,20 +92,18 @@ const stageNames = ["采集原始条目", "去重与评分", "核验一手来源
 
 const containsChinese = (value: string) => /[\u3400-\u9fff]/u.test(value);
 
-const briefingBasisLabel = (candidate: Candidate) => {
-  if (!candidate.briefing) return "中文速读待生成";
+const briefingBasisLabel = (candidate: Candidate, generating = false) => {
+  if (!candidate.briefing) return generating ? "中文速读生成中" : "中文速读待生成";
   if (candidate.briefing.basis === "full-source") return "已读原文";
   if (candidate.briefing.basis === "excerpt") return "据来源摘要";
   return "仅据标题";
 };
 
 const candidateDisplayTitle = (candidate: Candidate) => candidate.briefing?.titleZh
-  ?? (containsChinese(candidate.title) ? candidate.title : "中文速读待生成");
+  ?? candidate.title;
 
 const candidateDisplaySummary = (candidate: Candidate) => candidate.briefing?.summaryZh
-  ?? (containsChinese(candidate.excerpt)
-    ? candidate.excerpt
-    : "系统会保留原标题；中文标题和一句话摘要尚未生成，可点击上方按钮补全。");
+  ?? (candidate.excerpt.trim() || "中文标题和一句话摘要尚未生成。");
 
 const candidateSupportsCommunityDraft = (candidate: Candidate) => {
   return isCommunityCandidate(candidate);
@@ -247,6 +245,7 @@ export function Workbench({
   const topicDiscoveryEnabled = selectedSources.some((source) => source.kind === "google_news");
   const activeStep = activeStepFor(run);
   const collectionIsActive = Boolean(run && ["queued", "collecting", "scoring", "extracting"].includes(run.status));
+  const briefingGenerationActive = Boolean(collectionIsActive && run?.stage.includes("生成中文速读"));
   const runIsActive = collectionIsActive || run?.status === "generating";
   const quickIntakeActive = Boolean(runIsActive && (run?.origin === "link-intake" || run?.origin === "screenshot-intake"));
   const quickIntakeRun = Boolean(run?.origin === "link-intake" || run?.origin === "screenshot-intake");
@@ -546,7 +545,7 @@ export function Workbench({
                     <div className="candidate-card-meta">
                       <span>{candidateHome.featured.sourceName}</span>
                       <span>{candidateHome.featured.evidence}</span>
-                      <span className={`briefing-basis ${candidateHome.featured.briefing?.basis ?? "pending"}`}>{briefingBasisLabel(candidateHome.featured)}</span>
+                      <span className={`briefing-basis ${candidateHome.featured.briefing?.basis ?? "pending"}`}>{briefingBasisLabel(candidateHome.featured, briefingGenerationActive)}</span>
                       <span>价值 {candidateHome.featured.score}/15</span>
                     </div>
                     <h4>{candidateDisplayTitle(candidateHome.featured)}</h4>
@@ -583,7 +582,7 @@ export function Workbench({
                         <article className={candidate.selected ? "candidate-secondary-card selected" : "candidate-secondary-card"} key={candidate.id}>
                           <div className="candidate-card-meta">
                             <span>{candidate.sourceName}</span>
-                            <span className={`briefing-basis ${candidate.briefing?.basis ?? "pending"}`}>{briefingBasisLabel(candidate)}</span>
+                            <span className={`briefing-basis ${candidate.briefing?.basis ?? "pending"}`}>{briefingBasisLabel(candidate, briefingGenerationActive)}</span>
                           </div>
                           <h4>{candidateDisplayTitle(candidate)}</h4>
                           <p>{candidateDisplaySummary(candidate)}</p>

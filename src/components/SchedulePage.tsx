@@ -152,7 +152,7 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
           <div className="schedule-status-grid" aria-live="polite">
             <div><span>下次运行</span><strong>{nextScheduledTime(settings)}</strong></div>
             <div><span>最近一次</span><strong>{scheduledStatus(latestScheduledRun)}</strong></div>
-            <div><span>错过时间</span><strong>Mac 当天唤醒后自动补跑一次</strong></div>
+            <div><span>错过时间</span><strong>电脑当天恢复运行后自动补跑一次</strong></div>
           </div>
           <label className="setting-check-row"><input type="checkbox" checked={settings.autoGenerate} onChange={(event) => onSettings({ autoGenerate: event.target.checked })} /><span><strong>心跳后自动生成高分文章</strong><small>开启后会对 10 分及以上的前 {settings.autoGenerateCount} 条分别成稿；建议影子运行稳定后再开。</small></span></label>
           {settings.autoGenerate ? <label className="inline-number"><span>自动生成数量</span><input type="number" min="1" max="10" value={settings.autoGenerateCount} onChange={(event) => onSettings({ autoGenerateCount: Number(event.target.value) })} /></label> : null}
@@ -236,7 +236,7 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
               <span className={wechatConnection?.ok ? "connection-dot ok" : "connection-dot"} />
               <div>
                 <strong>{wechatConnection?.ok ? "草稿接口已连接" : wechatConnection ? "连接需要处理" : wechatForm.appSecretConfigured ? "连接信息已保存" : "等待首次配置"}</strong>
-                <small>{wechatConnection?.detail ?? (wechatForm.appSecretConfigured ? "点击“保存并测试”进行只读验证" : "AppSecret 会写入 macOS 钥匙串，不进入项目文件或备份")}</small>
+                <small>{wechatConnection?.detail ?? (wechatForm.appSecretConfigured ? "点击“保存并测试”进行只读验证" : "AppSecret 会写入本机受保护存储，不进入项目状态或备份")}</small>
               </div>
             </div>
             <ol>
@@ -244,7 +244,7 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
               <li>把运行本工具的当前出口 IP 加到公众号 IP 白名单。</li>
               <li>保存并测试后，到任意文章的“审批发布包”同步草稿。</li>
             </ol>
-            <p><KeyRound size={13} />AppSecret 只保存在本机 macOS 钥匙串；数据备份不包含它。</p>
+            <p><KeyRound size={13} />AppSecret 只保存在操作系统的本机安全存储中；数据备份不包含它。</p>
           </div>
         </div>
         <div className="wechat-settings-actions">
@@ -262,7 +262,7 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
       </section>
 
       <section className="settings-section data-management-section">
-        <div className="settings-section-heading"><Archive size={20} /><div><h2>本地数据与迁移</h2><p>完整归档包含 SQLite 快照、草稿图片、素材库、轻量状态备份和 SHA-256 清单；macOS 钥匙串密钥永不导出。</p></div></div>
+        <div className="settings-section-heading"><Archive size={20} /><div><h2>本地数据与迁移</h2><p>完整归档包含 SQLite 快照、草稿图片、素材库、轻量状态备份和 SHA-256 清单；操作系统安全存储中的密钥永不导出。</p></div></div>
         <div className="storage-usage-grid" aria-label="本地数据占用">
           <div><HardDrive size={17} /><span><small>总占用</small><strong>{storage ? formatBytes(storage.totalBytes) : "读取中"}</strong></span></div>
           <div><span><small>草稿图片</small><strong>{storage ? formatBytes(storage.mediaBytes) : "—"}</strong></span></div>

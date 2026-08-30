@@ -3,11 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=22.16 <23",
+    "npm": ">=10.9 <11"
+  },
   "scripts": {
     "dev": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
-    "start": "NODE_ENV=production tsx server/index.ts",
-    "test": "node --test --import tsx server/**/*.test.ts"
+    "start": "cross-env NODE_ENV=production tsx server/index.ts",
+    "test": "node --test --import tsx server/**/*.test.ts src/**/*.test.ts src/**/*.test.tsx",
+    "test:e2e": "node --test --import tsx tests/e2e/*.test.ts"
   },
   "dependencies": {
     "@tiptap/extension-image": "^3.29.2",
@@ -16,25 +22,26 @@
     "@tiptap/react": "^3.29.2",
     "@tiptap/starter-kit": "^3.29.2",
     "@types/sanitize-html": "^2.16.1",
-    "@vitejs/plugin-react": "latest",
-    "cheerio": "latest",
-    "express": "latest",
-    "lucide-react": "latest",
-    "playwright-core": "latest",
-    "react": "latest",
-    "react-dom": "latest",
+    "@vitejs/plugin-react": "6.0.5",
+    "cheerio": "1.2.0",
+    "express": "5.2.1",
+    "lucide-react": "1.31.0",
+    "playwright-core": "1.62.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "react-resizable-panels": "^4.12.2",
     "sanitize-html": "^2.17.6",
     "sharp": "^0.35.3",
     "simple-icons": "^16.28.0",
-    "vite": "latest"
+    "vite": "8.2.1"
   },
   "devDependencies": {
-    "@types/express": "latest",
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "tsx": "latest",
-    "typescript": "latest"
+    "@types/express": "5.0.6",
+    "@types/node": "26.2.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "cross-env": "^10.1.0",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2"
   }
 }

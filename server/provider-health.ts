@@ -150,7 +150,7 @@ const codexHealth = async (
     // diagnostic only and does not start a model request.
     const isolatedLogin = await dependencies.runCommand(
       "codex",
-      ["-c", "model_reasoning_effort=xhigh", "login", "status"],
+      ["-c", "service_tier=fast", "-c", "model_reasoning_effort=xhigh", "login", "status"],
       codexProbeTimeoutMs,
     );
     if (!commandOk(isolatedLogin)) {
@@ -161,11 +161,11 @@ const codexHealth = async (
         return resultFor(provider, startedAt, dependencies, "error", "auth", "Codex CLI 可用，但没有有效的 ChatGPT 登录；请在终端运行 codex login 后重试。");
       }
       if (looksLikeConfigError(normalLogin) || looksLikeConfigError(isolatedLogin)) {
-        return resultFor(provider, startedAt, dependencies, "error", "config", "Codex 配置无法读取；请检查 ~/.codex/config.toml，或更新 Codex CLI 后重试。");
+        return resultFor(provider, startedAt, dependencies, "error", "config", "Codex 配置无法读取；请检查 ~/.codex/config.toml 中的 service_tier 与 model_reasoning_effort，或更新 Codex CLI 后重试。");
       }
       return resultFor(provider, startedAt, dependencies, "error", "unknown", "Codex 登录诊断未通过；请在终端运行 codex login status 查看并修复。");
     }
-    commandPrefix = ["-c", "model_reasoning_effort=xhigh"];
+    commandPrefix = ["-c", "service_tier=fast", "-c", "model_reasoning_effort=xhigh"];
     configWarning = looksLikeConfigError(normalLogin);
   }
 
@@ -178,7 +178,7 @@ const codexHealth = async (
     return resultFor(provider, startedAt, dependencies, "error", execHelp.timedOut ? "timeout" : "config", "Codex 已登录，但非交互命令不可用；请更新 Codex CLI，并在终端运行 codex exec --help 检查。");
   }
   if (configWarning) {
-    return resultFor(provider, startedAt, dependencies, "warning", "config", "ChatGPT 登录有效，但 ~/.codex/config.toml 与当前 CLI 不兼容；请更新 Codex CLI，或把 model_reasoning_effort 调整为 xhigh。");
+    return resultFor(provider, startedAt, dependencies, "warning", "config", "ChatGPT 登录有效，但 ~/.codex/config.toml 与当前 CLI 不兼容；工作台已使用兼容覆盖，仍建议更新 Codex CLI。");
   }
 
   const versionLabel = version.stdout.match(/codex(?:-cli)?\s+([\w.-]+)/i)?.[1];

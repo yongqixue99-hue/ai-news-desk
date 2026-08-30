@@ -108,3 +108,46 @@ test("queued jobs can be cancelled and interrupted running jobs recover immediat
     assert.equal(store.claimNextJob({ workerId: "new-process" })?.id, resumable.id);
   });
 });
+
+test("operational retention keeps active work and only the newest terminal history", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-desk-retention-db-"));
+  let currentTime = "2026-08-27T00:00:00.000Z";
+  const store = await LocalDatabase.open({
+    workflowRoot: root,
+    initialState: () => ({ version: 11 }),
+    now: () => currentTime,
+  });
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      currentTime = `2026-08-${27 + index}T00:00:00.000Z`;
+      const job = store.enqueueJob({
+        type: "collect",
+        idempotencyKey: `terminal-${index}`,
+        payload: { index },
+      }).job;
+      store.claimNextJob({ workerId: "retention-test" });
+      store.completeJob(job.id, "retention-test");
+      store.recordWorkflowEvent({
+        type: "completed",
+        subjectType: "run",
+        subjectId: `run-${index}`,
+      });
+    }
+    currentTime = "2026-08-30T00:00:00.000Z";
+    store.enqueueJob({ type: "collect", idempotencyKey: "active", payload: {} });
+
+    const removed = store.pruneOperationalHistory({
+      terminalJobsOlderThan: "2026-01-01T00:00:00.000Z",
+      workflowEventsOlderThan: "2026-01-01T00:00:00.000Z",
+      maxTerminalJobs: 1,
+      maxWorkflowEvents: 1,
+    });
+
+    assert.deepEqual(removed, { terminalJobs: 2, workflowEvents: 2 });
+    assert.deepEqual(store.listJobs().map((job) => job.idempotencyKey).sort(), ["active", "terminal-2"]);
+    assert.deepEqual(store.listWorkflowEvents().map((event) => event.subjectId), ["run-2"]);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -807,7 +807,7 @@ export const selectTopAndGenerate = async (runId: string, count: number) => {
 export const codexStatus = async () => {
   const outputPath = path.join(workflowJobsRoot, "codex-status.txt");
   return new Promise<{ ok: boolean; detail: string }>((resolve) => {
-    const child = spawn("codex", ["-c", "model_reasoning_effort=xhigh", "login", "status"], {
+    const child = spawn("codex", ["-c", "service_tier=fast", "-c", "model_reasoning_effort=xhigh", "login", "status"], {
       cwd: workspacePath(),
       stdio: ["ignore", "pipe", "pipe"],
     });

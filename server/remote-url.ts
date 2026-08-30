@@ -4,6 +4,15 @@ import { isIP } from "node:net";
 const blockedHostnames = new Set(["localhost", "localhost.localdomain", "0.0.0.0", "::", "::1"]);
 const redirectStatuses = new Set([301, 302, 303, 307, 308]);
 
+// Clash and similar Windows proxy/TUN setups commonly synthesize addresses
+// from 198.18.0.0/15. Literal access to that range remains blocked; when a
+// public hostname resolves only to a fake IP, DoH below verifies its real
+// public records before allowing the normal system fetch to reach the proxy.
+const isProxyFakeIpv4 = (address: string) => {
+  const [a, b] = address.split(".").map(Number);
+  return a === 198 && (b === 18 || b === 19);
+};
+
 const disallowedIpv4 = (address: string) => {
   const parts = address.split(".").map(Number);
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
@@ -42,6 +51,30 @@ export const isDisallowedRemoteAddress = (address: string) => {
   return true;
 };
 
+interface DnsJsonResponse {
+  Answer?: Array<{ type?: number; data?: string }>;
+}
+
+const publicAddressesFromDoh = async (hostname: string) => {
+  const queries = await Promise.allSettled(["A", "AAAA"].map(async (type) => {
+    const endpoint = new URL("https://cloudflare-dns.com/dns-query");
+    endpoint.searchParams.set("name", hostname);
+    endpoint.searchParams.set("type", type);
+    const response = await fetch(endpoint, {
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+      headers: { accept: "application/dns-json" },
+    });
+    if (!response.ok) throw new Error(`DoH HTTP ${response.status}`);
+    const payload = await response.json() as DnsJsonResponse;
+    return (payload.Answer ?? [])
+      .filter((answer) => answer.type === 1 || answer.type === 28)
+      .map((answer) => answer.data?.trim() ?? "")
+      .filter((address) => isIP(address) !== 0);
+  }));
+  return [...new Set(queries.flatMap((query) => query.status === "fulfilled" ? query.value : []))];
+};
+
 export const validateRemoteUrl = async (rawUrl: string | URL) => {
   const url = rawUrl instanceof URL ? new URL(rawUrl) : new URL(rawUrl);
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error("只允许读取 HTTP/HTTPS 地址");
@@ -61,6 +94,12 @@ export const validateRemoteUrl = async (rawUrl: string | URL) => {
     addresses = await lookup(hostname, { all: true, verbatim: true });
   } catch {
     throw new Error(`无法解析远程地址：${hostname}`);
+  }
+  if (addresses.length && addresses.every((entry) => isProxyFakeIpv4(entry.address))) {
+    const verifiedAddresses = await publicAddressesFromDoh(hostname).catch(() => []);
+    if (verifiedAddresses.length && verifiedAddresses.every((address) => !isDisallowedRemoteAddress(address))) {
+      return url;
+    }
   }
   if (!addresses.length || addresses.some((entry) => isDisallowedRemoteAddress(entry.address))) {
     throw new Error("远程地址解析到了私网、回环或保留 IP");

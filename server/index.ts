@@ -3,6 +3,8 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 import express from "express";
 import { createServer as createViteServer } from "vite";
+import { pruneJobArtifacts } from "./artifact-retention.js";
+import { createLocalSecurityMiddleware } from "./http-security.js";
 import {
   insertedMediaIds,
   publisherImagePostBodyHtml,
@@ -122,6 +124,7 @@ import {
   replaceState,
   updateState,
   workflowMaterialsRoot,
+  workflowJobsRoot,
   workflowMediaRoot,
   workflowRoot,
 } from "./storage.js";
@@ -149,9 +152,11 @@ import type {
 import type { AssignmentMode, ContentPackage } from "./product-types.js";
 
 const app = express();
+app.disable("x-powered-by");
 const port = Number(process.env.AI_NEWS_DESK_PORT || 4317);
 const deliveryDesk = createDeliveryDesk();
 
+app.use(createLocalSecurityMiddleware(port));
 const defaultJsonBody = express.json({ limit: "2mb" });
 app.use((request, response, next) => {
   // A complete state backup can grow beyond normal command payloads. Keep the
@@ -2361,13 +2366,22 @@ if (process.env.NODE_ENV === "production") {
 app.use(
   (error: Error, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
     console.error(error);
-    response.status(500).json({ error: error.message || "服务器发生错误" });
+    response.status(500).json({ error: "服务器发生错误，请查看本机服务日志" });
   },
 );
 
 // Warm the title-token index before the HTTP port becomes visible. With a
 // few hundred historical signals this keeps the very first Today request,
 // not only subsequent requests, inside the personal-product latency budget.
+const startupDatabase = await getLocalDatabase();
+const startupNow = Date.now();
+startupDatabase.pruneOperationalHistory({
+  terminalJobsOlderThan: new Date(startupNow - 30 * 86_400_000).toISOString(),
+  workflowEventsOlderThan: new Date(startupNow - 90 * 86_400_000).toISOString(),
+  maxTerminalJobs: 1_000,
+  maxWorkflowEvents: 5_000,
+});
+await pruneJobArtifacts(workflowJobsRoot, { maxAgeMs: 14 * 86_400_000, maxFiles: 200 });
 buildTodayView(await readState());
 
 await startOwnedServer({
