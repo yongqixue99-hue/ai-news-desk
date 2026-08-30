@@ -10,6 +10,8 @@ import type {
 import { assignStory } from "./editorial-desk.js";
 import { isCommunityCandidate } from "./community-feed.js";
 import { interleaveBySource } from "./source-diversity.js";
+import { hasCurrentPublication } from "./publication-state.js";
+import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
 import type { Candidate, CollectionTopicId, SourceConfig, WorkflowState } from "./types.js";
 
 interface CandidateRecord {
@@ -293,7 +295,7 @@ const explanationFor = (
       ? detailed.unknownsZh
       : basis === "title"
         ? ["当前只有标题级证据，正文细节、数据与实际影响仍未确认。"]
-        : ["当前为扫描级速读；打开后会继续读取来源正文并补齐具体细节。"],
+        : ["当前为扫描级摘要；打开后会继续读取来源正文并补齐具体细节。"],
     qualityFlags: detailed?.qualityFlags ?? [],
     sources,
     generatedAt: selected.candidate.briefing?.generatedAt,
@@ -321,6 +323,8 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   const bestInsight = records.find((record) => record.candidate.communityInsight)?.candidate.communityInsight;
   const images = uniqueBy(records.flatMap((record) => record.candidate.images), (image) => normalizedUrl(image.url) || image.id)
     .slice(0, 24);
+  const localImages = images.filter(isLocalImageFileReady);
+  const publishReadyImages = localImages.filter((image) => isNeutralImagePublishReady(image, now));
   const publishedTimes = records.map((record) => Date.parse(record.candidate.publishedAt)).filter(Number.isFinite);
   const fetchedTimes = records.map(timeFor).filter(Number.isFinite);
   const fallbackTime = Date.parse(now);
@@ -376,7 +380,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     id,
     title,
     originalTitle: primary.candidate.title,
-    summary: bestBriefing?.summaryZh || primary.candidate.excerpt.slice(0, 240) || "等待补充来源速读",
+    summary: bestBriefing?.summaryZh || primary.candidate.excerpt.slice(0, 240) || "等待补充来源摘要",
     whyImportant: assignment.audienceValue,
     communitySummary: bestInsight?.summaryZh,
     communityFocus: bestInsight?.focusZh ?? [],
@@ -395,6 +399,9 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     communitySampleCount,
     images,
     imageCount: images.length,
+    localImageCount: localImages.length,
+    publishReadyImageCount: publishReadyImages.length,
+    rightsReviewImageCount: localImages.length - publishReadyImages.length,
     selected: records.some((record) => record.candidate.selected),
     drafted: records.some((record) => record.candidate.status === "drafted"),
     published: records.some((record) => record.candidate.userFeedback === "published"),
@@ -408,7 +415,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
 const storyRank = (story: StoryView) => {
   const evidence = story.evidenceStrength === "strong" ? 18 : story.evidenceStrength === "moderate" ? 9 : 0;
   const trend = story.trend.direction === "rising" ? 15 : story.trend.direction === "steady" ? 5 : 0;
-  const images = Math.min(6, story.imageCount) * 1.5;
+  const images = Math.min(6, (story.localImageCount ?? 0) * 2 + Math.min(2, story.imageCount)) * 1.5;
   const recency = Math.max(0, 16 - story.ageHours / 3);
   return story.recommendationScore + evidence + trend + images + recency;
 };
@@ -452,14 +459,16 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
       selectedCount: state.runs.reduce((total, run) => total + run.candidates.filter((candidate) => candidate.selected).length, 0),
       draftCount: drafts.length,
       syncedCount: drafts.filter((draft) => Boolean(draft.wechatDraft) || draft.status === "filled").length,
-      publishedCount: drafts.filter((draft) => draft.status === "published" || Boolean(draft.publicationConfirmedAt)).length,
+      publishedCount: drafts.filter((draft) => draft.publicationConfirmations
+        ? hasCurrentPublication(draft)
+        : draft.status === "published" && Boolean(draft.publicationConfirmedAt)).length,
       feedbackCount: state.candidateFeedback.length,
       reusableMaterialCount: state.materials.length,
     },
     coverage: {
       activeStoryCount: active.length,
       risingCount: active.filter((story) => story.trend.direction === "rising").length,
-      imageReadyCount: active.filter((story) => story.imageCount >= 2).length,
+      imageReadyCount: active.filter((story) => (story.localImageCount ?? 0) >= 2).length,
       strongEvidenceCount: active.filter((story) => story.evidenceStrength === "strong").length,
       topicIds: [...new Set(active.flatMap((story) => story.topicIds))] as CollectionTopicId[],
     },

@@ -55,6 +55,8 @@ export interface PublisherPreflightDraft {
 
 export interface PublisherPreflightInput {
   checkedAt?: string;
+  /** Immutable local publication revision represented by this preflight. */
+  expectedRevisionHash?: string;
   minimumProtocolVersion?: string;
   runtime: PublisherRuntimeSnapshot;
   draft: PublisherPreflightDraft;
@@ -85,6 +87,8 @@ export interface PublisherPreflightResult {
   protocolVersion?: string;
   /** Image placement ids frozen at preflight time for a later audited receipt. */
   draftImageIds: string[];
+  /** Immutable local publication revision represented by this preflight. */
+  expectedRevisionHash?: string;
   minimumProtocolVersion: string;
   canQueueFill: boolean;
   publishReady: boolean;
@@ -148,6 +152,8 @@ export interface PublisherReceipt {
   protocolVersion?: string;
   startedAt: string;
   completedAt: string;
+  /** Local publishable revision represented by this fill attempt. */
+  revisionHash?: string;
   outcome: "blocked" | "failed" | "partial" | "filled";
   pageUrl?: string;
   diagnosticScreenshot?: string;
@@ -301,23 +307,31 @@ export const evaluatePublisherPreflight = (
     {
       id: "images",
       label: "图片",
-      status: input.draft.images.length === 0
-        ? "warning"
-        : input.draft.images.every((image) => image.available)
-          ? "pass"
-          : "blocked",
-      required: input.draft.images.length > 0,
-      detail: input.draft.images.length
-        ? `${input.draft.images.filter((image) => image.available).length}/${input.draft.images.length} 张可读取`
-        : "本稿未配置图片",
-      issueCode: input.draft.images.length === 0
-        ? "PREFLIGHT_IMAGES_EMPTY"
-        : input.draft.images.every((image) => image.available)
-          ? undefined
-          : "PREFLIGHT_IMAGES_MISSING",
-      action: input.draft.images.length === 0
-        ? "建议从原文或已核验素材库补充至少一张配图。"
-        : "重新下载缺失图片，或从正文中移除对应图片位置。",
+      status: isImagePost && input.draft.images.length !== 1
+        ? "blocked"
+        : input.draft.images.length === 0
+          ? "warning"
+          : input.draft.images.every((image) => image.available)
+            ? "pass"
+            : "blocked",
+      required: isImagePost || input.draft.images.length > 0,
+      detail: isImagePost && input.draft.images.length !== 1
+        ? `图文稿必须恰好上传 1 张图片，当前为 ${input.draft.images.length} 张`
+        : input.draft.images.length
+          ? `${input.draft.images.filter((image) => image.available).length}/${input.draft.images.length} 张可读取`
+          : "本稿未配置图片",
+      issueCode: isImagePost && input.draft.images.length !== 1
+        ? "PREFLIGHT_IMAGE_POST_IMAGE_COUNT"
+        : input.draft.images.length === 0
+          ? "PREFLIGHT_IMAGES_EMPTY"
+          : input.draft.images.every((image) => image.available)
+            ? undefined
+            : "PREFLIGHT_IMAGES_MISSING",
+      action: isImagePost && input.draft.images.length !== 1
+        ? "在图文稿正文中只保留 1 张待上传图片后重新检查。"
+        : input.draft.images.length === 0
+          ? "建议从原文或已核验素材库补充至少一张配图。"
+          : "重新下载缺失图片，或从正文中移除对应图片位置。",
     },
     {
       id: "captions",
@@ -402,6 +416,7 @@ export const evaluatePublisherPreflight = (
     mode: input.runtime.mode,
     protocolVersion,
     draftImageIds: input.draft.images.map((image) => image.id),
+    expectedRevisionHash: input.expectedRevisionHash,
     minimumProtocolVersion,
     canQueueFill: queueBlocking.length === 0,
     publishReady,
@@ -567,6 +582,7 @@ export const completePublisherAttempt = (
     outcome,
     pageUrl: report.pageUrl,
     diagnosticScreenshot: report.diagnosticScreenshot,
+    revisionHash: attempt.preflight.expectedRevisionHash,
     checks,
     blocking,
     warnings,

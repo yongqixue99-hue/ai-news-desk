@@ -335,6 +335,12 @@ export interface SourceImage {
     | "expired";
   evidenceNote?: string;
   evidencePath?: string;
+  /** Machine-readable public license identifier, for example CC-BY-4.0. */
+  licenseId?: string;
+  /** Public license terms URL that must remain visible with licensed media. */
+  licenseUrl?: string;
+  /** What this workspace changed after obtaining the source file. */
+  modificationNote?: string;
   allowedPlatforms?: string[];
   expiresAt?: string;
   entityTags?: string[];
@@ -704,6 +710,10 @@ export interface ArticleAgentThread {
 
 export interface ImageMaterial {
   id: string;
+  /** Stable catalog identity for bundled material-library assets. */
+  seedAssetId?: string;
+  /** Catalog revision whose authoritative rights/source metadata was applied. */
+  seedCatalogCreatedAt?: string;
   title: string;
   fileName: string;
   localPath: string;
@@ -720,6 +730,9 @@ export interface ImageMaterial {
     | "expired";
   evidenceNote?: string;
   evidencePath?: string;
+  licenseId?: string;
+  licenseUrl?: string;
+  modificationNote?: string;
   allowedPlatforms: string[];
   expiresAt?: string;
   entityTags: string[];
@@ -747,10 +760,26 @@ export interface WeChatDraftSyncReceipt {
   mediaId: string;
   operation: "created" | "updated" | "unchanged";
   contentHash: string;
+  /** Local publishable revision represented by this remote draft payload. */
+  revisionHash?: string;
   syncedAt: string;
   localDraftUpdatedAt: string;
   imageCount: number;
   coverPlacementId: string;
+}
+
+export type PublicationPlatform = "xiaoheihe" | "wechat";
+
+export interface PlatformPublicationConfirmation {
+  platform: PublicationPlatform;
+  confirmedAt: string;
+  receiptId: string;
+  /** Local publishable revision explicitly acknowledged by the user. */
+  revisionHash: string;
+  /** Remote payload identity when the platform exposes one (currently WeChat). */
+  deliveryContentHash?: string;
+  /** Set when a later edit or delivery makes this acknowledgement historical. */
+  staleAt?: string;
 }
 
 export type DraftFactEvidenceStatus =
@@ -832,6 +861,12 @@ export interface ArticleDraft {
   publisherReceipt?: PublisherReceipt;
   /** Latest revision synced to the personal WeChat official-account draft box. */
   wechatDraft?: WeChatDraftSyncReceipt;
+  /** Version-bound acknowledgement per publication platform. */
+  publicationConfirmations?: Partial<Record<PublicationPlatform, PlatformPublicationConfirmation>>;
+  /**
+   * Legacy compatibility mirror for the latest current platform confirmation.
+   * New server logic must use publicationConfirmations for authorization.
+   */
   publicationConfirmedAt?: string;
   /** Receipt explicitly acknowledged by the user as the published revision. */
   publicationReceiptId?: string;
@@ -874,6 +909,8 @@ export interface PublisherStep {
 export interface PublisherResult {
   at: string;
   ok: boolean;
+  /** Local publishable revision actually read by the platform adapter. */
+  revisionHash?: string;
   pageUrl?: string;
   community?: string;
   topics?: string[];
@@ -976,6 +1013,8 @@ export interface WorkflowState {
   editorialSystem: EditorialSystemState;
   aiSettings: AiSettings;
   materials: ImageMaterial[];
+  /** Bundled assets explicitly deleted by the user; startup seed must not restore them. */
+  materialSeedTombstones: string[];
   sources: SourceConfig[];
   sourcePresets: SourcePreset[];
   candidateFeedback: CandidateFeedback[];

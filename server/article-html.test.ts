@@ -35,7 +35,7 @@ const draft = (): ArticleDraft => ({
       attribution: "example.com",
       sourceUrl: "https://example.com/article",
       selected: true,
-      rights: "check-required",
+      rights: "owned",
     },
   }],
   community: "盒友杂谈",
@@ -57,6 +57,7 @@ test("legacy drafts migrate into one continuous HTML document", () => {
   const html = legacyDraftBodyHtml(next);
   assert.match(html, /第一段/);
   assert.match(html, /data-media-id="placement_one"/);
+  assert.match(html, /href="https:\/\/example\.com\/article"/);
   assert.doesNotMatch(html, /data-media-id="library_only"/);
   assert.match(html, /结尾观点/);
 });
@@ -92,6 +93,23 @@ test("publisher caption prefers the edited paragraph over a generic image label"
   assert.doesNotMatch(publisherBodyHtml(next), /<p>图：广告示意图<\/p>/);
 });
 
+test("publisher keeps visible linked attribution for licensed images", () => {
+  const next = draft();
+  next.images[0].image.rights = "licensed";
+  next.images[0].image.attribution = "TechCrunch / Wikimedia Commons，CC BY 2.0";
+  next.images[0].image.licenseId = "CC-BY-2.0";
+  next.images[0].image.licenseUrl = "https://creativecommons.org/licenses/by/2.0/";
+  next.images[0].image.modificationNote = "仅缩放，未裁切或调色";
+  next.bodyHtml = '<p>前文</p><img src="/media/draft_test/image_one.png" data-media-id="placement_one"><p>图：Sam Altman 资料图</p><p>后文</p>';
+
+  const html = publisherBodyHtml(next);
+  assert.match(html, /图：Sam Altman 资料图/);
+  assert.match(html, /TechCrunch \/ Wikimedia Commons，CC BY 2\.0/);
+  assert.match(html, /href="https:\/\/example\.com\/article"/);
+  assert.match(html, /href="https:\/\/creativecommons\.org\/licenses\/by\/2\.0\/"/);
+  assert.match(html, /修改：仅缩放，未裁切或调色/);
+});
+
 test("publisher captions fit Xiaoheihe's native image description limit", () => {
   const next = draft();
   next.bodyHtml = `<p>前文</p><img src="/media/draft_test/image_one.png" data-media-id="placement_one"><p>图：${"很长的图片说明".repeat(12)}（来源：example.com）</p><p>后文</p>`;
@@ -114,4 +132,24 @@ test("image-post drafts keep the selected image and short copy without article c
   assert.doesNotMatch(normalizedDraftBodyHtml(next), /图：|总结/);
   assert.match(publisherImagePostBodyHtml(next), /额度用完.*续命币/s);
   assert.doesNotMatch(publisherImagePostBodyHtml(next), /待上传配图|AIIMG|<img|图：/);
+});
+
+test("image-post drafts append attribution for non-owned images", () => {
+  const next = draft();
+  next.contentFormat = "image-post";
+  next.images[0].image.rights = "licensed";
+  next.images[0].image.attribution = "TechCrunch / Wikimedia Commons，CC BY 2.0";
+  next.images[0].image.licenseId = "CC-BY-2.0";
+  next.images[0].image.licenseUrl = "https://creativecommons.org/licenses/by/2.0/";
+  next.images[0].image.modificationNote = "仅缩放，未裁切或调色";
+  next.bodyHtml = '<p>短文正文</p><img src="/media/draft_test/image_one.png" data-media-id="placement_one"><p>图：人物资料图（来源：TechCrunch）</p>';
+
+  const html = publisherImagePostBodyHtml(next);
+  assert.match(html, /短文正文/);
+  assert.match(html, /图片来源：人物资料图/);
+  assert.match(html, /TechCrunch \/ Wikimedia Commons，CC BY 2\.0/);
+  assert.match(html, /https:\/\/example\.com\/article/);
+  assert.match(html, /https:\/\/creativecommons\.org\/licenses\/by\/2\.0\//);
+  assert.match(html, /修改：仅缩放，未裁切或调色/);
+  assert.doesNotMatch(html, /<img/);
 });

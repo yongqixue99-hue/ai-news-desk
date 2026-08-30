@@ -110,7 +110,14 @@ export interface StoryView {
   communitySourceCount: number;
   communitySampleCount: number;
   images: SourceImage[];
+  /** All discovered records, including remote-only URLs. */
   imageCount: number;
+  /** Cached files that can still be used when the publisher URL expires. */
+  localImageCount?: number;
+  /** Cached files whose rights metadata currently passes automatic use rules. */
+  publishReadyImageCount?: number;
+  /** Cached files that still require a human rights decision. */
+  rightsReviewImageCount?: number;
   selected: boolean;
   drafted: boolean;
   published: boolean;
@@ -184,6 +191,12 @@ export interface DiscussionSample {
 export interface AssetCandidate {
   id: string;
   sourceImageId: string;
+  /**
+   * Immutable image and governance snapshot captured when the package is
+   * built. Draft generation must consume this record instead of looking the
+   * image up again in a mutable Story or material library.
+   */
+  sourceImage: SourceImage;
   url: string;
   caption: string;
   attribution: string;
@@ -195,6 +208,10 @@ export interface AssetCandidate {
   width?: number;
   height?: number;
   recommendedAfterClaimId?: string;
+  /** Where the reviewable asset came from; legacy packages omit this field. */
+  origin?: "source" | "library";
+  /** A local file exists and can survive a remote publisher image failure. */
+  localReady?: boolean;
 }
 
 export interface ContentPackageSource {

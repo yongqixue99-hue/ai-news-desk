@@ -1,4 +1,5 @@
 import { evaluateMaterialPublishEligibility, normalizeGovernedMaterial } from "./material-governance.js";
+import { inspectLocalImageFile } from "./image-readiness.js";
 import type { ArticleDraft, DraftReadinessResult } from "./types.js";
 
 export const evaluateDraftReadiness = (
@@ -21,8 +22,13 @@ export const evaluateDraftReadiness = (
       sourceUrl: placement.image.sourceUrl,
       evidence: {
         note: placement.image.evidenceNote,
-        path: placement.image.evidencePath || placement.image.localPath,
+        // A local image file proves that bytes exist, not that publication
+        // rights exist. Licensed/editorial media needs separate evidence.
+        path: placement.image.evidencePath,
       },
+      licenseId: placement.image.licenseId,
+      licenseUrl: placement.image.licenseUrl,
+      modificationNote: placement.image.modificationNote,
       allowedPlatforms: placement.image.allowedPlatforms
         ?? (placement.image.rights === "owned" ? ["*"] : []),
       expiresAt: placement.image.expiresAt,
@@ -33,11 +39,16 @@ export const evaluateDraftReadiness = (
       publicPath: placement.image.publicPath,
     });
     const decision = evaluateMaterialPublishEligibility(material, platform, checkedAt);
+    const localFile = inspectLocalImageFile(placement.image);
+    const blockers = [...new Set([
+      ...(localFile.available ? [] : [localFile.reason || "图片本地文件不可用。"]),
+      ...decision.blockers,
+    ])];
     return {
       placementId: placement.id,
-      eligible: decision.eligible,
-      status: decision.status,
-      blockers: decision.blockers,
+      eligible: localFile.available && decision.eligible,
+      status: blockers.length ? "blocked" as const : decision.status,
+      blockers,
       warnings: decision.warnings,
       effectiveRights: decision.effectiveRights,
     };

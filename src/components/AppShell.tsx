@@ -5,7 +5,9 @@ import {
   CalendarDays,
   Compass,
   FilePenLine,
+  History,
   MessagesSquare,
+  MoreHorizontal,
   Newspaper,
   PanelLeftClose,
   PanelLeftOpen,
@@ -27,6 +29,14 @@ const navigation: Array<{ id: AppPage; label: string; icon: LucideIcon }> = [
   { id: "drafts", label: "草稿", icon: FilePenLine },
   { id: "sources", label: "新闻源", icon: Radio },
   { id: "editorial-system", label: "内容策略", icon: Compass },
+];
+
+const mobileMoreNavigation: Array<{ id: AppPage; label: string; icon: LucideIcon }> = [
+  { id: "sources", label: "新闻源", icon: Radio },
+  { id: "editorial-system", label: "内容策略", icon: Compass },
+  { id: "schedule", label: "自动化计划", icon: Zap },
+  { id: "runs", label: "运行记录", icon: History },
+  { id: "ai-settings", label: "AI 设置", icon: Bot },
 ];
 
 interface AppShellProps {
@@ -63,7 +73,9 @@ export function AppShell({
 }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(getInitialCollapsed);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const automationActive = page === "schedule" || page === "runs";
+  const mobileMoreActive = mobileMoreNavigation.some((item) => item.id === page);
   const unreadCount = unreadNotificationCount(notifications);
   const badgeCount = notificationsMuted ? 0 : unreadCount;
   const notificationLabel = notificationsMuted
@@ -86,7 +98,17 @@ export function AppShell({
     return () => window.removeEventListener("keydown", handleShortcut);
   }, []);
 
+  useEffect(() => {
+    if (!mobileMoreOpen) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMoreOpen(false);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [mobileMoreOpen]);
+
   const navigate = (nextPage: AppPage) => {
+    setMobileMoreOpen(false);
     onNavigate(nextPage);
   };
 
@@ -180,6 +202,40 @@ export function AppShell({
               <span>自动化</span>
             </button>
           </div>
+
+          <div className={`mobile-more-nav${mobileMoreOpen ? " open" : ""}`}>
+            <button
+              type="button"
+              className={mobileMoreActive ? "nav-item active" : "nav-item"}
+              aria-label="更多功能"
+              aria-haspopup="menu"
+              aria-expanded={mobileMoreOpen}
+              onClick={() => setMobileMoreOpen((current) => !current)}
+            >
+              <MoreHorizontal size={19} strokeWidth={1.8} />
+              <span>更多</span>
+            </button>
+            {mobileMoreOpen ? (
+              <div className="mobile-more-menu" role="menu" aria-label="更多功能">
+                {mobileMoreNavigation.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      key={item.id}
+                      className={page === item.id ? "active" : undefined}
+                      aria-current={page === item.id ? "page" : undefined}
+                      onClick={() => navigate(item.id)}
+                    >
+                      <Icon size={17} strokeWidth={1.8} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
         </nav>
 
         <div className="sidebar-footer">
@@ -211,7 +267,7 @@ export function AppShell({
       </aside>
       <button
         type="button"
-        className="mobile-notification-button"
+        className={page === "drafts" ? "mobile-notification-button on-drafts" : "mobile-notification-button"}
         aria-label={notificationLabel}
         aria-haspopup="dialog"
         aria-controls="notification-center"

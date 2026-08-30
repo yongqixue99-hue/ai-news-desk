@@ -35,3 +35,57 @@ test("uncertain facts and unlicensed inserted images block readiness", () => {
   assert.match(result.blockers.join("\n"), /发布日期尚未核实/);
   assert.match(result.blockers.join("\n"), /版权状态待确认/);
 });
+
+test("a local licensed file is not accepted as its own permission evidence", () => {
+  const input = draft();
+  input.images = [{
+    id: "placement-licensed",
+    afterParagraph: 0,
+    caption: "人物资料图",
+    image: {
+      id: "image-licensed",
+      url: "/media/person.jpg",
+      publicPath: "/media/person.jpg",
+      localPath: "C:\\workflow\\media\\person.jpg",
+      caption: "人物资料图",
+      attribution: "Example Photographer / CC BY 4.0",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Example.jpg",
+      selected: true,
+      rights: "licensed",
+      allowedPlatforms: ["xiaoheihe"],
+    },
+  }];
+
+  const result = evaluateDraftReadiness(input, "xiaoheihe", "2026-08-13T01:00:00.000Z");
+  assert.equal(result.ready, false);
+  assert.match(result.blockers.join("\n"), /缺少授权证据/u);
+});
+
+test("an owned image with a stale path cannot make a draft publication-ready", () => {
+  const input = draft();
+  const migratedPath = process.platform === "win32"
+    ? "/Users/old-mac/ai-news-desk/media/owned.jpg"
+    : "C:\\Users\\old-windows\\ai-news-desk\\media\\owned.jpg";
+  input.images = [{
+    id: "placement-owned",
+    afterParagraph: 0,
+    caption: "自有图片",
+    image: {
+      id: "image-owned",
+      url: "/media/owned.jpg",
+      publicPath: "/media/owned.jpg",
+      localPath: migratedPath,
+      caption: "自有图片",
+      attribution: "AI News Desk",
+      sourceUrl: "https://example.com/news",
+      selected: true,
+      rights: "owned",
+      allowedPlatforms: ["*"],
+    },
+  }];
+
+  const result = evaluateDraftReadiness(input, "xiaoheihe", "2026-08-13T01:00:00.000Z");
+
+  assert.equal(result.ready, false);
+  assert.match(result.blockers.join("\n"), /其他操作系统|不是绝对路径/u);
+});

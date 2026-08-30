@@ -9,6 +9,62 @@ const escapeHtml = (value: string) =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
+const safeSourceUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const attributionHtml = (attribution: string, sourceUrl: string) => {
+  const href = safeSourceUrl(sourceUrl);
+  const label = escapeHtml(attribution || "来源待补充");
+  return href
+    ? `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer noopener">${label}</a>`
+    : label;
+};
+
+const licenseDetailsHtml = (placement: ArticleDraft["images"][number]) => {
+  if (placement.image.rights !== "licensed") return [];
+  const licenseId = placement.image.licenseId?.trim();
+  const licenseUrl = safeSourceUrl(placement.image.licenseUrl || "");
+  const license = licenseId
+    ? licenseUrl
+      ? `<a href="${escapeHtml(licenseUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(licenseId)}</a>`
+      : escapeHtml(licenseId)
+    : "许可信息待补充";
+  return [
+    `许可：${license}`,
+    `修改：${escapeHtml(placement.image.modificationNote?.trim() || "修改说明待补充")}`,
+  ];
+};
+
+const plainAttributionDetails = (placement: ArticleDraft["images"][number]) => {
+  const sourceUrl = safeSourceUrl(placement.image.sourceUrl);
+  const details = [
+    `${escapeHtml(placement.image.attribution || "来源待补充")}${sourceUrl ? `（${escapeHtml(sourceUrl)}）` : ""}`,
+  ];
+  if (placement.image.rights === "licensed") {
+    const licenseUrl = safeSourceUrl(placement.image.licenseUrl || "");
+    details.push(`许可：${escapeHtml(placement.image.licenseId || "待补充")}${licenseUrl ? `（${escapeHtml(licenseUrl)}）` : ""}`);
+    details.push(`修改：${escapeHtml(placement.image.modificationNote || "待补充")}`);
+  }
+  return details;
+};
+
+const figureCaptionHtml = (
+  placement: ArticleDraft["images"][number],
+  caption = placement.caption || placement.image.caption || "配图",
+) => `<p>图：${escapeHtml(caption)}（${[
+  `来源：${attributionHtml(placement.image.attribution, placement.image.sourceUrl)}`,
+  ...licenseDetailsHtml(placement),
+].join("；")}）</p>`;
+
+const mustKeepVisibleAttribution = (placement: ArticleDraft["images"][number]) =>
+  placement.image.rights !== "owned";
+
 const xiaoheiheImageCaption = (value: string) => {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= 30) return normalized;
@@ -72,7 +128,7 @@ export const legacyDraftBodyHtml = (draft: ArticleDraft) => {
       const src = placement.image.publicPath || placement.image.url;
       blocks.push(
         `<img src="${escapeHtml(src)}" alt="${escapeHtml(placement.caption)}" data-media-id="${escapeHtml(placement.id)}" data-caption="${escapeHtml(placement.caption)}" data-attribution="${escapeHtml(placement.image.attribution)}">`,
-        `<p>图：${escapeHtml(placement.caption)}（来源：${escapeHtml(placement.image.attribution)}）</p>`,
+        figureCaptionHtml(placement),
       );
     }
   });
@@ -90,6 +146,26 @@ const parseEditedCaption = ($: ReturnType<typeof cheerio.load>, image: ReturnTyp
   const withoutPrefix = captionText.slice(2).trim();
   const withoutAttribution = withoutPrefix.replace(/（来源：[^）]*）\s*$/, "").trim();
   return withoutAttribution || undefined;
+};
+
+/** Rebuild mandatory source/license text immediately before platform sync. */
+export const bodyHtmlWithRequiredImageAttribution = (draft: ArticleDraft) => {
+  const placements = new Map(draft.images.map((placement) => [placement.id, placement]));
+  const $ = cheerio.load(`<article id="article-root">${normalizedDraftBodyHtml(draft)}</article>`, null, false);
+  $("#article-root img[data-media-id]").each((_index, element) => {
+    const image = $(element);
+    const placement = placements.get(image.attr("data-media-id") || "");
+    if (!placement || !mustKeepVisibleAttribution(placement)) return;
+    const captionParagraph = image.next("p").first();
+    const editedCaption = parseEditedCaption($, image);
+    const visible = figureCaptionHtml(
+      placement,
+      editedCaption || image.attr("data-caption")?.trim() || placement.caption,
+    );
+    if (editedCaption) captionParagraph.replaceWith(visible);
+    else image.after(visible);
+  });
+  return sanitizeDraftHtml($("#article-root").html() ?? "");
 };
 
 export const publisherImageCaptions = (draft: ArticleDraft) => {
@@ -125,11 +201,20 @@ export const publisherBodyHtml = (draft: ArticleDraft) => {
     }
     const captionParagraph = image.next("p").first();
     const editedCaption = parseEditedCaption($, image);
-    if (editedCaption) {
+    if (editedCaption && !mustKeepVisibleAttribution(placement)) {
       // Xiaoheihe has a native description field under each uploaded image.
       // The extension fills that field from the image payload, so keeping this
       // generated caption paragraph would show the same caption twice.
       captionParagraph.remove();
+    } else if (mustKeepVisibleAttribution(placement)) {
+      const visibleAttribution = figureCaptionHtml(
+        placement,
+        editedCaption
+          || image.attr("data-caption")?.trim()
+          || placement.caption,
+      );
+      if (editedCaption) captionParagraph.replaceWith(visibleAttribution);
+      else image.after(visibleAttribution);
     }
     const caption = captions.get(mediaId) || placement.caption;
     image.replaceWith(
@@ -147,20 +232,34 @@ export const publisherBodyHtml = (draft: ArticleDraft) => {
 };
 
 /**
- * Xiaoheihe's image-post editor has a separate image uploader. Keep only the
- * user's short copy in the text field; article upload markers and generated
- * caption paragraphs belong to the article editor and would otherwise leak
- * into the post as visible text.
+ * Xiaoheihe's image-post editor has a separate image uploader. Keep the user's
+ * short copy and mandatory non-owned-image attribution in the text field;
+ * article upload markers and duplicate owned-image captions belong to the
+ * article editor and would otherwise leak into the post as visible text.
  */
 export const publisherImagePostBodyHtml = (draft: ArticleDraft) => {
+  const placements = new Map(draft.images.map((placement) => [placement.id, placement]));
   const $ = cheerio.load(`<article id="article-root">${normalizedDraftBodyHtml(draft)}</article>`, null, false);
+  const captions = publisherImageCaptions(draft);
+  const visibleAttributions: string[] = [];
   $("#article-root img").each((_index, element) => {
     const image = $(element);
+    const placement = placements.get(image.attr("data-media-id") || "");
     const caption = image.next("p").first();
     if (caption.text().replace(/\s+/g, " ").trim().startsWith("图：")) caption.remove();
+    if (placement && mustKeepVisibleAttribution(placement)) {
+      visibleAttributions.push(
+        `图片来源：${escapeHtml(captions.get(placement.id) || placement.caption || placement.image.caption || "配图")}｜${[
+          ...plainAttributionDetails(placement),
+        ].join("；")}`,
+      );
+    }
     image.remove();
   });
   $("#article-root [data-ai-news-image]").remove();
+  if (visibleAttributions.length) {
+    $("#article-root").append(visibleAttributions.map((entry) => `<p>${entry}</p>`).join(""));
+  }
   return sanitizeDraftHtml($("#article-root").html() ?? "");
 };
 

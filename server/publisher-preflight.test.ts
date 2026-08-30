@@ -81,6 +81,7 @@ test("preflight returns actionable blockers for an outdated helper and incomplet
 test("a fill attempt produces a structured receipt without ever publishing", () => {
   const preflight = evaluatePublisherPreflight({
     checkedAt: "2026-08-13T00:00:00.000Z",
+    expectedRevisionHash: "preflight-revision-1",
     runtime: {
       mode: "chrome-extension",
       connected: true,
@@ -117,6 +118,7 @@ test("a fill attempt produces a structured receipt without ever publishing", () 
   });
 
   assert.equal(receipt.schemaVersion, "publisher-receipt/v1");
+  assert.equal(receipt.revisionHash, "preflight-revision-1");
   assert.equal(receipt.outcome, "filled");
   assert.equal(receipt.safety.finalPublishAttempted, false);
   assert.equal(receipt.safety.finalPublishPerformed, false);
@@ -175,6 +177,38 @@ test("an image post can intentionally omit topics without inventing tags", () =>
   assert.equal(result.publishReady, true);
   assert.equal(result.capabilities.find((capability) => capability.id === "topics")?.status, "warning");
   assert.match(result.warnings.find((warning) => warning.capability === "topics")?.message || "", /不会自动生成标签/);
+});
+
+test("an image post is blocked unless it has exactly one inserted image", () => {
+  const result = evaluatePublisherPreflight({
+    minimumProtocolVersion: "0.1.17",
+    runtime: {
+      mode: "chrome-extension",
+      connected: true,
+      protocolVersion: "0.1.17",
+      loggedIn: true,
+      editorReady: true,
+    },
+    draft: {
+      id: "draft-image-post-too-many-images",
+      contentFormat: "image-post",
+      title: "图文稿图片数量检查",
+      bodyHtml: "<p>这是一段满足长度要求、但错误插入了两张图片的图文稿正文。</p>",
+      community: "盒友杂谈",
+      topics: [],
+      images: [
+        { id: "image-one", available: true, caption: "第一张图" },
+        { id: "image-two", available: true, caption: "第二张图" },
+      ],
+    },
+  });
+
+  assert.equal(result.canQueueFill, false);
+  assert.equal(result.publishReady, false);
+  assert.equal(
+    result.blocking.some((issue) => issue.code === "PREFLIGHT_IMAGE_POST_IMAGE_COUNT"),
+    true,
+  );
 });
 
 test("CDP mode does not require the Chrome extension protocol version", () => {

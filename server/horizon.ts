@@ -11,9 +11,15 @@ import { isCommunityCandidate } from "./community-feed.js";
 import { buildCandidateBriefingEvidence } from "./candidate-briefing.js";
 import { generateCandidateBriefings } from "./candidate-briefing-service.js";
 import { extractPage } from "./extractor.js";
+import { mergeVisualImages } from "./visual-desk.js";
 import { selectTopAndGenerate } from "./generator.js";
 import { findActiveCollectionRun, isCollectionActive } from "./run-policy.js";
-import { rawItemMatchesSearch, rawItemToCandidate, sortCandidates } from "./scoring.js";
+import {
+  rawItemMatchesSearch,
+  rawItemTimeRejectionReason,
+  rawItemToCandidate,
+  sortCandidates,
+} from "./scoring.js";
 import { applySourceRunResult, sourceResultsForRun } from "./source-health.js";
 import {
   dynamicTopicQuery,
@@ -37,12 +43,40 @@ import type {
   CollectionTopicId,
   RawHorizonItem,
   SourceConfig,
+  SourceImage,
   WorkflowRun,
 } from "./types.js";
 
 const now = () => new Date().toISOString();
 const runControllers = new Map<string, AbortController>();
 const briefingJobs = new Map<string, Promise<CandidateBriefingEnrichmentResult>>();
+
+export const collectionReadinessLog = (
+  candidateCount: number,
+  briefingCount: number,
+): { message: string; level: "success" | "warning" } => {
+  if (candidateCount <= 0) {
+    return { message: "采集完成，但没有候选；请查看来源诊断", level: "warning" };
+  }
+  const completed = Math.max(0, Math.min(candidateCount, Math.floor(briefingCount)));
+  if (completed === candidateCount) {
+    return { message: "候选列表与中文摘要已准备好，可以勾选并分别成稿", level: "success" };
+  }
+  return {
+    message: `候选列表已准备好；中文摘要生成 ${completed}/${candidateCount} 条，可稍后重试补全`,
+    level: "warning",
+  };
+};
+
+/**
+ * Page extraction may rediscover an image already supplied by a richer
+ * adapter such as X. Existing candidate records remain the provenance source
+ * of truth; probe results only fill missing files/metadata or add new images.
+ */
+export const mergeCandidateProbeImages = (
+  current: SourceImage[],
+  probed: SourceImage[],
+) => mergeVisualImages(current, probed);
 
 export interface CandidateBriefingEnrichmentResult {
   run: WorkflowRun;
@@ -144,8 +178,8 @@ const probeImages = async (runId: string, signal?: AbortSignal) => {
             ?.candidates.find((entry) => entry.id === candidate.id);
           if (!target) return;
           target.canonicalUrl = page.canonicalUrl;
-          target.imageCount = page.images.length;
-          target.images = page.images;
+          target.images = mergeCandidateProbeImages(target.images, page.images);
+          target.imageCount = target.images.length;
           if (!target.excerpt && page.text) target.excerpt = page.text.slice(0, 360);
         });
       } catch {
@@ -153,7 +187,7 @@ const probeImages = async (runId: string, signal?: AbortSignal) => {
           const target = current.runs
             .find((entry) => entry.id === runId)
             ?.candidates.find((entry) => entry.id === candidate.id);
-          if (target) target.imageCount = 0;
+          if (target) target.imageCount = target.images.length;
         });
       }
     }
@@ -182,7 +216,7 @@ const executeCandidateBriefingEnrichment = async (
   const provider = state.aiSettings.providers.find((entry) => entry.id === state.aiSettings.analysisProviderId)
     ?? state.aiSettings.providers.find((entry) => entry.id === state.aiSettings.activeProviderId)
     ?? state.aiSettings.providers[0];
-  if (!provider) throw new Error("没有可用的中文速读模型，请先配置 AI");
+  if (!provider) throw new Error("没有可用的中文摘要模型，请先配置 AI");
 
   const evidence = buildCandidateBriefingEvidence(candidates, extractedSourceText);
   const generated = await generateCandidateBriefings(runId, provider, evidence, { signal });
@@ -212,7 +246,7 @@ const executeCandidateBriefingEnrichment = async (
       at: timestamp,
       stage: "生成中文速读",
       message: failed
-        ? `已生成 ${completed}/${candidates.length} 条中文速读；失败项保留原标题，可手动补全`
+        ? `已生成 ${completed}/${candidates.length} 条中文摘要；失败项保留原标题，可手动补全`
         : `已为 ${completed} 条候选生成中文标题与一句话摘要`,
       level: failed ? "warning" : "success",
     });
@@ -443,6 +477,7 @@ export const executeCollection = async (runId: string) => {
   const controller = new AbortController();
   runControllers.set(runId, controller);
   let selectedSources: SourceConfig[] = [];
+  let briefingCount = 0;
   try {
     const state = await updateState((current) => current);
     const run = state.runs.find((entry) => entry.id === runId);
@@ -492,11 +527,33 @@ export const executeCollection = async (runId: string) => {
       rawItems.length ? "success" : "warning",
     );
 
+    const filterOptions = { windowHours: run.windowHours, now: Date.now() };
+    const timeRejectionCounts = rawItems.reduce((counts, item) => {
+      const reason = rawItemTimeRejectionReason(item, filters, filterOptions);
+      if (reason) counts[reason] = (counts[reason] ?? 0) + 1;
+      return counts;
+    }, {} as Partial<Record<NonNullable<ReturnType<typeof rawItemTimeRejectionReason>>, number>>);
     const filteredRawItems = rawItems.filter((item) => rawItemMatchesSearch(item, {
       dateFrom: run.dateFrom,
       dateTo: run.dateTo,
       keywords: run.keywords,
-    }));
+    }, filterOptions));
+    const missingOrInvalidDates = (timeRejectionCounts["missing-published-at"] ?? 0)
+      + (timeRejectionCounts["invalid-published-at"] ?? 0);
+    const staleOrOutOfRange = (timeRejectionCounts["outside-window"] ?? 0)
+      + (timeRejectionCounts["outside-date-range"] ?? 0);
+    const futureDates = timeRejectionCounts["future-published-at"] ?? 0;
+    if (missingOrInvalidDates || staleOrOutOfRange || futureDates) {
+      const scope = run.dateFrom || run.dateTo
+        ? "手工日期范围"
+        : `最近 ${run.windowHours} 小时窗口`;
+      await appendLog(
+        runId,
+        "去重与评分",
+        `${scope}已隔离 ${missingOrInvalidDates + staleOrOutOfRange + futureDates} 条记录：超出范围 ${staleOrOutOfRange} 条、缺少或无法解析发布时间 ${missingOrInvalidDates} 条、未来时间 ${futureDates} 条`,
+        "warning",
+      );
+    }
     await patchRun(runId, { filteredRawCount: filteredRawItems.length });
     const preferenceState = await readState();
     const seenUrls = new Set<string>();
@@ -551,12 +608,13 @@ export const executeCollection = async (runId: string) => {
     if (candidates.length) {
       await patchRun(runId, { stage: "生成中文速读" });
       try {
-        await enrichCandidateBriefings(runId, { extractedSourceText, signal: controller.signal });
+        const briefingResult = await enrichCandidateBriefings(runId, { extractedSourceText, signal: controller.signal });
+        briefingCount = briefingResult.completed;
       } catch (error) {
         await appendLog(
           runId,
           "生成中文速读",
-          `中文速读暂未生成，候选采集不受影响：${error instanceof Error ? error.message : String(error)}`,
+          `中文摘要暂未生成，候选采集不受影响：${error instanceof Error ? error.message : String(error)}`,
           "warning",
         );
       }
@@ -590,11 +648,12 @@ export const executeCollection = async (runId: string) => {
         }, { createdAt: completedAt });
       }
     });
+    const readinessLog = collectionReadinessLog(candidates.length, briefingCount);
     await appendLog(
       runId,
       candidates.length ? "生成中文速读" : "提取来源原图",
-      candidates.length ? "候选列表与中文速读已准备好，可以勾选并分别成稿" : "采集完成，但没有候选；请查看来源诊断",
-      candidates.length ? "success" : "warning",
+      readinessLog.message,
+      readinessLog.level,
     );
     if (run.autoGenerateCount && candidates.length) {
       await selectTopAndGenerate(runId, run.autoGenerateCount);

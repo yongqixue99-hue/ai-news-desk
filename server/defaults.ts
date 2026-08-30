@@ -22,6 +22,7 @@ import {
 } from "./source-routing.js";
 import { sortCandidates } from "./scoring.js";
 import { normalizeWorkflowNotifications } from "./notifications.js";
+import { normalizeDraftPublicationState } from "./publication-state.js";
 
 const configuredDefaultSources: SourceConfig[] = [
   {
@@ -1185,14 +1186,14 @@ const configuredDefaultSources: SourceConfig[] = [
     name: "AI 官方账号（X）",
     kind: "x",
     homepageUrl: "https://x.com/",
-    query: "OpenAI, AnthropicAI, GoogleDeepMind",
+    query: "OpenAI, AnthropicAI, GoogleDeepMind, nvidia, AIatMeta, MicrosoftAI, xai, sama, demishassabis",
     topicIds: ["ai", "technology", "science"],
     enabled: false,
     selected: false,
     category: "ai-official",
     role: "official",
     discoveryOnly: false,
-    note: "X API v2 · 官方账号原帖 · 需配置 Bearer Token",
+    note: "X API v2 · 9 个素材观察账号原帖 · 默认停用 · 需配置 Bearer Token 并人工复核账号与媒体权利",
   },
 ];
 
@@ -1544,6 +1545,12 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   state.draftRevisions ??= [];
   state.articleAgentThreads ??= [];
   state.materials ??= [];
+  state.materialSeedTombstones = Array.isArray(state.materialSeedTombstones)
+    ? [...new Set(state.materialSeedTombstones
+      .filter((assetId): assetId is string => typeof assetId === "string")
+      .map((assetId) => assetId.trim())
+      .filter(Boolean))].slice(0, 1_000)
+    : [];
   state.intakeReviews ??= [];
   state.aiRunTraces ??= [];
   state.publisherReceipts ??= [];
@@ -1564,7 +1571,7 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   const validDraftStatuses = new Set([
     "editing", "reviewing", "needs-images", "ready", "filled", "published", "shelved",
   ]);
-  state.drafts = (state.drafts ?? []).map((draft) => ({
+  state.drafts = (state.drafts ?? []).map((draft) => normalizeDraftPublicationState({
     ...draft,
     status: validDraftStatuses.has(draft.status) ? draft.status : "editing",
     contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
@@ -1760,6 +1767,7 @@ export const createDefaultState = (): WorkflowState => ({
   editorialSystem: { profile: defaultEditorialProfile(), suggestionDecisions: [] },
   aiSettings: defaultAiSettings(),
   materials: [],
+  materialSeedTombstones: [],
   sources: defaultSources.map((source) => ({
     ...source,
     selected: source.enabled && defaultDailyAiSourceIds.has(source.id),

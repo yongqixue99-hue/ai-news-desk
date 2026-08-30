@@ -1,6 +1,7 @@
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const domAdapter = globalThis.XiaoheiheDom;
 const imagePostDomAdapter = globalThis.XiaoheiheImagePostDom;
+const publisherJobAdapter = globalThis.XiaoheihePublisherJob;
 
 const isVisible = (element) => {
   if (!(element instanceof Element)) return false;
@@ -281,6 +282,15 @@ async function fillImagePost(job) {
     steps.push({ name: "正文", ok: bodyOk, detail: bodyOk ? `图文短文已填入并验证（${bodyText.length} 字）` : "图文短文填入后被清空" });
     if (!titleOk || !bodyOk) return { pageUrl: location.href, steps };
 
+    const imageIntegrity = publisherJobAdapter?.validateImagePostPayload(job);
+    if (!imageIntegrity?.ok) {
+      steps.push({
+        name: "配图",
+        ok: false,
+        detail: String(imageIntegrity?.detail || "图文稿图片完整性模块未加载"),
+      });
+      return { pageUrl: location.href, steps };
+    }
     const image = Array.isArray(job.images) ? job.images[0] : undefined;
     if (!image?.dataUrl) {
       steps.push({ name: "配图", ok: false, detail: "图文稿没有可上传图片" });
@@ -306,6 +316,14 @@ async function fillImagePost(job) {
 
 async function uploadImages(job) {
   const images = Array.isArray(job.images) ? job.images : [];
+  const integrity = publisherJobAdapter?.validateArticleImagePayload(job);
+  if (!integrity?.ok) {
+    return {
+      name: "配图",
+      ok: false,
+      detail: String(integrity?.detail || "文章图片完整性模块未加载"),
+    };
+  }
   if (!images.length) return { name: "配图", ok: true, detail: "本稿没有需要上传的图片" };
   const byId = new Map(images.map((image) => [image.id, image]));
   const markers = domAdapter?.findImageMarkers(document, images.map((image) => image.id))
@@ -313,11 +331,15 @@ async function uploadImages(job) {
       id: element.getAttribute("data-ai-news-image"),
       element,
     }));
-  if (!markers.length) {
+  const markerIds = markers.map((entry) => String(entry.id || ""));
+  const exactDomMarkers = markers.length === images.length
+    && new Set(markerIds).size === markerIds.length
+    && markerIds.every((id) => byId.has(id));
+  if (!exactDomMarkers) {
     return {
       name: "配图",
       ok: false,
-      detail: `检测到 ${images.length} 张配图，但没有找到正文中的插入位置`,
+      detail: `编辑器图片标记与载荷不一致（找到 ${markers.length} 个位置，需要 ${images.length} 张）`,
     };
   }
 
@@ -394,10 +416,10 @@ async function uploadImages(job) {
   }
   return {
     name: "配图",
-    ok: uploaded === markers.length,
-    detail: uploaded === markers.length
+    ok: uploaded === images.length,
+    detail: uploaded === images.length
       ? `已上传 ${uploaded} 张图片并填写图片描述`
-      : `已上传 ${uploaded}/${markers.length} 张；${failures[0] || "其余位置保留了待上传标记"}`,
+      : `已上传 ${uploaded}/${images.length} 张；${failures[0] || "其余位置保留了待上传标记"}`,
   };
 }
 

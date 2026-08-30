@@ -39,8 +39,13 @@ interface SourcesPageProps {
 }
 
 type PurposeFilter = "all" | SourceRole;
-type HealthFilter = "all" | NonNullable<SourceConfig["health"]>;
+type HealthFilter = "all" | "attention" | NonNullable<SourceConfig["health"]>;
+type SourceCollectionState = "disabled" | "manual" | "default";
 type XCredentialStatus = { configured: boolean; hint?: string };
+
+const collectionStateFor = (source: SourceConfig): SourceCollectionState => (
+  !source.enabled ? "disabled" : source.selected ? "default" : "manual"
+);
 
 const responseJson = async <T,>(response: Response): Promise<T> => {
   const body = await response.json().catch(() => ({})) as T & { error?: string };
@@ -148,9 +153,16 @@ export function SourcesPage({
     if (normalizedQuery && !sourceMatchesQuery(source, normalizedQuery)) return false;
     if (topicFilter !== "all" && !sourceTopicIds(source).includes(topicFilter)) return false;
     if (purposeFilter !== "all" && sourceRoleFor(source) !== purposeFilter) return false;
-    if (healthFilter !== "all" && (source.health ?? "unknown") !== healthFilter) return false;
+    const health = source.health ?? "unknown";
+    if (healthFilter === "attention" && health !== "warning" && health !== "error" && health !== "unknown") return false;
+    if (healthFilter !== "all" && healthFilter !== "attention" && health !== healthFilter) return false;
     return true;
   }), [healthFilter, normalizedQuery, purposeFilter, sources, topicFilter]);
+  const healthSummary = useMemo(() => sources.reduce((summary, source) => {
+    const health = source.health ?? "unknown";
+    summary[health] += 1;
+    return summary;
+  }, { healthy: 0, warning: 0, error: 0, unknown: 0 }), [sources]);
   const visibleIds = filteredSources.map((source) => source.id);
   const allVisibleChecked = visibleIds.length > 0 && visibleIds.every((sourceId) => checkedIds.has(sourceId));
 
@@ -336,12 +348,19 @@ export function SourcesPage({
         </div>
       </section>
 
+      <section className="source-health-overview" aria-label="新闻源健康概览">
+        <div><span>来源健康</span><strong>{healthSummary.healthy} 个正常</strong><small>{healthSummary.warning + healthSummary.error + healthSummary.unknown} 个需要关注 · 其中 {healthSummary.unknown} 个尚未检查</small></div>
+        <button type="button" className={healthFilter === "attention" ? "active" : undefined} onClick={() => setHealthFilter(healthFilter === "attention" ? "all" : "attention")}>
+          <TriangleAlert size={15} />{healthFilter === "attention" ? "显示全部来源" : "只看需关注来源"}
+        </button>
+      </section>
+
       <div className="source-manager-tools">
         <label className="source-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、地址或备注" />{query ? <button type="button" onClick={() => setQuery("")} aria-label="清空搜索"><X size={14} /></button> : null}</label>
         <div className="source-filters">
           <label><span>频道</span><select value={topicFilter} onChange={(event) => setTopicFilter(event.target.value as "all" | CollectionTopicId)}><option value="all">全部</option>{collectionTopics.map((topic) => <option key={topic.id} value={topic.id}>{topic.label}</option>)}</select></label>
           <label><span>分类</span><select value={purposeFilter} onChange={(event) => setPurposeFilter(event.target.value as PurposeFilter)}><option value="all">全部</option>{Object.entries(sourceRoleLabels).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>
-          <label><span>健康</span><select value={healthFilter} onChange={(event) => setHealthFilter(event.target.value as HealthFilter)}><option value="all">全部</option><option value="healthy">正常</option><option value="warning">需检查</option><option value="error">失败</option><option value="unknown">未检查</option></select></label>
+          <label><span>健康</span><select value={healthFilter} onChange={(event) => setHealthFilter(event.target.value as HealthFilter)}><option value="all">全部</option><option value="attention">需关注</option><option value="healthy">正常</option><option value="warning">需检查</option><option value="error">失败</option><option value="unknown">未检查</option></select></label>
         </div>
         <span>显示 {filteredSources.length} / {sources.length}</span>
       </div>
@@ -359,7 +378,7 @@ export function SourcesPage({
       <div className="source-manager-table">
         <div className="source-manager-head">
           <label className="source-row-select" title="勾选当前筛选结果"><input type="checkbox" checked={allVisibleChecked} onChange={toggleAllVisible} aria-label="勾选当前筛选结果" /></label>
-          <span>启用</span><span>新闻源</span><span>类型</span><span>用途</span><span>健康</span><span>默认采集</span><span />
+          <span>采集状态</span><span>新闻源</span><span>类型</span><span>用途</span><span>健康</span><span />
         </div>
         {filteredSources.map((source) => {
           const health = source.health ?? "unknown";
@@ -370,17 +389,29 @@ export function SourcesPage({
           const homepageUrl = source.homepageUrl ?? source.routes?.find((route) => route.homepageUrl)?.homepageUrl ?? source.url;
           const failureCount = source.consecutiveFailures ?? 0;
           const testing = testingSourceId === source.id;
+          const collectionState = collectionStateFor(source);
           return (
             <div className={`source-manager-row ${checkedIds.has(source.id) ? "checked" : ""}`} key={source.id}>
               <label className="source-row-select"><input type="checkbox" checked={checkedIds.has(source.id)} onChange={() => toggleChecked(source.id)} aria-label={`勾选新闻源 ${source.name}`} /></label>
-              <label className="switch"><input type="checkbox" checked={source.enabled} onChange={(event) => void onSave(source, { enabled: event.target.checked })} /><span /></label>
+              <select
+                className={`source-collection-state state-${collectionState}`}
+                value={collectionState}
+                aria-label={`${source.name} 的采集状态`}
+                onChange={(event) => {
+                  const next = event.target.value as SourceCollectionState;
+                  void onSave(source, { enabled: next !== "disabled", selected: next === "default" });
+                }}
+              >
+                <option value="disabled">停用</option>
+                <option value="manual">可手动使用</option>
+                <option value="default">默认采集</option>
+              </select>
               <div className="managed-source-name"><strong>{source.name}</strong><span>{topicSummary}{source.note ? ` · ${source.note}` : ""}</span></div>
               <span className="source-kind">{source.kind === "rss" ? "RSS" : source.kind === "hackernews" ? "HN" : source.kind === "zhihu" ? "知乎 CLI" : source.kind === "last30days" ? "30 天社区" : source.kind === "github" ? "GitHub" : source.kind === "x" ? "X 官方" : "新闻检索"}</span>
               <span className={`source-role-badge ${role}`}>{sourceRoleLabels[role]}</span>
               <span className={`source-health ${health}`} title={source.lastHealthDetail}>
                 {healthIcon}<span><strong>{healthLabel} · 检查 {formatTimestamp(source.lastCheckedAt, "尚未")}</strong><small>最后成功 {formatTimestamp(source.lastSuccessfulAt, "尚无")}{failureCount ? ` · 连续失败 ${failureCount} 次` : ""}</small></span>
               </span>
-              <label className="row-checkbox"><input type="checkbox" checked={source.selected} onChange={(event) => void onSave(source, { selected: event.target.checked })} /><span>{source.selected ? "✓" : null}</span></label>
               <div className="row-actions">
                 <button type="button" className="source-test-button" onClick={() => testSource(source.id)} disabled={Boolean(testingSourceId)} title="只测试这个来源">{testing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}<span>测试</span></button>
                 {homepageUrl ? <a className="source-homepage-link" href={homepageUrl} target="_blank" rel="noreferrer" title="打开官方网站"><Globe2 size={15} /><span>官网</span></a> : null}

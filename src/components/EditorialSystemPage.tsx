@@ -174,7 +174,7 @@ export function EditorialSystemPage({
         <div>
           <span className="editorial-kicker"><ShieldCheck size={14} /> 人负责方向，Agent 负责整理</span>
           <h1>内容策略</h1>
-          <p>自动读源、近期记忆和 48 小时选题简报都在这里；任何长期配置变更仍需你确认。</p>
+          <p>这里管理长期档案、近期记忆和自动读源；实时选题统一在今日编辑台处理。</p>
         </div>
         <div className="page-header-actions">
           <button type="button" className="secondary-button" onClick={onOpenSources}>
@@ -374,38 +374,23 @@ export function EditorialSystemPage({
         </div>
       </div>
 
-      <section className="editorial-brief-section">
+      <section className="editorial-brief-section editorial-today-handoff" aria-labelledby="editorial-today-handoff-title">
         <div className="editorial-brief-heading">
           <div>
-            <span className="editorial-card-kicker">自动生成 · 硬窗口 {view.brief.hardWindowHours} 小时</span>
-            <h2>当前值得处理的事件</h2>
-            <p>同一新闻由头只占一个位置，其他报道保留为佐证；合规事件不足时宁可少列。</p>
+            <span className="editorial-card-kicker">实时选题已统一到今日编辑台</span>
+            <h2 id="editorial-today-handoff-title">今天写什么，请去今日编辑台</h2>
+            <p>内容策略保留长期方向和学习记录；{view.brief.hardWindowHours} 小时窗口内的事件、证据与下一步动作统一在今日页判断。</p>
           </div>
-          <div className="editorial-brief-stats">
-            <span><strong>{view.brief.mustReads.length}</strong> 个事件</span>
-            <span><strong>{view.brief.excludedDuplicateCount}</strong> 条重复已合并</span>
-            <span><strong>{view.brief.excludedStaleCount}</strong> 条旧闻已排除</span>
-          </div>
+          <a className="primary-button" href="#today"><BookOpenCheck size={15} />打开今日编辑台</a>
         </div>
-        {view.brief.coverageGaps.length ? <div className="editorial-coverage-gap">覆盖不足：{view.brief.coverageGaps.map((topicId) => topicLabel.get(topicId) ?? topicId).join("、")}</div> : null}
-        {view.brief.mustReads.length ? (
-          <div className="editorial-brief-list">
-            {view.brief.mustReads.map((item, index) => (
-              <article key={item.eventId}>
-                <span className="editorial-brief-index">{String(index + 1).padStart(2, "0")}</span>
-                <div className="editorial-brief-body">
-                  <div className="editorial-brief-meta"><span>{item.sourceName}</span><span>{item.ageHours} 小时前</span><span>{item.evidence}</span></div>
-                  <h3><a href={item.url} target="_blank" rel="noreferrer">{item.title}<ExternalLink size={13} /></a></h3>
-                  <p>{item.excerpt || "来源未提供摘要，请打开原文核验。"}</p>
-                  {item.supporting.length ? <div className="editorial-supporting"><BookOpenCheck size={13} />另有 {item.supporting.length} 个佐证来源：{item.supporting.map((support) => support.sourceName).join("、")}</div> : null}
-                </div>
-                <button type="button" className="secondary-button" onClick={() => onOpenRun(item.runId)}>进入候选池</button>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="editorial-brief-empty"><BookOpenCheck size={28} /><strong>48 小时内还没有合规候选</strong><span>点击“立即读取”，或检查是否已经选择并启用信息源。</span></div>
-        )}
+        <div className="editorial-brief-stats" aria-label="最近一次实时选题整理摘要">
+          <span><strong>{view.brief.mustReads.length}</strong> 个候选已交给今日页</span>
+          <span><strong>{view.brief.excludedDuplicateCount}</strong> 条重复已合并</span>
+          <span><strong>{view.brief.excludedStaleCount}</strong> 条旧闻已排除</span>
+        </div>
+        {view.brief.coverageGaps.length ? (
+          <div className="editorial-coverage-gap">今日页仍缺少：{view.brief.coverageGaps.map((topicId) => topicLabel.get(topicId) ?? topicId).join("、")}</div>
+        ) : null}
       </section>
     </div>
   );

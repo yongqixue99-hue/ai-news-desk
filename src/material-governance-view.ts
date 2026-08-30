@@ -29,6 +29,11 @@ export const materialGovernanceView = (
   const expired = material.rights === "expired"
     || (expiry !== undefined && Number.isFinite(expiry) && expiry <= new Date(checkedAt).getTime());
   const requiresAttribution = ["licensed", "official", "editorial-screenshot"].includes(material.rights);
+  const claimsCreativeCommons = material.rights === "licensed" && /(?:creative commons|\bcc[- ]?by)/iu.test([
+    material.licenseId,
+    material.attribution,
+    material.evidenceNote,
+  ].filter(Boolean).join(" "));
 
   if (expired) blockers.push("授权已到期");
   if (material.rights === "check-required") blockers.push("版权状态待确认");
@@ -47,6 +52,8 @@ export const materialGovernanceView = (
     blockers.push("缺少来源署名");
   }
   if (requiresAttribution && !hasSourceUrl(material.sourceUrl)) blockers.push("缺少来源 URL");
+  if (claimsCreativeCommons && (!material.licenseId?.trim() || !hasSourceUrl(material.licenseUrl))) blockers.push("缺少 CC 许可标识或条款 URL");
+  if (claimsCreativeCommons && !material.modificationNote?.trim()) blockers.push("缺少修改说明");
   if (
     !material.allowedPlatforms.includes("*")
     && !material.allowedPlatforms.map((item) => item.toLowerCase()).includes(platform.toLowerCase())

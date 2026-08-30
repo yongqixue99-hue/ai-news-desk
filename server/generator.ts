@@ -12,6 +12,7 @@ import {
   startAiRunTrace,
 } from "./ai-run-observability.js";
 import { downloadSourceImage, extractPage } from "./extractor.js";
+import { copyLocalSourceImageToDraft } from "./materials.js";
 import { runGenerationProviderObserved } from "./provider-runtime.js";
 import { readSkillInstructions, skillsForArticleTask } from "./skill-registry.js";
 import { readState, updateState, workflowJobsRoot, workspacePath } from "./storage.js";
@@ -500,7 +501,11 @@ export const generateCandidateDraft = async (
     const sourceImage = imageById.get(selection.imageId);
     if (!sourceImage) continue;
     try {
-      const downloaded = sourceImage.localPath ? sourceImage : await downloadSourceImage(sourceImage, draftId);
+      const downloaded = sourceImage.localPath
+        ? await copyLocalSourceImageToDraft(sourceImage, draftId, {
+          requireFingerprintMatch: Boolean(evidenceOverride?.contentPackage),
+        })
+        : await downloadSourceImage(sourceImage, draftId);
       placements.push({
         id: `placement_${randomUUID().slice(0, 8)}`,
         image: downloaded,
@@ -508,6 +513,9 @@ export const generateCandidateDraft = async (
         caption: selection.caption || sourceImage.caption,
       });
     } catch (error) {
+      if (evidenceOverride?.contentPackage) {
+        throw new Error(`素材包图片 ${sourceImage.id} 无法按冻结快照复制：${error instanceof Error ? error.message : String(error)}`);
+      }
       await appendRunLog(
         runId,
         "保存原图",
@@ -524,7 +532,11 @@ export const generateCandidateDraft = async (
     if (placements.length >= settings.imageLimit) break;
     if (placements.some((placement) => placement.image.url === sourceImage.url)) continue;
     try {
-      const downloaded = sourceImage.localPath ? sourceImage : await downloadSourceImage(sourceImage, draftId);
+      const downloaded = sourceImage.localPath
+        ? await copyLocalSourceImageToDraft(sourceImage, draftId, {
+          requireFingerprintMatch: Boolean(evidenceOverride?.contentPackage),
+        })
+        : await downloadSourceImage(sourceImage, draftId);
       const needsVisibleFallback = placements.length < plannedSelections.length;
       placements.push({
         id: `placement_${randomUUID().slice(0, 8)}`,
@@ -535,6 +547,9 @@ export const generateCandidateDraft = async (
         caption: sourceImage.caption,
       });
     } catch (error) {
+      if (evidenceOverride?.contentPackage) {
+        throw new Error(`素材包图片 ${sourceImage.id} 无法按冻结快照复制：${error instanceof Error ? error.message : String(error)}`);
+      }
       await appendRunLog(
         runId,
         "保存备选原图",

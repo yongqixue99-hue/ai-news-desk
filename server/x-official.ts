@@ -16,6 +16,7 @@ interface XPost {
     quote_count?: number;
   };
   entities?: { urls?: Array<{ expanded_url?: string }> };
+  attachments?: { media_keys?: string[] };
   referenced_tweets?: Array<{ id: string; type: "replied_to" | "quoted" | "retweeted" }>;
 }
 
@@ -26,9 +27,19 @@ interface XUser {
   verified?: boolean;
 }
 
+interface XMedia {
+  media_key: string;
+  type: "photo" | "video" | "animated_gif" | string;
+  url?: string;
+  preview_image_url?: string;
+  width?: number;
+  height?: number;
+  alt_text?: string;
+}
+
 export interface XRecentSearchResponse {
   data?: XPost[];
-  includes?: { users?: XUser[] };
+  includes?: { users?: XUser[]; media?: XMedia[] };
   meta?: { newest_id?: string; next_token?: string; result_count?: number };
 }
 
@@ -55,9 +66,10 @@ export const createXApiClient = (dependencies: {
     endpoint.searchParams.set("query", query);
     endpoint.searchParams.set("max_results", "100");
     endpoint.searchParams.set("sort_order", "recency");
-    endpoint.searchParams.set("tweet.fields", "author_id,created_at,entities,public_metrics,referenced_tweets");
-    endpoint.searchParams.set("expansions", "author_id");
+    endpoint.searchParams.set("tweet.fields", "author_id,created_at,entities,public_metrics,referenced_tweets,attachments");
+    endpoint.searchParams.set("expansions", "author_id,attachments.media_keys");
     endpoint.searchParams.set("user.fields", "id,name,username,verified");
+    endpoint.searchParams.set("media.fields", "media_key,type,url,preview_image_url,width,height,alt_text");
     if (input.sinceId && /^\d+$/u.test(input.sinceId)) endpoint.searchParams.set("since_id", input.sinceId);
     const bearerToken = (await dependencies.getBearerToken()).trim();
     if (!bearerToken) throw new Error("尚未配置 X API Bearer Token");
@@ -139,6 +151,38 @@ const firstExternalUrl = (post: XPost) => post.entities?.urls?.flatMap((entity) 
   }
 })[0];
 
+const safeMediaUrl = (value: string | undefined) => {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return /^https?:$/u.test(url.protocol) ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const mediaForPost = (post: XPost, mediaByKey: ReadonlyMap<string, XMedia>) => {
+  const seen = new Set<string>();
+  return (post.attachments?.media_keys ?? []).flatMap((mediaKey) => {
+    if (seen.has(mediaKey)) return [];
+    seen.add(mediaKey);
+    const media = mediaByKey.get(mediaKey);
+    if (!media) return [];
+    const url = safeMediaUrl(media.type === "photo"
+      ? media.url ?? media.preview_image_url
+      : media.preview_image_url);
+    if (!url) return [];
+    return [{
+      media_key: media.media_key,
+      kind: media.type === "photo" ? "photo" : "preview",
+      url,
+      width: media.width,
+      height: media.height,
+      alt_text: media.alt_text?.trim().slice(0, 180),
+    }];
+  });
+};
+
 const itemsForResponse = (
   source: SourceConfig,
   accounts: string[],
@@ -147,6 +191,7 @@ const itemsForResponse = (
 ) => {
   const allowed = new Set(accounts.map((account) => account.toLowerCase()));
   const users = new Map((response.includes?.users ?? []).map((user) => [user.id, user]));
+  const mediaByKey = new Map((response.includes?.media ?? []).map((media) => [media.media_key, media]));
   return (response.data ?? []).flatMap((post): RawHorizonItem[] => {
     const user = post.author_id ? users.get(post.author_id) : undefined;
     const isReplyOrRetweet = post.referenced_tweets?.some(
@@ -176,6 +221,7 @@ const itemsForResponse = (
         reply_count: metrics.reply_count ?? 0,
         retweet_count: metrics.retweet_count ?? 0,
         quote_count: metrics.quote_count ?? 0,
+        x_media: mediaForPost(post, mediaByKey),
         collector: "x-api-v2",
         ...(canonicalUrl ? { canonical_url: canonicalUrl } : {}),
       },

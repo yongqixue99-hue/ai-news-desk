@@ -86,9 +86,21 @@ const emptyMaterial: MaterialMetadataInput = {
   rights: "check-required",
   evidenceNote: "",
   evidencePath: "",
+  licenseId: "",
+  licenseUrl: "",
+  modificationNote: "",
   allowedPlatforms: [],
   expiresAt: "",
   entityTags: [],
+};
+
+type MaterialCategory = "all" | "people" | "companies" | "generic" | "review";
+
+const materialCategoryFor = (material: ImageMaterial): Exclude<MaterialCategory, "all" | "review"> => {
+  const text = `${material.tags.join(" ")} ${material.entityTags.join(" ")} ${material.title}`.toLowerCase();
+  if (/人物|portrait|founder|ceo|负责人|创始人/u.test(text)) return "people";
+  if (/公司|品牌|logo|标识|company/u.test(text)) return "companies";
+  return "generic";
 };
 
 const expiryEndOfDay = (value: string | undefined) => {
@@ -156,16 +168,21 @@ export function AISettingsPage({
   const [materialMetadata, setMaterialMetadata] = useState<MaterialMetadataInput>(emptyMaterial);
   const [materialBusy, setMaterialBusy] = useState(false);
   const [materialSearch, setMaterialSearch] = useState("");
+  const [materialCategory, setMaterialCategory] = useState<MaterialCategory>("all");
   const materialFileInput = useRef<HTMLInputElement>(null);
   const providerModelInputRef = useRef<HTMLInputElement>(null);
 
   const filteredMaterials = useMemo(() => {
     const query = materialSearch.trim().toLowerCase();
-    if (!query) return materials;
-    return materials.filter((material) =>
-      `${material.title} ${material.attribution} ${material.tags.join(" ")} ${material.entityTags.join(" ")} ${material.rights}`.toLowerCase().includes(query),
-    );
-  }, [materialSearch, materials]);
+    return materials.filter((material) => {
+      const matchesQuery = !query
+        || `${material.title} ${material.attribution} ${material.tags.join(" ")} ${material.entityTags.join(" ")} ${material.rights}`.toLowerCase().includes(query);
+      if (!matchesQuery) return false;
+      if (materialCategory === "all") return true;
+      if (materialCategory === "review") return materialGovernanceView(material).status === "blocked";
+      return materialCategoryFor(material) === materialCategory;
+    });
+  }, [materialCategory, materialSearch, materials]);
   const usableMaterialCount = useMemo(
     () => materials.filter((material) => materialGovernanceView(material).status !== "blocked").length,
     [materials],
@@ -294,6 +311,9 @@ export function AISettingsPage({
         sourceUrl: materialMetadata.sourceUrl?.trim() || undefined,
         evidenceNote: materialMetadata.evidenceNote?.trim() || undefined,
         evidencePath: materialMetadata.evidencePath?.trim() || undefined,
+        licenseId: materialMetadata.licenseId?.trim() || undefined,
+        licenseUrl: materialMetadata.licenseUrl?.trim() || undefined,
+        modificationNote: materialMetadata.modificationNote?.trim() || undefined,
         expiresAt: expiryEndOfDay(materialMetadata.expiresAt),
       };
       if (materialMode === "file" && materialFile) await onUploadMaterial(materialFile, metadata);
@@ -528,6 +548,11 @@ export function AISettingsPage({
               </fieldset>
               <label className="material-evidence-note"><span>授权／来源证据说明</span><textarea rows={3} value={materialMetadata.evidenceNote || ""} onChange={(event) => setMaterialMetadata((current) => ({ ...current, evidenceNote: event.target.value }))} placeholder="如：品牌媒体包许可条款、拍摄者授权说明，或官方发布页中的来源说明" /></label>
               <label><span>证据文件路径</span><input value={materialMetadata.evidencePath || ""} onChange={(event) => setMaterialMetadata((current) => ({ ...current, evidencePath: event.target.value }))} placeholder="本机授权文件路径（可选）" /></label>
+              {materialMetadata.rights === "licensed" ? <>
+                <label><span>许可标识</span><input value={materialMetadata.licenseId || ""} onChange={(event) => setMaterialMetadata((current) => ({ ...current, licenseId: event.target.value }))} placeholder="如：CC-BY-4.0" /></label>
+                <label><span>许可条款 URL</span><input value={materialMetadata.licenseUrl || ""} onChange={(event) => setMaterialMetadata((current) => ({ ...current, licenseUrl: event.target.value }))} placeholder="https://creativecommons.org/licenses/…" /></label>
+                <label className="material-evidence-note"><span>对原图做了什么修改</span><textarea rows={2} value={materialMetadata.modificationNote || ""} onChange={(event) => setMaterialMetadata((current) => ({ ...current, modificationNote: event.target.value }))} placeholder="如：仅缩放，未裁切、调色或叠字" /></label>
+              </> : null}
             </div>
             <div className="material-form-actions"><button type="button" className="secondary-button" onClick={() => { resetMaterialForm(); setMaterialComposerOpen(false); }}>取消</button><button type="button" className="primary-button" disabled={materialBusy || !materialMetadata.title.trim() || (materialMode === "file" ? !materialFile : !materialUrl.trim())} onClick={() => void submitMaterial()}>{materialBusy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />}加入素材库</button></div>
           </div>
@@ -536,6 +561,17 @@ export function AISettingsPage({
         <div className="material-toolbar">
           <label><Search size={15} /><input value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="搜索名称、人物、公司或标签" /></label>
           <span>{materials.length} 张素材 · {usableMaterialCount} 张无阻断</span>
+        </div>
+        <div className="material-filter-tabs" role="group" aria-label="素材类型筛选">
+          {([
+            ["all", "全部"],
+            ["people", "人物"],
+            ["companies", "公司与标识"],
+            ["generic", "通用示意"],
+            ["review", "待处理版权"],
+          ] as const).map(([value, label]) => (
+            <button type="button" key={value} className={materialCategory === value ? "active" : ""} onClick={() => setMaterialCategory(value)}>{label}</button>
+          ))}
         </div>
         {filteredMaterials.length ? (
           <div className="material-grid">
@@ -547,6 +583,7 @@ export function AISettingsPage({
                   <div className="material-card-copy">
                     <strong>{material.title}</strong>
                     <small>{material.attribution}</small>
+                    {material.rights === "licensed" ? <small>{material.licenseId || "许可待补充"}{material.modificationNote ? ` · ${material.modificationNote}` : " · 修改说明待补充"}</small> : null}
                     <div>{material.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
                     <div className={`material-governance-state ${governance.status}`} title={governance.detail}>
                       {governance.status === "allowed" ? <ShieldCheck size={12} /> : <AlertTriangle size={12} />}

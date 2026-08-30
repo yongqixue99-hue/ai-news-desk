@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type {
   AssetCandidate,
   AssignmentMode,
@@ -8,6 +11,17 @@ import type {
   StoryView,
 } from "./product-types.js";
 import { storyById } from "./story-desk.js";
+import { recommendMaterialFallbacks } from "./material-recommendation.js";
+import {
+  inspectLocalImageFile,
+  isLocalImageFileReady,
+  isNeutralImagePublishReady,
+} from "./image-readiness.js";
+import { workflowMediaRoot } from "./storage.js";
+import {
+  evaluateMaterialPublishEligibility,
+  normalizeGovernedMaterial,
+} from "./material-governance.js";
 import type { Candidate, SourceImage, WorkflowState } from "./types.js";
 
 const signalIdFor = (runId: string, candidateId: string) => `${runId}:${candidateId}`;
@@ -128,21 +142,47 @@ const discussionSamplesFor = (state: WorkflowState, story: StoryView): Discussio
   }).slice(0, 80);
 };
 
-const rightsFor = (image: SourceImage): Pick<AssetCandidate, "rightsDecision" | "rightsReason"> => {
-  if (image.rights === "expired") return { rightsDecision: "blocked", rightsReason: "授权或适用期已过期" };
-  if (["official", "licensed", "owned"].includes(image.rights)) {
-    const allowed = image.allowedPlatforms;
-    if (allowed?.length && !allowed.includes("wechat") && !allowed.includes("*")) {
-      return { rightsDecision: "blocked", rightsReason: "现有授权不包含微信公众号" };
-    }
-    return { rightsDecision: "allowed", rightsReason: "权利状态允许进入微信公众号预检" };
+const rightsFor = (
+  image: SourceImage,
+  checkedAt: string,
+): Pick<AssetCandidate, "rightsDecision" | "rightsReason"> => {
+  const governed = normalizeGovernedMaterial({
+    id: image.id,
+    title: image.caption,
+    attribution: image.attribution,
+    rights: image.rights,
+    sourceUrl: image.sourceUrl,
+    evidence: { note: image.evidenceNote, path: image.evidencePath },
+    licenseId: image.licenseId,
+    licenseUrl: image.licenseUrl,
+    modificationNote: image.modificationNote,
+    allowedPlatforms: image.allowedPlatforms ?? (image.rights === "owned" ? ["*"] : []),
+    expiresAt: image.expiresAt,
+    entityTags: image.entityTags,
+    fingerprint: image.fingerprint ?? "",
+    createdAt: checkedAt,
+    localPath: image.localPath,
+    publicPath: image.publicPath,
+  });
+  const decision = evaluateMaterialPublishEligibility(governed, "wechat", checkedAt);
+  const localFile = inspectLocalImageFile(image);
+  const blockers = [
+    ...(localFile.available ? [] : [localFile.reason || "图片本地文件不可用。"]),
+    ...decision.blockers,
+  ];
+  if (blockers.length) {
+    return {
+      rightsDecision: "blocked",
+      rightsReason: [...new Set(blockers)].join("；") || "图片权利信息不完整",
+    };
   }
-  return {
-    rightsDecision: "warning",
-    rightsReason: image.rights === "editorial-screenshot" || image.rights === "commentary-screenshot"
-      ? "编辑截图需要人工确认合理使用范围与图注"
-      : "来源未明确授权，使用前必须人工确认",
-  };
+  if (decision.warnings.length) {
+    return {
+      rightsDecision: "warning",
+      rightsReason: decision.warnings.join("；"),
+    };
+  }
+  return { rightsDecision: "allowed", rightsReason: "权利状态允许进入微信公众号预检" };
 };
 
 const imageRoleFor = (image: SourceImage): AssetCandidate["role"] => {
@@ -153,20 +193,132 @@ const imageRoleFor = (image: SourceImage): AssetCandidate["role"] => {
   return "fact";
 };
 
-const assetsFor = (story: StoryView, claims: EvidenceClaim[]): AssetCandidate[] => story.images.map((image, index) => ({
-  id: `asset_${createHash("sha1").update(`${story.id}:${image.id}:${image.url}`).digest("hex").slice(0, 12)}`,
-  sourceImageId: image.id,
-  url: image.publicPath || image.url,
-  caption: image.caption,
-  attribution: image.attribution,
-  sourceUrl: image.sourceUrl,
-  rights: image.rights,
-  ...rightsFor(image),
-  role: index === 0 ? "cover" : imageRoleFor(image),
-  width: image.width,
-  height: image.height,
-  recommendedAfterClaimId: claims[index % Math.max(1, claims.length)]?.id,
-}));
+const sourceImageSnapshot = (image: SourceImage): SourceImage => {
+  const snapshot: SourceImage = {
+    ...image,
+    allowedPlatforms: image.allowedPlatforms ? [...image.allowedPlatforms] : undefined,
+    entityTags: image.entityTags ? [...image.entityTags] : undefined,
+  };
+  if (isLocalImageFileReady(snapshot)) {
+    const actual = createHash("sha256").update(readFileSync(snapshot.localPath!)).digest("hex");
+    const recorded = snapshot.fingerprint?.trim().toLowerCase() || "";
+    if (recorded && !/^[a-f0-9]{64}$/u.test(recorded)) {
+      throw new Error(`图片 ${snapshot.id} 已记录的指纹格式无效，不能建立素材包`);
+    }
+    if (recorded && recorded !== actual) {
+      throw new Error(`图片 ${snapshot.id} 指纹不一致，文件可能已被替换`);
+    }
+    snapshot.fingerprint = recorded || actual;
+  }
+  return snapshot;
+};
+
+const assetsFor = (
+  story: StoryView,
+  claims: EvidenceClaim[],
+  fallbackImages: SourceImage[] = [],
+  checkedAt = new Date().toISOString(),
+): AssetCandidate[] => [...story.images, ...fallbackImages].map((image, index) => {
+  const sourceImage = sourceImageSnapshot(image);
+  return {
+    id: `asset_${createHash("sha1").update(`${story.id}:${sourceImage.id}:${sourceImage.url}`).digest("hex").slice(0, 12)}`,
+    sourceImageId: sourceImage.id,
+    sourceImage,
+    url: sourceImage.publicPath || sourceImage.url,
+    caption: sourceImage.caption,
+    attribution: sourceImage.attribution,
+    sourceUrl: sourceImage.sourceUrl,
+    rights: sourceImage.rights,
+    ...rightsFor(sourceImage, checkedAt),
+    role: index === 0 ? "cover" : imageRoleFor(sourceImage),
+    width: sourceImage.width,
+    height: sourceImage.height,
+    recommendedAfterClaimId: claims[index % Math.max(1, claims.length)]?.id,
+    origin: sourceImage.id.startsWith("library:") ? "library" : "source",
+    localReady: isLocalImageFileReady(sourceImage),
+  };
+});
+
+const normalizedAssetGovernanceSnapshot = (asset: AssetCandidate) => {
+  const image = asset.sourceImage;
+  return {
+    id: asset.id,
+    sourceImageId: asset.sourceImageId,
+    role: asset.role,
+    recommendedAfterClaimId: asset.recommendedAfterClaimId,
+    origin: asset.origin,
+    localReady: asset.localReady,
+    rightsDecision: asset.rightsDecision,
+    rightsReason: asset.rightsReason,
+    image: {
+      id: image.id,
+      url: image.url,
+      caption: image.caption,
+      attribution: image.attribution,
+      sourceUrl: image.sourceUrl,
+      width: image.width,
+      height: image.height,
+      selected: image.selected,
+      rights: image.rights,
+      evidenceNote: image.evidenceNote,
+      evidencePath: image.evidencePath,
+      licenseId: image.licenseId,
+      licenseUrl: image.licenseUrl,
+      modificationNote: image.modificationNote,
+      allowedPlatforms: [...(image.allowedPlatforms ?? [])].map((item) => item.trim().toLowerCase()).sort(),
+      expiresAt: image.expiresAt,
+      entityTags: [...(image.entityTags ?? [])].map((item) => item.trim()).sort((left, right) => left.localeCompare(right)),
+      fingerprint: image.fingerprint?.trim().toLowerCase(),
+    },
+  };
+};
+
+export interface FreezeContentPackageAssetsOptions {
+  assetRoot?: string;
+}
+
+/**
+ * Copies every local package snapshot into package-owned storage. The package
+ * id is deliberately based on governance/content, not machine-specific paths;
+ * repeated builds therefore reuse the same immutable package directory.
+ */
+export const freezeContentPackageAssets = async (
+  contentPackage: ContentPackage,
+  options: FreezeContentPackageAssetsOptions = {},
+): Promise<ContentPackage> => {
+  const frozen = structuredClone(contentPackage);
+  const packageRoot = path.join(options.assetRoot ?? path.join(workflowMediaRoot, "packages"), frozen.id);
+  for (const asset of frozen.assets) {
+    if (!asset.localReady) continue;
+    const sourceImage = asset.sourceImage;
+    if (!sourceImage?.localPath?.trim() || !sourceImage.publicPath?.trim()) {
+      throw new Error(`素材包图片 ${asset.sourceImageId} 缺少完整本地快照`);
+    }
+    const expected = sourceImage.fingerprint?.trim().toLowerCase() || "";
+    if (!/^[a-f0-9]{64}$/u.test(expected)) {
+      throw new Error(`素材包图片 ${asset.sourceImageId} 缺少有效 SHA-256 指纹`);
+    }
+    const bytes = await readFile(sourceImage.localPath);
+    const actual = createHash("sha256").update(bytes).digest("hex");
+    if (actual !== expected) {
+      throw new Error(`素材包图片 ${asset.sourceImageId} 内容已变化，无法冻结`);
+    }
+    const extension = path.extname(sourceImage.localPath).toLowerCase();
+    const safeExtension = [".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(extension)
+      ? (extension === ".jpeg" ? ".jpg" : extension)
+      : ".jpg";
+    const safeId = sourceImage.id.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 64) || "image";
+    const fileName = `${safeId}-${expected.slice(0, 16)}${safeExtension}`;
+    await mkdir(packageRoot, { recursive: true });
+    const localPath = path.join(packageRoot, fileName);
+    await writeFile(localPath, bytes);
+    const publicPath = `/media/packages/${encodeURIComponent(frozen.id)}/${encodeURIComponent(fileName)}`;
+    asset.sourceImage = { ...sourceImage, localPath, publicPath, fingerprint: expected };
+    asset.url = publicPath;
+    asset.localReady = true;
+  }
+  return frozen;
+};
 
 const communityEvidenceLabelFor = (samples: DiscussionSample[]) => {
   const authors = new Set(samples.map((sample) => sample.author));
@@ -209,7 +361,15 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
   const discussionSamples = input.discussionSamples?.length
     ? input.discussionSamples
     : discussionSamplesFor(state, story);
-  const assets = assetsFor(story, facts);
+  const publishableLocalCount = story.images.filter((image) =>
+    isNeutralImagePublishReady(image, now)).length;
+  const fallbackImages = recommendMaterialFallbacks(
+    state.materials,
+    story,
+    Math.max(0, 2 - publishableLocalCount),
+    now,
+  );
+  const assets = assetsFor(story, facts, fallbackImages, now);
   const blockers = [...story.assignment.blockers];
   if (!facts.some((claim) => claim.status === "supported" || claim.status === "partially-supported")) {
     blockers.push("没有可用于写作的正文级事实");
@@ -221,7 +381,11 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
   if (assets.some((asset) => asset.rightsDecision === "warning")) uncertainties.push("部分图片需要人工确认权利状态");
   if (assets.some((asset) => asset.rightsDecision === "blocked")) uncertainties.push("存在不能同步微信公众号的图片，预检时会自动排除");
   const sourceFingerprint = story.signals.map((signal) => `${signal.runId}:${signal.candidateId}:${signal.fetchedAt}`).sort().join("|");
-  const id = `package_${createHash("sha256").update(`${story.id}:${mode}:${sourceFingerprint}`).digest("hex").slice(0, 18)}`;
+  const assetFingerprint = createHash("sha256")
+    .update(JSON.stringify(assets.map(normalizedAssetGovernanceSnapshot)
+      .sort((left, right) => left.id.localeCompare(right.id))))
+    .digest("hex");
+  const id = `package_${createHash("sha256").update(`${story.id}:${mode}:${sourceFingerprint}:${assetFingerprint}`).digest("hex").slice(0, 18)}`;
   return {
     id,
     storyId: story.id,

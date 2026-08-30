@@ -8,7 +8,7 @@ import {
   launchPublisherChrome,
   publisherStatus as cdpPublisherStatus,
 } from "./publisher.js";
-import type { PublisherStatus, Settings } from "./types.js";
+import type { ArticleDraft, PublisherStatus, Settings } from "./types.js";
 
 type PublisherSettings = Pick<
   Settings,
@@ -36,9 +36,22 @@ export const openPublisher = async (settings: PublisherSettings) => {
   return { mode: "cdp" as const, ok: status.ok, detail: status.detail };
 };
 
-export const fillDraftInPublisher = async (draftId: string, settings: PublisherSettings) => {
+export const fillDraftInPublisher = async (
+  draftSnapshot: ArticleDraft,
+  expectedRevisionHash: string,
+  settings: PublisherSettings,
+) => {
   if (settings.publisherMode === "chrome-extension") {
-    return fillViaChromeExtension(draftId, settings.xiaoheiheEditorUrl);
+    return fillViaChromeExtension(
+      draftSnapshot,
+      expectedRevisionHash,
+      settings.xiaoheiheEditorUrl,
+    );
   }
-  return fillViaCdp(draftId, settings.chromeDebugPort, settings.xiaoheiheEditorUrl);
+  return fillViaCdp(
+    draftSnapshot,
+    expectedRevisionHash,
+    settings.chromeDebugPort,
+    settings.xiaoheiheEditorUrl,
+  );
 };

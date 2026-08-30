@@ -58,10 +58,48 @@ test("source health separates successful yield from a quiet collection window", 
   const results = sourceResultsForRun(sources, rawItems, [candidate("openai-1")]);
   assert.deepEqual(results.map(({ sourceId, status, healthImpact, rawCount, candidateCount }) => ({ sourceId, status, healthImpact, rawCount, candidateCount })), [
     { sourceId: "openai", status: "healthy", healthImpact: "success", rawCount: 1, candidateCount: 1 },
-    { sourceId: "bbc", status: "healthy", healthImpact: "success", rawCount: 1, candidateCount: 0 },
-    { sourceId: "hn", status: "warning", healthImpact: "neutral", rawCount: 0, candidateCount: 0 },
+    { sourceId: "bbc", status: "warning", healthImpact: "success", rawCount: 1, candidateCount: 0 },
+    { sourceId: "hn", status: "warning", healthImpact: "success", rawCount: 0, candidateCount: 0 },
   ]);
-  assert.match(results[2].detail, /不计为失败/);
+  assert.match(results[0].detail, /连接与解析正常/);
+  assert.match(results[1].detail, /没有窗口内候选/);
+  assert.match(results[2].detail, /不判为连接故障/);
+});
+
+test("old parsed entries do not make a source fully healthy when none survive the current window", () => {
+  const target = source("archive", "旧条目来源", "rss");
+  const [result] = sourceResultsForRun(
+    [target],
+    [item("old-1", "rss", target.name), item("old-2", "rss", target.name)],
+    [],
+  );
+
+  assert.equal(result.status, "warning");
+  assert.equal(result.healthImpact, "success");
+  assert.equal(result.rawCount, 2);
+  assert.equal(result.candidateCount, 0);
+  assert.match(result.detail, /发布时间、日期\/关键词、去重或当前主题频道/);
+});
+
+test("consecutive zero yield explains likely editorial causes without reporting an outage", () => {
+  const target = source("quiet", "安静来源", "rss");
+  target.health = "warning";
+  target.lastCheckedAt = "2026-08-30T10:00:00.000Z";
+  target.lastRawCount = 4;
+  target.lastCandidateCount = 0;
+  target.consecutiveFailures = 2;
+
+  const [result] = sourceResultsForRun([target], [], []);
+  assert.equal(result.status, "warning");
+  assert.equal(result.healthImpact, "success");
+  assert.match(result.detail, /连续多轮/);
+  assert.match(result.detail, /主题\/频道路由/);
+  assert.match(result.detail, /不判为连接故障/);
+
+  applySourceRunResult(target, result, "2026-08-31T10:00:00.000Z");
+  assert.equal(target.health, "warning");
+  assert.equal(target.lastSuccessfulAt, "2026-08-31T10:00:00.000Z");
+  assert.equal(target.consecutiveFailures, 0);
 });
 
 test("a connector-specific failure is reported without marking unrelated sources as failed", () => {
@@ -75,7 +113,9 @@ test("a connector-specific failure is reported without marking unrelated sources
 
   assert.equal(results[0].status, "error");
   assert.match(results[0].detail, /尚未登录/);
-  assert.equal(results[1].status, "healthy");
+  assert.equal(results[1].status, "warning");
+  assert.equal(results[1].healthImpact, "success");
+  assert.match(results[1].detail, /连接与解析正常/);
   assert.doesNotMatch(results[1].detail, /知乎/);
 });
 

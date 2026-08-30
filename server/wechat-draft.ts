@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import { evaluateDraftReadiness } from "./draft-readiness.js";
-import { normalizedDraftBodyHtml } from "./article-html.js";
+import { bodyHtmlWithRequiredImageAttribution } from "./article-html.js";
 import type {
   ArticleDraft,
   DraftImagePlacement,
@@ -113,8 +113,9 @@ export const createWeChatDraftDesk = (
     const digest = input.digest?.trim() ?? "";
     assertDraftMetadata(input.draft, author, digest);
 
+    const deliveryBodyHtml = bodyHtmlWithRequiredImageAttribution(input.draft);
     const $ = cheerio.load(
-      `<article id="wechat-article">${normalizedDraftBodyHtml(input.draft)}</article>`,
+      `<article id="wechat-article">${deliveryBodyHtml}</article>`,
       null,
       false,
     );
@@ -141,7 +142,7 @@ export const createWeChatDraftDesk = (
       author,
       digest,
       contentSourceUrl: input.contentSourceUrl?.trim() ?? "",
-      bodyHtml: normalizedDraftBodyHtml(input.draft),
+      bodyHtml: deliveryBodyHtml,
       images: usedPlacements.map((placement) => ({
         id: placement.id,
         fingerprint: imageFingerprint(assets.get(placement.id)!),

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "ai-news-x-source-watchlist/v1",
+  "reviewedAt": "2026-08-31T00:00:00.000Z",
+  "policy": {
+    "purpose": "一手新闻线索和原帖引用；不是可直接转载的图片授权库。",
+    "mediaRights": "check-required",
+    "downloadMediaByDefault": false,
+    "rules": [
+      "账号句柄可能变化，启用前应再次核对官网或认证信息。",
+      "X 帖子中的图片只保存原帖 URL 和作者信息，不自动宣称可商用。",
+      "只有明确附带可复用许可或另行取得授权的图片，才可转为 licensed。",
+      "文章优先嵌入或链接原帖；确需截图时按评论性引用处理并保留证据。"
+    ]
+  },
+  "accounts": [
+    { "entity": "OpenAI", "handle": "OpenAI", "profileUrl": "https://x.com/OpenAI", "kind": "company", "verificationStatus": "manual-review-before-enable" },
+    { "entity": "Anthropic", "handle": "AnthropicAI", "profileUrl": "https://x.com/AnthropicAI", "kind": "company", "verificationStatus": "manual-review-before-enable" },
+    { "entity": "Google DeepMind", "handle": "GoogleDeepMind", "profileUrl": "https://x.com/GoogleDeepMind", "kind": "company", "verificationStatus": "manual-review-before-enable" },
+    { "entity": "NVIDIA", "handle": "nvidia", "profileUrl": "https://x.com/nvidia", "kind": "company", "verificationStatus": "manual-review-before-enable" },
+    { "entity": "Meta AI", "handle": "AIatMeta", "profileUrl": "https://x.com/AIatMeta", "kind": "company", "verificationStatus": "manual-review-before-enable" },
+    { "entity": "Microsoft AI", "handle": "MicrosoftAI", "profileUrl": "https://x.com/MicrosoftAI", "kind": "company", "verificationStatus": "manual-review-before-enable" },
+    { "entity": "xAI", "handle": "xai", "profileUrl": "https://x.com/xai", "kind": "company", "verificationStatus": "manual-review-before-enable" },
+    { "entity": "Sam Altman", "handle": "sama", "profileUrl": "https://x.com/sama", "kind": "person", "verificationStatus": "manual-review-before-enable" },
+    { "entity": "Demis Hassabis", "handle": "demishassabis", "profileUrl": "https://x.com/demishassabis", "kind": "person", "verificationStatus": "manual-review-before-enable" }
+  ]
+}

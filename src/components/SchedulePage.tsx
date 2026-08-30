@@ -21,11 +21,13 @@ interface SchedulePageProps {
   onTestWeChatConnection: () => Promise<WeChatConnectionResult>;
 }
 
+const displayRunStage = (stage: string) => stage.replace("生成中文速读", "生成中文摘要");
+
 const scheduledStatus = (run?: WorkflowRun) => {
   if (!run) return "还没有定时运行记录";
-  if (["queued", "collecting", "scoring", "extracting"].includes(run.status)) return `正在运行 · ${run.stage}`;
+  if (["queued", "collecting", "scoring", "extracting"].includes(run.status)) return `正在运行 · ${displayRunStage(run.stage)}`;
   if (run.status === "generating") return "正在自动成稿";
-  if (run.status === "failed") return `失败 · ${run.error ?? run.stage}`;
+  if (run.status === "failed") return `失败 · ${run.error ?? displayRunStage(run.stage)}`;
   if (run.status === "cancelled") return "已取消";
   if (!run.candidates.length) return "已完成 · 未找到候选";
   return `已完成 · ${run.candidates.length} 条候选`;

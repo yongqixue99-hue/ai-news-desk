@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   Archive,
   BrainCircuit,
   Check,
   CheckCircle2,
+  ChevronRight,
   Cloud,
   Columns2,
   Copy,
@@ -38,9 +39,18 @@ import {
   textFromHtml,
 } from "../editor-utils";
 import { applyOptimizationChanges, applyOptimizationChangesToHtml } from "../optimization-patches";
+import {
+  clearDraftRecoverySnapshot,
+  editableDraftContent,
+  persistDraftRecoverySnapshot,
+  restoreDraftFromRecovery,
+  switchDraftSafely,
+} from "../draft-stability";
 import { RichArticleEditor, type RichArticleEditorHandle } from "./RichArticleEditor";
 import { WeChatDraftPanel } from "./WeChatDraftPanel";
 import { draftStatusLabel, manualDraftStatuses } from "../draft-lifecycle-view";
+import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
+import { getRovingTabTarget } from "../hooks/rovingTabs";
 import type {
   ArticleDraft,
   AiProviderConfig,
@@ -57,6 +67,7 @@ import type {
   PublisherPreflightResult,
   PublishedImagePromotionPublicStatus,
   PublisherStatus,
+  PlatformPublicationConfirmation,
   WeChatChannelSettings,
   WeChatDraftSyncReceipt,
 } from "../types";
@@ -72,6 +83,8 @@ interface DraftWorkspaceProps {
   wechatSettings: WeChatChannelSettings;
   recentTopics: string[];
   recentCommunities: string[];
+  onGoToday: () => void;
+  onOpenWorkbench: () => void;
   onSelectDraft: (draftId: string) => void;
   onSave: (draftId: string, patch: Partial<ArticleDraft>, saveMode: DraftSaveMode) => Promise<ArticleDraft>;
   onLoadRevisions: (draftId: string) => Promise<DraftRevision[]>;
@@ -107,7 +120,7 @@ interface DraftWorkspaceProps {
     draftId: string,
     input: { author?: string; digest?: string; contentSourceUrl?: string },
   ) => Promise<WeChatDraftSyncReceipt | undefined>;
-  onConfirmPublished: (draftId: string, platform: PublishPlatform) => Promise<void>;
+  onConfirmPublished: (draftId: string, platform: PublishPlatform) => Promise<PlatformPublicationConfirmation>;
 }
 
 type ViewMode = "edit" | "split" | "preview";
@@ -189,6 +202,8 @@ export function DraftWorkspace({
   wechatSettings,
   recentTopics,
   recentCommunities,
+  onGoToday,
+  onOpenWorkbench,
   onSelectDraft,
   onSave,
   onLoadRevisions,
@@ -226,6 +241,8 @@ export function DraftWorkspace({
   const [saving, setSaving] = useState(false);
   const [savingMode, setSavingMode] = useState<DraftSaveMode>();
   const [dirty, setDirty] = useState(false);
+  const [switchingDraftId, setSwitchingDraftId] = useState<string>();
+  const [recoveryMessage, setRecoveryMessage] = useState("");
   const [editVersion, setEditVersion] = useState(0);
   const [lastSavedAt, setLastSavedAt] = useState(selected?.updatedAt ?? "");
   const [lastSaveMode, setLastSaveMode] = useState<DraftSaveMode>();
@@ -256,15 +273,21 @@ export function DraftWorkspace({
   const richEditor = useRef<RichArticleEditorHandle>(null);
   const drawerFileInput = useRef<HTMLInputElement>(null);
   const editingRef = useRef<ArticleDraft | undefined>(editing);
+  const dirtyRef = useRef(false);
   const editVersionRef = useRef(0);
   const activeSaveRef = useRef<Promise<ArticleDraft> | null>(null);
+  const bestEffortFlushStartedRef = useRef(false);
   const saveHandlerRef = useRef(onSave);
   const revisionLoaderRef = useRef(onLoadRevisions);
   const agentThreadLoaderRef = useRef(onLoadAgentThreads);
   const publishedImageStatusLoaderRef = useRef(onLoadPublishedImageMaterialStatuses);
+  const utilityTabListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const next = editableDraft(selected);
+    const recovered = selected
+      ? restoreDraftFromRecovery(window.localStorage, selected)
+      : undefined;
+    const next = editableDraft(recovered ?? selected);
     editingRef.current = next;
     setEditing(next);
     setFillResult(selected?.fillResult);
@@ -275,7 +298,9 @@ export function DraftWorkspace({
     setPublishedImageStatusLoading(false);
     setPublishedImageSavingId(undefined);
     setPublishedImageError("");
-    setDirty(false);
+    dirtyRef.current = Boolean(recovered);
+    setDirty(Boolean(recovered));
+    setRecoveryMessage(recovered ? "已恢复上次关闭前的修改，将自动保存" : "");
     setSaveError("");
     setLastSavedAt(selected?.updatedAt ?? "");
     setLastSaveMode(undefined);
@@ -346,31 +371,28 @@ export function DraftWorkspace({
     setSaving(true);
     setSavingMode(mode);
     setSaveError("");
-    const operation = saveHandlerRef.current(current.id, {
-      title: current.title,
-      paragraphs: current.paragraphs,
-      take: current.take,
-      bodyHtml: current.bodyHtml,
-      layoutTheme: current.layoutTheme,
-      images: current.images,
-      sources: current.sources,
-      factClaims: current.factClaims,
-      uncertainties: current.uncertainties,
-      community: current.community,
-      topics: current.topics,
-      status: current.status,
-    }, mode);
+    const operation = saveHandlerRef.current(current.id, editableDraftContent(current), mode);
     activeSaveRef.current = operation;
     try {
       const saved = await operation;
-      setEditing((value) => value?.id === saved.id ? { ...value, updatedAt: saved.updatedAt } : value);
+      setEditing((value) => {
+        if (value?.id !== saved.id) return value;
+        const next = { ...value, updatedAt: saved.updatedAt };
+        editingRef.current = next;
+        return next;
+      });
       setLastSavedAt(saved.updatedAt);
       setLastSaveMode(mode);
       if (editingRef.current?.id === saved.id && editVersionRef.current === versionAtStart) {
+        dirtyRef.current = false;
         setDirty(false);
+        setRecoveryMessage("");
+        clearDraftRecoverySnapshot(window.localStorage, saved.id);
       }
       return saved;
     } catch (error) {
+      const latest = editingRef.current;
+      if (latest) persistDraftRecoverySnapshot(window.localStorage, latest);
       setSaveError(mode === "auto" ? "自动保存失败，内容仍在当前页面" : "保存失败，请重试");
       throw error;
     } finally {
@@ -386,6 +408,64 @@ export function DraftWorkspace({
     }, 1_100);
     return () => window.clearTimeout(timer);
   }, [dirty, editVersion, save, saving]);
+
+  useEffect(() => {
+    if (!dirty || !editing) return;
+    persistDraftRecoverySnapshot(window.localStorage, editing);
+  }, [dirty, editVersion, editing]);
+
+  useEffect(() => {
+    const persistCurrent = () => {
+      const current = editingRef.current;
+      if (!current || !dirtyRef.current) return undefined;
+      persistDraftRecoverySnapshot(window.localStorage, current);
+      return current;
+    };
+
+    const flushBestEffort = () => {
+      const snapshot = persistCurrent();
+      if (!snapshot || bestEffortFlushStartedRef.current) return;
+      bestEffortFlushStartedRef.current = true;
+      const pending = activeSaveRef.current;
+      const waitForPending = pending
+        ? pending.then(() => undefined, () => undefined)
+        : Promise.resolve();
+      void waitForPending.then(async () => {
+        if (!dirtyRef.current) return;
+        const current = editingRef.current;
+        if (!current) return;
+        const versionAtStart = editVersionRef.current;
+        try {
+          await saveHandlerRef.current(current.id, editableDraftContent(current), "auto");
+          if (editingRef.current?.id === current.id && editVersionRef.current === versionAtStart) {
+            dirtyRef.current = false;
+            clearDraftRecoverySnapshot(window.localStorage, current.id);
+          }
+        } catch {
+          persistDraftRecoverySnapshot(window.localStorage, editingRef.current ?? current);
+        }
+      }).finally(() => {
+        bestEffortFlushStartedRef.current = false;
+      });
+    };
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      persistCurrent();
+      flushBestEffort();
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const handlePageHide = () => flushBestEffort();
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handlePageHide);
+      flushBestEffort();
+    };
+  }, []);
 
   useEffect(() => {
     const draftId = editing?.id;
@@ -414,7 +494,10 @@ export function DraftWorkspace({
 
   useEffect(() => {
     const draftId = editing?.id;
-    if (utilityTab !== "publish" || !draftId || !editing?.publicationConfirmedAt) return;
+    const xiaoheiheConfirmation = editing
+      ? currentPlatformPublicationConfirmation(editing, "xiaoheihe")
+      : undefined;
+    if (utilityTab !== "publish" || !draftId || !xiaoheiheConfirmation) return;
     let active = true;
     setPublishedImageStatusLoading(true);
     setPublishedImageError("");
@@ -425,7 +508,7 @@ export function DraftWorkspace({
       })
       .finally(() => { if (active) setPublishedImageStatusLoading(false); });
     return () => { active = false; };
-  }, [editing?.id, editing?.publicationConfirmedAt, utilityTab]);
+  }, [editing?.id, editing?.publicationConfirmations?.xiaoheihe, utilityTab]);
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -449,18 +532,59 @@ export function DraftWorkspace({
         <div className="large-empty-state">
           <Cloud size={35} />
           <h2>还没有草稿</h2>
-          <p>回到今日工作台，采集候选、勾选新闻，再点击“生成所选文章”。</p>
+          <p>可以从今日事件推荐采用一条新闻，也可以到新闻工作台粘贴链接或上传截图。</p>
+          <div className="draft-empty-actions">
+            <button type="button" className="primary-button" onClick={onGoToday}>去今日选题</button>
+            <button type="button" className="secondary-button" onClick={onOpenWorkbench}>截图／链接成稿</button>
+          </div>
         </div>
       </div>
     );
   }
 
   const updateEditing = (patch: Partial<ArticleDraft>) => {
-    setEditing((current) => current ? { ...current, ...patch } : current);
+    setEditing((current) => {
+      if (!current) return current;
+      const next = { ...current, ...patch };
+      editingRef.current = next;
+      return next;
+    });
     editVersionRef.current += 1;
     setEditVersion(editVersionRef.current);
+    dirtyRef.current = true;
     setDirty(true);
     setSaveError("");
+  };
+
+  const selectDraft = async (draftId: string) => {
+    if (draftId === editing.id) {
+      setDraftLibraryOpen(false);
+      return;
+    }
+    if (switchingDraftId) return;
+    setSwitchingDraftId(draftId);
+    setSaveError("");
+    try {
+      await switchDraftSafely({
+        targetDraftId: draftId,
+        hasDirtyChanges: () => dirtyRef.current || Boolean(activeSaveRef.current),
+        flush: async () => {
+          const pending = activeSaveRef.current;
+          if (pending) await pending;
+          if (dirtyRef.current) await save("manual");
+        },
+        select: (nextDraftId) => {
+          onSelectDraft(nextDraftId);
+          setDraftLibraryOpen(false);
+        },
+      });
+    } catch {
+      const current = editingRef.current;
+      if (current) persistDraftRecoverySnapshot(window.localStorage, current);
+      setSaveError("切换前保存失败，仍停留在当前草稿；请检查连接后重试");
+    } finally {
+      setSwitchingDraftId(undefined);
+    }
   };
 
   const copy = async () => {
@@ -493,18 +617,30 @@ export function DraftWorkspace({
 
   const uploadImage = async (file: File) => {
     const placement = await onUploadImage(editing.id, file);
-    setEditing((current) => current ? { ...current, images: [...current.images, placement] } : current);
+    setEditing((current) => {
+      if (!current) return current;
+      const next = { ...current, images: [...current.images, placement] };
+      editingRef.current = next;
+      return next;
+    });
     editVersionRef.current += 1;
     setEditVersion(editVersionRef.current);
+    dirtyRef.current = true;
     setDirty(true);
     return placement;
   };
 
   const importImage = async (url: string, caption?: string) => {
     const placement = await onImportImage(editing.id, url, caption);
-    setEditing((current) => current ? { ...current, images: [...current.images, placement] } : current);
+    setEditing((current) => {
+      if (!current) return current;
+      const next = { ...current, images: [...current.images, placement] };
+      editingRef.current = next;
+      return next;
+    });
     editVersionRef.current += 1;
     setEditVersion(editVersionRef.current);
+    dirtyRef.current = true;
     setDirty(true);
     return placement;
   };
@@ -529,9 +665,15 @@ export function DraftWorkspace({
     setImageError("");
     try {
       const placement = await onInsertMaterial(editing.id, material.id);
-      setEditing((current) => current ? { ...current, images: [...current.images, placement] } : current);
+      setEditing((current) => {
+        if (!current) return current;
+        const next = { ...current, images: [...current.images, placement] };
+        editingRef.current = next;
+        return next;
+      });
       editVersionRef.current += 1;
       setEditVersion(editVersionRef.current);
+      dirtyRef.current = true;
       setDirty(true);
       insertImage(placement);
     } catch (error) {
@@ -609,8 +751,9 @@ export function DraftWorkspace({
           fillResult: result,
           publisherReceipt: result.receipt,
           status: result.ok ? "filled" as const : "editing" as const,
-          publicationConfirmedAt: result.ok ? undefined : current.publicationConfirmedAt,
-          publicationReceiptId: result.ok ? undefined : current.publicationReceiptId,
+          publicationConfirmations: result.ok
+            ? withoutPlatformPublicationConfirmation(current, "xiaoheihe")
+            : current.publicationConfirmations,
         };
         editingRef.current = next;
         return next;
@@ -623,7 +766,14 @@ export function DraftWorkspace({
     if (receipt) {
       setEditing((current) => {
         if (!current) return current;
-        const next = { ...current, wechatDraft: receipt };
+        const currentWechatConfirmation = currentPlatformPublicationConfirmation(current, "wechat");
+        const next = {
+          ...current,
+          wechatDraft: receipt,
+          publicationConfirmations: currentWechatConfirmation?.revisionHash === receipt.revisionHash
+            ? current.publicationConfirmations
+            : withoutPlatformPublicationConfirmation(current, "wechat"),
+        };
         editingRef.current = next;
         return next;
       });
@@ -634,17 +784,18 @@ export function DraftWorkspace({
   const confirmPublication = async (platform: PublishPlatform) => {
     setConfirmingPublication(true);
     try {
-      await onConfirmPublished(editing.id, platform);
-      const confirmedAt = new Date().toISOString();
+      const confirmation = await onConfirmPublished(editing.id, platform);
       setEditing((current) => {
         if (!current) return current;
         const next = {
           ...current,
           status: "published" as const,
-          publicationConfirmedAt: confirmedAt,
-          publicationReceiptId: platform === "wechat"
-            ? current.wechatDraft?.mediaId
-            : fillResult?.receipt?.attemptId ?? current.publisherReceipt?.attemptId,
+          publicationConfirmations: {
+            ...(current.publicationConfirmations ?? {}),
+            [platform]: confirmation,
+          },
+          publicationConfirmedAt: confirmation.confirmedAt,
+          publicationReceiptId: confirmation.receiptId,
         };
         editingRef.current = next;
         return next;
@@ -684,7 +835,10 @@ export function DraftWorkspace({
       setEditing(next);
       editVersionRef.current += 1;
       setEditVersion(editVersionRef.current);
+      dirtyRef.current = false;
       setDirty(false);
+      setRecoveryMessage("");
+      clearDraftRecoverySnapshot(window.localStorage, result.draft.id);
       setSaveError("");
       setLastSavedAt(result.draft.updatedAt);
       setLastSaveMode("manual");
@@ -866,7 +1020,9 @@ export function DraftWorkspace({
     [...recentCommunityOptions, ...popularCommunityOptions],
     editing.community,
   ) ? editing.community : undefined;
-  const rememberedPublication = Boolean(editing.publicationConfirmedAt);
+  const xiaoheihePublication = dirty ? undefined : currentPlatformPublicationConfirmation(editing, "xiaoheihe");
+  const wechatPublication = dirty ? undefined : currentPlatformPublicationConfirmation(editing, "wechat");
+  const rememberedPublication = Boolean(xiaoheihePublication);
   const loginRequired = Boolean(fillResult?.steps.some((step) => step.name === "登录" && !step.ok));
   const publishMetadataReady = Boolean(fillResult?.ok && ["分区", "话题"].every(
     (name) => fillResult.steps.find((step) => step.name === name)?.ok === true,
@@ -879,12 +1035,14 @@ export function DraftWorkspace({
     { label: editing.uncertainties.length ? `${editing.uncertainties.length} 项事实待确认` : "没有未解决的事实项", ok: editing.uncertainties.length === 0 },
     { label: uncheckedImageCount ? `${uncheckedImageCount} 张图片版权待确认` : "图片来源标注已检查", ok: uncheckedImageCount === 0 },
   ];
-  const saveStateText = saving
+  const saveStateText = switchingDraftId
+    ? "正在保存并切换草稿…"
+    : saving
     ? savingMode === "auto" ? "正在自动保存…" : "正在保存…"
     : saveError
       ? saveError
       : dirty
-        ? "将在 1 秒后自动保存"
+        ? recoveryMessage || "将在 1 秒后自动保存"
         : lastSaveMode === "auto"
           ? `已自动保存 ${formatSaved(lastSavedAt || editing.updatedAt)}`
           : `已保存 ${formatSaved(lastSavedAt || editing.updatedAt)}`;
@@ -910,6 +1068,38 @@ export function DraftWorkspace({
       : uncheckedImageCount
         ? `可以填入，但发布前还有 ${uncheckedImageCount} 张图片需要确认转载权限。`
         : "检查已通过；只填入编辑器，不会自动发布。";
+  const passedReadinessCount = readiness.filter((item) => item.ok).length;
+  const nextAction = weakFactClaims.length || editing.uncertainties.length || verifiedSourceCount < editing.sources.length
+    ? {
+        tab: "sources" as const,
+        label: `核验 ${weakFactClaims.length + editing.uncertainties.length + Math.max(0, editing.sources.length - verifiedSourceCount)} 项事实与来源`,
+        detail: "先处理证据不足和待确认事实，再进入发布检查。",
+        action: "打开资料核验",
+      }
+    : uncheckedImageCount || insertedMediaIds.size === 0
+      ? {
+          tab: "images" as const,
+          label: uncheckedImageCount ? `确认 ${uncheckedImageCount} 张图片权限` : "为正文加入一张合格来源图",
+          detail: "发布前需要至少一张正文图，并确认图片转载边界。",
+          action: "打开图片面板",
+        }
+      : {
+          tab: "publish" as const,
+          label: publisherReady ? "完成平台检查并填入编辑器" : "连接发布渠道",
+          detail: publisherReady ? "事实与图片已经通过本地检查，下一步核对平台兼容性。" : publishGuidance,
+          action: publisherReady ? "打开发布检查" : "查看连接状态",
+        };
+  const handleUtilityTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!utilityTab) return;
+    const currentIndex = utilityTabs.findIndex((tab) => tab.id === utilityTab);
+    const nextIndex = getRovingTabTarget(utilityTabs.length, currentIndex, event.key);
+    if (nextIndex === null) return;
+    event.preventDefault();
+    setUtilityTab(utilityTabs[nextIndex].id);
+    window.requestAnimationFrame(() => {
+      utilityTabListRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus();
+    });
+  };
 
   const editorPane = (
     <section className="draft-pane editor-pane" aria-label="正文编辑区">
@@ -1011,6 +1201,21 @@ export function DraftWorkspace({
         </div>
       </header>
 
+      <section className={`draft-next-action next-${nextAction.tab}`} aria-label="当前草稿的下一步">
+        <div className="draft-next-action-copy">
+          <span>下一步</span>
+          <strong>{nextAction.label}</strong>
+          <small>{nextAction.detail}</small>
+        </div>
+        <div className="draft-readiness-summary" aria-label={`发布准备 ${passedReadinessCount}/${readiness.length}`}>
+          <span>事实 {factClaims.length - weakFactClaims.length}/{factClaims.length || 0}</span>
+          <span>图片 {insertedMediaIds.size} 张</span>
+          <span>微信 {wechatPublication ? "已发布" : editing.publicationConfirmations?.wechat?.staleAt ? "新版本待同步" : editing.wechatDraft ? "已同步" : "未同步"}</span>
+          <span>小黑盒 {xiaoheihePublication ? "已发布" : editing.publicationConfirmations?.xiaoheihe?.staleAt ? "新版本待填入" : editing.publisherReceipt ? "已填入" : "未填入"}</span>
+        </div>
+        <button type="button" className="secondary-button" onClick={() => setUtilityTab(nextAction.tab)}>{nextAction.action}<ChevronRight size={14} /></button>
+      </section>
+
       {editing.sourceMaterial ? (
         <div className="source-material-banner" role="note">
           <ShieldAlert size={17} />
@@ -1038,7 +1243,8 @@ export function DraftWorkspace({
                 <button
                   key={draft.id}
                   className={draft.id === editing.id ? "draft-list-item active" : "draft-list-item"}
-                  onClick={() => onSelectDraft(draft.id)}
+                  disabled={Boolean(switchingDraftId)}
+                  onClick={() => void selectDraft(draft.id)}
                 >
                   <span className="draft-source">{draft.sources[0]?.label ?? "AI 新闻"}</span>
                   <strong>{draft.title}</strong>
@@ -1082,15 +1288,15 @@ export function DraftWorkspace({
         </nav>
 
         {utilityTab ? (
-          <aside className="draft-utility-drawer" aria-label={`${utilityTabs.find((tab) => tab.id === utilityTab)?.label}面板`}>
+          <aside id="draft-utility-panel" className="draft-utility-drawer" role="tabpanel" aria-label={`${utilityTabs.find((tab) => tab.id === utilityTab)?.label}面板`}>
             <div className="drawer-title-row utility-drawer-title">
               <div><strong>{utilityHeading.title}</strong><span>{utilityHeading.subtitle}</span></div>
               <button aria-label="关闭右侧面板" onClick={() => setUtilityTab(null)}><X size={16} /></button>
             </div>
 
-            <div className="utility-tab-list" role="tablist" aria-label="辅助工具分类">
+            <div ref={utilityTabListRef} className="utility-tab-list" role="tablist" aria-label="辅助工具分类" onKeyDown={handleUtilityTabKeyDown}>
               {utilityTabs.map((tab) => (
-                <button key={tab.id} role="tab" aria-selected={utilityTab === tab.id} className={utilityTab === tab.id ? "active" : ""} onClick={() => setUtilityTab(tab.id)}>{tab.label}</button>
+                <button key={tab.id} role="tab" tabIndex={utilityTab === tab.id ? 0 : -1} aria-selected={utilityTab === tab.id} aria-controls="draft-utility-panel" className={utilityTab === tab.id ? "active" : ""} onClick={() => setUtilityTab(tab.id)}>{tab.label}</button>
               ))}
             </div>
 
@@ -1309,10 +1515,10 @@ export function DraftWorkspace({
                     <div className="inspector-image-grid material-inspector-grid">
                       {materials.filter((material) => {
                         const query = materialSearch.trim().toLowerCase();
-                        return !query || `${material.title} ${material.attribution} ${material.tags.join(" ")}`.toLowerCase().includes(query);
+                        return !query || `${material.title} ${material.attribution} ${material.tags.join(" ")} ${material.entityTags.join(" ")}`.toLowerCase().includes(query);
                       }).map((material) => (
                         <button key={material.id} className="inspector-image material-inspector-item" disabled={Boolean(materialBusyId)} title={`插入到当前光标 · ${material.attribution}`} onClick={() => void addMaterial(material)}>
-                          <img src={material.publicPath} alt="" />
+                          <img src={material.publicPath} alt={material.title} />
                           <span>{material.title}</span>
                           <small>{materialBusyId === material.id ? "正在复制…" : material.rights === "check-required" ? "插入 · 权限待确认" : "一键插入"}</small>
                         </button>
@@ -1533,7 +1739,7 @@ export function DraftWorkspace({
                       ) : null}
                     </section>
                   ) : null}
-                  {editing.publicationConfirmedAt ? (
+                  {xiaoheihePublication ? (
                     <section className="utility-section published-material-section">
                       <div className="inspector-heading">
                         <h3><Archive size={14} />发布配图沉淀</h3>

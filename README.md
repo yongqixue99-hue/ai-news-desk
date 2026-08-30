@@ -134,7 +134,7 @@ npm run start
 
 1. 在 [X Developer Console](https://developer.x.com/) 创建可读取公开帖子的应用，取得 API v2 Bearer Token；X 的开发者访问和搜索接口可能按当前套餐或用量计费。
 2. 打开“新闻源”，在“X 官方账号采集”中粘贴 Bearer Token，点击“保存并启用 X 官方源”。Token 在 Windows 使用当前用户 DPAPI、在 macOS 使用钥匙串，不写入 `.workflow/`、日志或导出备份。
-3. 默认白名单是 `OpenAI, AnthropicAI, GoogleDeepMind`。可以编辑或新增 X 来源，用逗号填写其他官方账号；账号必须由用户明确加入白名单，平台的认证标记不会自动把陌生账号升级为官方来源。
+3. 默认观察白名单包含 `OpenAI, AnthropicAI, GoogleDeepMind, nvidia, AIatMeta, MicrosoftAI, xai, sama, demishassabis` 九个账号，但来源默认停用。可以编辑或新增 X 来源，用逗号填写其他官方账号；账号必须由用户明确加入白名单，平台的认证标记不会自动把陌生账号升级为官方来源。
 4. 点击来源行的“测试”会请求 X API recent search；正式采集只保留白名单账号自己的公开原帖，排除回复和转推，并用 `since_id` 断点续采。限流或单个 X 来源失败不会阻断 RSS 和其他来源。
 
 适配器只读公开帖子，不读取私信、不执行互动，也不代发内容。未配置 Token 时默认 X 来源保持停用，不会用网页抓取或模拟数据冒充 API 结果。接口和授权范围以 [X API 文档](https://docs.x.com/x-api/introduction) 与 [Bearer Token 说明](https://docs.x.com/fundamentals/authentication/oauth-2-0/bearer-tokens)为准。
@@ -151,11 +151,23 @@ AppSecret 只保存在本机受保护存储中：macOS 使用钥匙串，Windows
 
 ## 安装为 Windows 后台任务
 
-在 PowerShell 中执行以下脚本，可注册当前用户登录后自动启动的计划任务：
+先完成依赖安装和生产构建，再注册当前用户登录后自动启动的计划任务：
 
 ```powershell
+npm ci
+npm run build
 powershell -ExecutionPolicy Bypass -File .\scripts\install-windows-service.ps1
 ```
+
+安装脚本会在写入任务前检查 Node.js、`node_modules`、`dist` 和服务入口；重复执行会原位更新同名任务，不会创建多个实例。注册后会核对执行程序、参数和工作目录，并在 60 秒内确认 `/api/health` 可用。若已有手动启动的服务占用 4317 端口，请先在原终端停止它，再重新安装。
+
+需要只读检查计划任务、监听端口、进程和健康接口时执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-windows-service.ps1
+```
+
+任一关键项缺失时，验证脚本会输出具体原因并返回非零退出码，适合人工排查或接入本地检查脚本。如果当前终端无权读取 Windows 计划任务，脚本会明确报告“Access denied”、继续检查端口与健康接口，并要求在管理员 PowerShell 中重跑；权限错误不会被误报成任务不存在。
 
 打开控制台和卸载自动启动任务：
 
@@ -166,7 +178,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows-service.ps1
 
 卸载只移除计划任务，不删除 `.workflow/` 中的新闻、草稿或图片。
 
-计划任务直接托管唯一的 Node 服务进程，在进程临时退出后会每分钟重启，最多三次；同一时间只允许一个实例。后台日志单文件达到 5 MB 后轮换并保留三份历史日志。
+计划任务直接托管唯一的 Node 服务进程，在进程临时退出后会每分钟重启，最多三次；同一时间只允许一个实例。后台日志使用带 BOM 的 UTF-8，Windows PowerShell 5.1 可直接读取；升级时发现旧 UTF-16、无 BOM UTF-8 或非法编码日志，会先把原始字节完整保存在同目录的 `windows-service.log.legacy-*` 文件，再创建新日志。正常日志单文件达到 5 MB 后轮换并保留三份历史日志。
 
 ## 安装为 Mac 后台服务
 
@@ -203,6 +215,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows-service.ps1
 
 ## 图片原则
 
-- 默认只使用官方页面、原报道页面或网页截图。
-- 不生成图片，不拿旧模型或无关品牌图凑数。
-- 每张图片保留来源页和署名；公开可访问不等于可转载，发布前仍需检查授权。
+- 事件图片优先使用官方页面、原报道页面或可追溯的编辑性网页截图，并先下载到本地受管目录再判断可发布。
+- 项目生成的图片只可作为明确标注“非事件现场”的通用概念配图；不得伪装成人物、产品、会议或新闻现场，也不能拿旧模型或无关品牌图凑数。
+- 每张非自有图片保留来源页、署名、许可标识、许可链接和修改说明；公开可访问不等于可转载，发布前仍需检查授权与平台范围。

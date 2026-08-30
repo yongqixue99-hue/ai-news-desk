@@ -3,6 +3,11 @@ import path from "node:path";
 import { chromium, type Browser, type Locator, type Page } from "playwright-core";
 import { insertedMediaIds, publisherBodyHtml } from "./article-html.js";
 import { openDebugChrome } from "./chrome-launch.js";
+import {
+  assertPublicationRevision,
+  PublicationRevisionConflictError,
+} from "./publication-state.js";
+import { inspectDraftImageFile } from "./published-materials.js";
 import { updateState, workflowRoot } from "./storage.js";
 import type { ArticleDraft, PublisherResult, PublisherStep } from "./types.js";
 
@@ -202,7 +207,20 @@ const uploadImages = async (page: Page, draft: ArticleDraft): Promise<PublisherS
   const uploadable = draft.images.filter(
     (placement) => placement.image.localPath && usedIds.has(placement.id),
   );
-  if (!uploadable.length) return { name: "配图", ok: true, detail: "本稿没有需要上传的图片" };
+  if (!usedIds.size) return { name: "配图", ok: true, detail: "本稿没有需要上传的图片" };
+  if (uploadable.length !== usedIds.size) {
+    return { name: "配图", ok: false, detail: `正文引用 ${usedIds.size} 张图片，但只有 ${uploadable.length} 张有本地记录` };
+  }
+  for (const placement of uploadable) {
+    const inspected = await inspectDraftImageFile(placement);
+    if (!inspected.available || !placement.image.fingerprint || inspected.fingerprint !== placement.image.fingerprint) {
+      return {
+        name: "配图",
+        ok: false,
+        detail: `图片“${placement.caption}”缺失或文件指纹已变化，请重新插入后再填入`,
+      };
+    }
+  }
 
   let uploaded = 0;
   let expected = 0;
@@ -298,13 +316,12 @@ const chooseTopics = async (page: Page, topics: string[]): Promise<PublisherStep
 };
 
 export const fillXiaoheihe = async (
-  draftId: string,
+  draftSnapshot: ArticleDraft,
+  expectedRevisionHash: string,
   port: number,
   editorUrl: string,
 ): Promise<PublisherResult> => {
-  const state = await updateState((current) => current);
-  const draft = state.drafts.find((entry) => entry.id === draftId);
-  if (!draft) throw new Error("草稿不存在");
+  assertPublicationRevision(draftSnapshot, "xiaoheihe", expectedRevisionHash);
   const ready = await publisherStatus(port);
   if (!ready.ok) throw new Error("请先启动专用 Chrome，并在其中登录小黑盒");
 
@@ -332,13 +349,30 @@ export const fillXiaoheihe = async (
     if (editorIssue) {
       steps.push(editorIssue);
     } else {
-      steps.push(await fillTitle(page, draft.title));
-      steps.push(await fillBody(page, draft));
-      if (steps.find((step) => step.name === "正文")?.ok) steps.push(await uploadImages(page, draft));
-      steps.push(await chooseCommunity(page, draft.community));
-      steps.push(await chooseTopics(page, draft.topics));
+      // Serialize behind pending saves, then compare immediately before the
+      // first field is written into the remote editor.
+      const currentDraft = await updateState((state) => {
+        const draft = state.drafts.find((entry) => entry.id === draftSnapshot.id);
+        return draft ? structuredClone(draft) : undefined;
+      });
+      if (!currentDraft) {
+        throw new PublicationRevisionConflictError(
+          draftSnapshot.id,
+          expectedRevisionHash,
+          "draft-missing",
+        );
+      }
+      assertPublicationRevision(currentDraft, "xiaoheihe", expectedRevisionHash);
+      steps.push(await fillTitle(page, draftSnapshot.title));
+      steps.push(await fillBody(page, draftSnapshot));
+      if (steps.find((step) => step.name === "正文")?.ok) {
+        steps.push(await uploadImages(page, draftSnapshot));
+      }
+      steps.push(await chooseCommunity(page, draftSnapshot.community));
+      steps.push(await chooseTopics(page, draftSnapshot.topics));
     }
   } catch (error) {
+    if (error instanceof PublicationRevisionConflictError) throw error;
     steps.push({
       name: "页面操作",
       ok: false,
@@ -354,7 +388,7 @@ export const fillXiaoheihe = async (
     await mkdir(logsRoot, { recursive: true });
     diagnosticScreenshot = path.join(
       logsRoot,
-      `publisher-${draft.id}-${new Date().toISOString().replace(/[:.]/g, "-")}.png`,
+      `publisher-${draftSnapshot.id}-${new Date().toISOString().replace(/[:.]/g, "-")}.png`,
     );
     await page.screenshot({ path: diagnosticScreenshot, fullPage: true }).catch(() => {
       diagnosticScreenshot = undefined;
@@ -363,21 +397,15 @@ export const fillXiaoheihe = async (
   const result: PublisherResult = {
     at: new Date().toISOString(),
     ok: allStepsOk,
+    revisionHash: expectedRevisionHash,
     pageUrl: page.url(),
-    community: draft.community,
-    topics: [...draft.topics],
+    community: draftSnapshot.community,
+    topics: [...draftSnapshot.topics],
     diagnosticScreenshot,
     steps,
     warning: diagnosticScreenshot
       ? `有步骤未完成，失败现场已保存：${diagnosticScreenshot}。系统不会点击最终发布。`
       : "内容只填入编辑器；系统不会点击最终发布。请检查正文、图片位置、分区和话题。",
   };
-  await updateState((current) => {
-    const target = current.drafts.find((entry) => entry.id === draftId);
-    if (!target) return;
-    target.fillResult = result;
-    if (allStepsOk) target.status = "filled";
-    target.updatedAt = new Date().toISOString();
-  });
   return result;
 };

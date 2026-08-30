@@ -1,7 +1,16 @@
-import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { format } from "node:util";
+import {
+  acquireWindowsServiceLogLock,
+  prepareWindowsServiceLog,
+} from "../server/windows-service-log.ts";
 import { windowsServicePath } from "../server/windows-service-environment.ts";
 
 process.env.NODE_ENV = "production";
@@ -34,12 +43,17 @@ const maximumLogBytes = 5 * 1024 * 1024;
 const retainedLogs = 3;
 
 mkdirSync(logDirectory, { recursive: true });
-if (existsSync(logPath) && statSync(logPath).size >= maximumLogBytes) {
-  for (let index = retainedLogs - 1; index >= 1; index -= 1) {
-    const source = `${logPath}.${index}`;
-    if (existsSync(source)) renameSync(source, `${logPath}.${index + 1}`);
-  }
-  renameSync(logPath, `${logPath}.1`);
+const logLock = await acquireWindowsServiceLogLock({ logPath });
+let logPreparation;
+try {
+  logPreparation = prepareWindowsServiceLog({
+    logPath,
+    maximumLogBytes,
+    retainedLogs,
+  });
+} catch (error) {
+  await logLock.release();
+  throw error;
 }
 
 const log = createWriteStream(logPath, { flags: "a" });
@@ -50,10 +64,16 @@ console.log = (...values) => write("INFO", values);
 console.info = (...values) => write("INFO", values);
 console.warn = (...values) => write("WARN", values);
 console.error = (...values) => write("ERROR", values);
+if (logPreparation.archivedPath) {
+  write("WARN", [
+    `previous service log was preserved at ${logPreparation.archivedPath} (${logPreparation.archiveReason})`,
+  ]);
+}
 process.on("warning", (warning) => console.warn(warning.stack || warning.message));
 process.on("exit", (code) => {
   write("INFO", [`service process exited with code ${code}`]);
   log.end();
+  void logLock.release();
 });
 
 await import("../server/index.ts");

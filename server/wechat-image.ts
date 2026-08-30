@@ -47,9 +47,16 @@ export const loadWeChatPlacementImage = async (
   placement: DraftImagePlacement,
 ): Promise<WeChatImageAsset> => {
   if (!placement.image.localPath) throw new Error(`图片“${placement.caption || placement.image.caption}”缺少本地文件`);
+  const reviewedFingerprint = placement.image.fingerprint?.trim().toLowerCase();
+  if (!reviewedFingerprint || !/^[a-f0-9]{64}$/u.test(reviewedFingerprint)) {
+    throw new Error(`图片“${placement.caption || placement.image.caption}”缺少已审核的 SHA-256 指纹，请重新插入图片后再次同步`);
+  }
   const inspected = await inspectDraftImageFile(placement, true);
   if (!inspected.available || !inspected.bytes) {
     throw new Error(inspected.reason || `无法读取图片“${placement.caption || placement.image.caption}”`);
+  }
+  if (inspected.fingerprint !== reviewedFingerprint) {
+    throw new Error(`图片“${placement.caption || placement.image.caption}”的本地文件已发生变化，请重新插入图片后再次同步`);
   }
   return prepareWeChatImage(inspected.bytes, path.basename(placement.image.localPath));
 };

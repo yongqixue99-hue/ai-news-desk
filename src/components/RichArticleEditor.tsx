@@ -72,6 +72,15 @@ const NewsImage = Image.extend({
 const sourceFor = (placement: DraftImagePlacement) =>
   placement.image.publicPath || placement.image.url;
 
+const visibleAttributionFor = (placement: DraftImagePlacement) => {
+  const details = [placement.image.attribution || "来源待补充"];
+  if (placement.image.rights === "licensed") {
+    details.push(`许可：${placement.image.licenseId || placement.image.licenseUrl || "待补充"}`);
+    details.push(`修改：${placement.image.modificationNote || "待补充"}`);
+  }
+  return details.join("；");
+};
+
 export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticleEditorProps>(
   function RichArticleEditor(
     { title, content, preview, theme, onChange, onUploadFile, onImportUrl },
@@ -127,7 +136,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
     const insertPlacement = (placement: DraftImagePlacement) => {
       if (!editor) return;
       const caption = placement.caption || placement.image.caption || "配图";
-      const attribution = placement.image.attribution || "来源待补充";
+      const attribution = visibleAttributionFor(placement);
       const imageAttributes = {
         src: sourceFor(placement),
         alt: caption,
@@ -198,7 +207,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
           title: caption,
           mediaId: placement.id,
           caption,
-          attribution: placement.image.attribution || "来源待补充",
+          attribution: visibleAttributionFor(placement),
         }).run();
       } catch (error) {
         setUploadError(error instanceof Error ? error.message : String(error));

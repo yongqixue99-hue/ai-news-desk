@@ -121,6 +121,42 @@ test("manual date and keyword filters are applied before editorial scoring", () 
   assert.equal(rawItemMatchesSearch(matching, { keywords: "Nintendo" }), false);
 });
 
+test("automatic collection rejects stale, future, and undated records outside its configured window", () => {
+  const currentTime = Date.parse("2026-08-31T12:00:00.000Z");
+  const options = { windowHours: 24, now: currentTime };
+
+  assert.equal(rawItemMatchesSearch(item({
+    published_at: "2026-08-30T13:00:00.000Z",
+  }), {}, options), true);
+  assert.equal(rawItemMatchesSearch(item({
+    published_at: "2026-08-30T11:00:00.000Z",
+  }), {}, options), false);
+  assert.equal(rawItemMatchesSearch(item({
+    published_at: "2026-08-31T13:00:00.000Z",
+  }), {}, options), false);
+  assert.equal(rawItemMatchesSearch(item({
+    published_at: undefined,
+    fetched_at: "2026-08-31T11:30:00.000Z",
+  }), {}, options), false);
+});
+
+test("an explicit historical search honors its calendar range instead of the automatic window", () => {
+  const historical = item({
+    published_at: "2026-06-15T08:00:00.000Z",
+    fetched_at: "2026-08-31T11:30:00.000Z",
+  });
+  const currentTime = Date.parse("2026-08-31T12:00:00.000Z");
+
+  assert.equal(rawItemMatchesSearch(historical, {
+    dateFrom: "2026-06-15",
+    dateTo: "2026-06-15",
+  }, { windowHours: 24, now: currentTime }), true);
+  assert.equal(rawItemMatchesSearch(historical, {
+    dateFrom: "2026-06-16",
+    dateTo: "2026-06-16",
+  }, { windowHours: 24, now: currentTime }), false);
+});
+
 test("public Hacker News interaction is preserved as a real heat signal", () => {
   const candidate = rawItemToCandidate(item({
     source_type: "hackernews",

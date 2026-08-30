@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, unlink, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { findDuplicateMaterial, fingerprintSha256 } from "./material-governance.js";
 import { fetchRemote, readResponseBuffer } from "./remote-url.js";
@@ -44,6 +44,9 @@ export interface MaterialInput {
   rights?: ImageMaterial["rights"];
   evidenceNote?: string;
   evidencePath?: string;
+  licenseId?: string;
+  licenseUrl?: string;
+  modificationNote?: string;
   allowedPlatforms?: string[];
   expiresAt?: string;
   entityTags?: string[];
@@ -70,6 +73,9 @@ export const normalizeMaterialInput = (input: MaterialInput, fallbackTitle: stri
     : "check-required" as const,
   evidenceNote: safeText(input.evidenceNote, "", 500) || undefined,
   evidencePath: input.evidencePath?.trim().slice(0, 1_000) || undefined,
+  licenseId: safeText(input.licenseId, "", 80) || undefined,
+  licenseUrl: input.licenseUrl?.trim().slice(0, 1_000) || undefined,
+  modificationNote: safeText(input.modificationNote, "", 500) || undefined,
   allowedPlatforms: uniqueText(input.allowedPlatforms).map((item) => item.toLowerCase()).slice(0, 20),
   expiresAt: input.expiresAt?.trim() || undefined,
   entityTags: uniqueText(input.entityTags ?? input.tags).slice(0, 24),
@@ -105,13 +111,17 @@ export const saveMaterialBytes = async (
   fallbackTitle: string,
   originalUrl = "",
   existingMaterials: readonly ImageMaterial[] = [],
+  materialId?: string,
 ): Promise<ImageMaterial> => {
   if (!bytes.length) throw new Error("上传的图片为空");
   if (bytes.length > 10 * 1024 * 1024) throw new Error("图片不能超过 10 MB");
   const fingerprint = fingerprintSha256(bytes);
   assertUniqueMaterialFingerprint(fingerprint, existingMaterials);
   const extension = extensionFor(contentType, originalUrl);
-  const id = `material_${randomUUID().slice(0, 10)}`;
+  const id = materialId?.trim() || `material_${randomUUID().slice(0, 10)}`;
+  if (!/^[a-z0-9][a-z0-9_-]{0,119}$/iu.test(id)) {
+    throw new Error("素材存储 ID 只能包含字母、数字、下划线或连字符");
+  }
   const fileName = `${id}${extension}`;
   const localPath = path.join(workflowMaterialsRoot, fileName);
   await mkdir(workflowMaterialsRoot, { recursive: true });
@@ -184,6 +194,9 @@ export const sourceImageFromMaterial = (
   rights: material.rights,
   evidenceNote: material.evidenceNote,
   evidencePath: material.evidencePath,
+  licenseId: material.licenseId,
+  licenseUrl: material.licenseUrl,
+  modificationNote: material.modificationNote,
   allowedPlatforms: [...material.allowedPlatforms],
   expiresAt: material.expiresAt,
   entityTags: [...material.entityTags],
@@ -210,8 +223,45 @@ export const copyMaterialToDraft = async (material: ImageMaterial, draftId: stri
   };
 };
 
+/**
+ * Freezes a reusable or hydrated local image into the draft's own media
+ * directory. Deleting the library entry later must not break an existing
+ * article or change the revision that was reviewed for publication.
+ */
+export const copyLocalSourceImageToDraft = async (
+  image: SourceImage,
+  draftId: string,
+  options: { requireFingerprintMatch?: boolean } = {},
+): Promise<SourceImage> => {
+  if (!image.localPath?.trim()) throw new Error("图片没有可复制的本地文件");
+  const bytes = await readFile(image.localPath);
+  const actualFingerprint = createHash("sha256").update(bytes).digest("hex");
+  if (options.requireFingerprintMatch) {
+    const expectedFingerprint = image.fingerprint?.trim().toLowerCase() || "";
+    if (!/^[a-f0-9]{64}$/u.test(expectedFingerprint)) throw new Error("图片缺少有效 SHA-256 指纹");
+    if (actualFingerprint !== expectedFingerprint) throw new Error("图片指纹不一致，内容已变化");
+  }
+  const directory = path.join(workflowMediaRoot, draftId);
+  await mkdir(directory, { recursive: true });
+  const extension = path.extname(image.localPath).toLowerCase();
+  const safeExtension = [".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(extension)
+    ? (extension === ".jpeg" ? ".jpg" : extension)
+    : ".jpg";
+  const safeId = image.id.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 80) || "image";
+  const fileName = `${safeId}_${randomUUID().slice(0, 6)}${safeExtension}`;
+  const localPath = path.join(directory, fileName);
+  await writeFile(localPath, bytes);
+  const publicPath = `/media/${encodeURIComponent(draftId)}/${encodeURIComponent(fileName)}`;
+  return { ...image, url: publicPath, localPath, publicPath, fingerprint: actualFingerprint };
+};
+
 export const removeMaterialFile = async (material: ImageMaterial) => {
   const resolved = path.resolve(material.localPath);
   const root = path.resolve(workflowMaterialsRoot);
-  if (resolved !== root && resolved.startsWith(`${root}${path.sep}`)) await unlink(resolved).catch(() => undefined);
+  const relative = path.relative(root, resolved);
+  const managed = Boolean(relative)
+    && relative !== ".."
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative);
+  if (managed) await unlink(resolved).catch(() => undefined);
 };

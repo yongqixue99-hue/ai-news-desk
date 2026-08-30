@@ -1,10 +1,43 @@
-import { extractPage } from "./extractor.js";
+import { downloadSourceImage, extractPage } from "./extractor.js";
 import { captureRenderedPageImages } from "./page-screenshot.js";
+import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
 import { readState, updateState } from "./storage.js";
 import { storyById } from "./story-desk.js";
-import type { SourceImage, SourceRole } from "./types.js";
+import type { StorySignalView } from "./product-types.js";
+import type { ExtractedPage, SourceImage, SourceRole } from "./types.js";
 
-const inFlight = new Map<string, Promise<{ imageCount: number; extractedSources: number; screenshotCount: number }>>();
+export interface VisualAssetCounts {
+  discoveredImageCount: number;
+  localReadyImageCount: number;
+  publishReadyImageCount: number;
+  rightsReviewImageCount: number;
+}
+
+export interface VisualHydrationResult extends VisualAssetCounts {
+  /**
+   * Compatibility field used by existing job/result consumers. It now means
+   * locally usable assets, not remote image URLs discovered on a page.
+   */
+  imageCount: number;
+  extractedSources: number;
+  screenshotCount: number;
+}
+
+interface VisualStorySnapshot {
+  images: SourceImage[];
+  signals: StorySignalView[];
+}
+
+export interface VisualHydrationDependencies {
+  getStory: () => Promise<VisualStorySnapshot | undefined>;
+  extract: (url: string, imageLimit: number) => Promise<ExtractedPage>;
+  persistExtraction: (signal: StorySignalView, page: ExtractedPage) => Promise<void>;
+  persistImages: (signal: StorySignalView, images: SourceImage[]) => Promise<void>;
+  localize: (image: SourceImage, assetRoot: string) => Promise<SourceImage>;
+  capture: (url: string, assetRoot: string, requestedLimit: number) => Promise<SourceImage[]>;
+}
+
+const inFlight = new Map<string, Promise<VisualHydrationResult>>();
 
 const roleRank = (role: SourceRole | undefined) => ({
   official: 5,
@@ -14,86 +47,285 @@ const roleRank = (role: SourceRole | undefined) => ({
   community: 1,
 })[role ?? "discovery"];
 
-const mergeImages = (current: SourceImage[], incoming: SourceImage[]) => {
-  const keys = new Set(current.map((image) => image.publicPath || image.url));
-  return [...current, ...incoming.filter((image) => {
-    const key = image.publicPath || image.url;
-    if (keys.has(key)) return false;
-    keys.add(key);
-    return true;
-  })].slice(0, 30);
+const normalizedUrlIdentity = (value: string | undefined) => {
+  const raw = value?.trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(?:utm_.+|ref|source|spm|from)$/iu.test(key)) url.searchParams.delete(key);
+    }
+    url.hash = "";
+    url.pathname = url.pathname.replace(/\/+$/u, "") || "/";
+    return url.toString().toLocaleLowerCase();
+  } catch {
+    return raw.toLocaleLowerCase();
+  }
 };
 
-const hydrate = async (storyId: string, minimumImages: number) => {
-  const initial = await readState();
-  const story = storyById(initial, storyId);
-  if (!story) throw new Error("Story 不存在");
-  if (story.imageCount >= minimumImages) {
-    return { imageCount: story.imageCount, extractedSources: 0, screenshotCount: 0 };
+const validFingerprint = (value: string | undefined) => {
+  const normalized = value?.trim().toLocaleLowerCase() || "";
+  return /^[a-f0-9]{64}$/u.test(normalized) ? normalized : "";
+};
+
+/**
+ * A CDN URL or generated id is not globally unique. Images may be merged only
+ * inside the same traceable source record, using a content fingerprint, image
+ * URL or id as the second half of the identity.
+ */
+const sameImage = (left: SourceImage, right: SourceImage) => {
+  const leftSource = normalizedUrlIdentity(left.sourceUrl);
+  const rightSource = normalizedUrlIdentity(right.sourceUrl);
+  if (!leftSource || leftSource !== rightSource) return false;
+  const leftFingerprint = validFingerprint(left.fingerprint);
+  const rightFingerprint = validFingerprint(right.fingerprint);
+  if (leftFingerprint && leftFingerprint === rightFingerprint) return true;
+  const leftUrl = normalizedUrlIdentity(left.url);
+  const rightUrl = normalizedUrlIdentity(right.url);
+  if (leftUrl && leftUrl === rightUrl) return true;
+  const leftId = left.id.trim();
+  return Boolean(leftId && leftId === right.id.trim());
+};
+
+const establishedText = (current: string | undefined, incoming: string | undefined) =>
+  current?.trim() ? current : incoming;
+
+const mergeEstablishedImage = (existing: SourceImage, incoming: SourceImage): SourceImage => ({
+  ...existing,
+  ...incoming,
+  id: existing.id,
+  url: existing.url,
+  localPath: incoming.localPath?.trim() ? incoming.localPath : existing.localPath,
+  publicPath: incoming.publicPath?.trim() ? incoming.publicPath : existing.publicPath,
+  // Localization/extraction may enrich presentation fields, but governance and
+  // provenance stay with the already established source record. Missing
+  // fields can be filled; populated fields require an explicit editorial edit.
+  rights: existing.rights,
+  attribution: establishedText(existing.attribution, incoming.attribution) || "来源待补充",
+  sourceUrl: establishedText(existing.sourceUrl, incoming.sourceUrl) || "",
+  evidenceNote: establishedText(existing.evidenceNote, incoming.evidenceNote),
+  evidencePath: establishedText(existing.evidencePath, incoming.evidencePath),
+  licenseId: establishedText(existing.licenseId, incoming.licenseId),
+  licenseUrl: establishedText(existing.licenseUrl, incoming.licenseUrl),
+  modificationNote: establishedText(existing.modificationNote, incoming.modificationNote),
+  allowedPlatforms: existing.allowedPlatforms === undefined
+    ? incoming.allowedPlatforms
+    : [...existing.allowedPlatforms],
+  expiresAt: establishedText(existing.expiresAt, incoming.expiresAt),
+  fingerprint: establishedText(existing.fingerprint, incoming.fingerprint),
+  entityTags: [...new Set([...(existing.entityTags ?? []), ...(incoming.entityTags ?? [])])],
+});
+
+/**
+ * A localized copy replaces its remote-only record instead of appearing as a
+ * duplicate. Older state may already contain both, so this also repairs that
+ * shape whenever the visual desk touches a Story.
+ */
+export const mergeVisualImages = (current: SourceImage[], incoming: SourceImage[]) => {
+  const merged = [...current];
+  for (const image of incoming) {
+    const existingIndex = merged.findIndex((entry) => sameImage(entry, image));
+    if (existingIndex < 0) {
+      merged.push(image);
+      continue;
+    }
+    merged[existingIndex] = mergeEstablishedImage(merged[existingIndex]!, image);
   }
+  return merged.slice(0, 30);
+};
+
+export const isLocalVisualAsset = (image: SourceImage) => isLocalImageFileReady(image);
+
+/**
+ * `check-required` and editorial screenshots remain useful local review
+ * assets, but are intentionally not described as publication-ready.
+ */
+export const countVisualAssets = (
+  images: SourceImage[],
+  checkedAt = new Date().toISOString(),
+): VisualAssetCounts => {
+  const unique = mergeVisualImages([], images);
+  const local = unique.filter(isLocalVisualAsset);
+  const publishReady = local.filter((image) => isNeutralImagePublishReady(image, checkedAt));
+  return {
+    discoveredImageCount: unique.length,
+    localReadyImageCount: local.length,
+    publishReadyImageCount: publishReady.length,
+    rightsReviewImageCount: local.length - publishReady.length,
+  };
+};
+
+const resultFor = (
+  story: VisualStorySnapshot | undefined,
+  extractedSources: number,
+  screenshotCount: number,
+): VisualHydrationResult => {
+  const counts = countVisualAssets(story?.images ?? []);
+  return {
+    imageCount: counts.localReadyImageCount,
+    ...counts,
+    extractedSources,
+    screenshotCount,
+  };
+};
+
+const canDownload = (image: SourceImage) => /^https?:\/\//iu.test(image.url.trim());
+
+/**
+ * Dependency-injected core keeps the network/storage boundary testable. A
+ * Story is complete only after enough files exist locally; remote discovery
+ * records never satisfy the minimum on their own.
+ */
+export const runVisualHydration = async (
+  storyId: string,
+  minimumImages: number,
+  dependencies: VisualHydrationDependencies,
+): Promise<VisualHydrationResult> => {
+  const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
+  let story = await dependencies.getStory();
+  if (!story) throw new Error("Story 不存在");
+  let counts = countVisualAssets(story.images);
+  if (counts.localReadyImageCount >= minimum) return resultFor(story, 0, 0);
+
   const signals = story.signals
     .filter((signal) => !signal.isCommunity)
     .sort((left, right) => roleRank(right.sourceRole) - roleRank(left.sourceRole))
     .slice(0, 3);
+  const assetRoot = `story_assets_${storyId.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 70)}`;
+  const primarySignal = signals[0];
+
+  // Prefer already-discovered article images before fetching the source page
+  // again. Persisting replaces the matching remote record in its candidate.
+  if (primarySignal) {
+    for (const image of story.images) {
+      if (counts.localReadyImageCount >= minimum) break;
+      if (isLocalVisualAsset(image) || !canDownload(image)) continue;
+      try {
+        const localized = await dependencies.localize(image, assetRoot);
+        if (!isLocalVisualAsset(localized)) continue;
+        await dependencies.persistImages(primarySignal, [localized]);
+        story = await dependencies.getStory();
+        counts = countVisualAssets(story?.images ?? []);
+      } catch {
+        // Try another discovered image, another source, then screenshots.
+      }
+    }
+  }
+
   let extractedSources = 0;
   for (const signal of signals) {
+    if (counts.localReadyImageCount >= minimum) break;
     try {
-      const page = await extractPage(signal.url, 12);
+      const page = await dependencies.extract(signal.url, 12);
       extractedSources += 1;
-      await updateState((state) => {
-        const candidate = state.runs.find((run) => run.id === signal.runId)
-          ?.candidates.find((entry) => entry.id === signal.candidateId);
-        if (!candidate) return;
-        candidate.canonicalUrl = page.canonicalUrl;
-        candidate.images = mergeImages(candidate.images, page.images);
-        candidate.imageCount = candidate.images.length;
-        if (!candidate.excerpt.trim() && page.text.trim()) candidate.excerpt = page.text.trim().slice(0, 600);
-      });
+      await dependencies.persistExtraction(signal, page);
+      for (const image of page.images) {
+        story = await dependencies.getStory();
+        counts = countVisualAssets(story?.images ?? []);
+        if (counts.localReadyImageCount >= minimum) break;
+        try {
+          const localized = isLocalVisualAsset(image)
+            ? image
+            : canDownload(image)
+              ? await dependencies.localize(image, assetRoot)
+              : undefined;
+          if (!localized || !isLocalVisualAsset(localized)) continue;
+          await dependencies.persistImages(signal, [localized]);
+        } catch {
+          // One broken CDN asset must not prevent the remaining candidates or
+          // the rendered-page fallback from being attempted.
+        }
+      }
     } catch {
       // Other sources and screenshot fallback still run. A single publisher's
       // client shell or bot protection must not empty the whole visual pack.
     }
-    const refreshed = storyById(await readState(), storyId);
-    if ((refreshed?.imageCount ?? 0) >= minimumImages) break;
+    story = await dependencies.getStory();
+    counts = countVisualAssets(story?.images ?? []);
   }
 
   let screenshotCount = 0;
-  let refreshed = storyById(await readState(), storyId);
-  if ((refreshed?.imageCount ?? 0) < minimumImages) {
-    const screenshotRoot = `story_assets_${storyId.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 70)}`;
+  story = await dependencies.getStory();
+  counts = countVisualAssets(story?.images ?? []);
+  if (counts.localReadyImageCount < minimum) {
     for (const signal of signals.slice(0, 2)) {
+      const requested = Math.min(3, minimum - counts.localReadyImageCount);
+      if (requested <= 0) break;
       try {
-        const requested = Math.min(3, minimumImages - (refreshed?.imageCount ?? 0));
-        if (requested <= 0) break;
-        const screenshots = await captureRenderedPageImages(signal.url, screenshotRoot, requested);
+        const screenshots = (await dependencies.capture(signal.url, assetRoot, requested))
+          .filter(isLocalVisualAsset);
         screenshotCount += screenshots.length;
-        await updateState((state) => {
-          const candidate = state.runs.find((run) => run.id === signal.runId)
-            ?.candidates.find((entry) => entry.id === signal.candidateId);
-          if (!candidate) return;
-          candidate.images = mergeImages(candidate.images, screenshots);
-          candidate.imageCount = candidate.images.length;
-        });
-        refreshed = storyById(await readState(), storyId);
-        if ((refreshed?.imageCount ?? 0) >= minimumImages) break;
+        if (screenshots.length) await dependencies.persistImages(signal, screenshots);
       } catch {
         // No irrelevant generated image is substituted when rendering fails.
       }
+      story = await dependencies.getStory();
+      counts = countVisualAssets(story?.images ?? []);
+      if (counts.localReadyImageCount >= minimum) break;
     }
   }
-  refreshed = storyById(await readState(), storyId);
-  return { imageCount: refreshed?.imageCount ?? 0, extractedSources, screenshotCount };
+
+  return resultFor(await dependencies.getStory(), extractedSources, screenshotCount);
 };
+
+const candidateForSignal = (state: Awaited<ReturnType<typeof readState>>, signal: StorySignalView) =>
+  state.runs.find((run) => run.id === signal.runId)
+    ?.candidates.find((candidate) => candidate.id === signal.candidateId);
+
+const persistImagesForStory = async (
+  storyId: string,
+  fallbackSignal: StorySignalView,
+  images: SourceImage[],
+) => updateState((state) => {
+  const currentStory = storyById(state, storyId);
+  if (!currentStory) return;
+  for (const image of images) {
+    let matched = false;
+    for (const signal of currentStory.signals) {
+      const candidate = candidateForSignal(state, signal);
+      if (!candidate || !candidate.images.some((entry) => sameImage(entry, image))) continue;
+      candidate.images = mergeVisualImages(candidate.images, [image]);
+      candidate.imageCount = candidate.images.length;
+      matched = true;
+    }
+    if (matched) continue;
+    const fallback = candidateForSignal(state, fallbackSignal);
+    if (!fallback) continue;
+    fallback.images = mergeVisualImages(fallback.images, [image]);
+    fallback.imageCount = fallback.images.length;
+  }
+});
+
+const productionDependencies = (storyId: string): VisualHydrationDependencies => ({
+  getStory: async () => storyById(await readState(), storyId),
+  extract: extractPage,
+  persistExtraction: async (signal, page) => {
+    await updateState((state) => {
+      const candidate = candidateForSignal(state, signal);
+      if (!candidate) return;
+      candidate.canonicalUrl = page.canonicalUrl;
+      candidate.images = mergeVisualImages(candidate.images, page.images);
+      candidate.imageCount = candidate.images.length;
+      if (!candidate.excerpt.trim() && page.text.trim()) candidate.excerpt = page.text.trim().slice(0, 600);
+    });
+  },
+  persistImages: (signal, images) => persistImagesForStory(storyId, signal, images),
+  localize: downloadSourceImage,
+  capture: captureRenderedPageImages,
+});
 
 /**
  * Visual hydration is deliberately lazy: only a user-selected Story pays the
- * cost of reading image-heavy pages and rendering screenshot fallbacks.
+ * cost of reading image-heavy pages, downloading source images and rendering
+ * screenshot fallbacks.
  */
 export const hydrateStoryAssets = (storyId: string, minimumImages = 2) => {
-  const existing = inFlight.get(storyId);
+  const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
+  const key = `${storyId}:${minimum}`;
+  const existing = inFlight.get(key);
   if (existing) return existing;
-  const operation = hydrate(storyId, Math.max(0, Math.min(8, minimumImages)))
-    .finally(() => inFlight.delete(storyId));
-  inFlight.set(storyId, operation);
+  const operation = runVisualHydration(storyId, minimum, productionDependencies(storyId))
+    .finally(() => inFlight.delete(key));
+  inFlight.set(key, operation);
   return operation;
 };

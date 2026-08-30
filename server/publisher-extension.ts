@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   insertedMediaIds,
@@ -8,7 +7,12 @@ import {
   publisherImageCaptions,
 } from "./article-html.js";
 import { openRegularChrome } from "./chrome-launch.js";
-import { readState, updateState, workspacePath } from "./storage.js";
+import {
+  assertPublicationRevision,
+  PublicationRevisionConflictError,
+} from "./publication-state.js";
+import { inspectDraftImageFile } from "./published-materials.js";
+import { updateState, workspacePath } from "./storage.js";
 import type {
   ArticleDraft,
   PublisherResult,
@@ -46,6 +50,11 @@ export interface ExtensionPublisherJob {
 export interface ExtensionPublisherReport {
   pageUrl?: string;
   steps: PublisherStep[];
+}
+
+export interface ExtensionPublisherFillDependencies {
+  loadCurrentDraft?: (draftId: string) => Promise<ArticleDraft | undefined>;
+  submit?: (job: ExtensionPublisherJob) => Promise<ExtensionPublisherReport>;
 }
 
 interface PendingJob {
@@ -168,43 +177,42 @@ export class ExtensionPublisherBridge {
 
 export const extensionPublisherBridge = new ExtensionPublisherBridge();
 
-const mimeTypeFor = (filePath: string) => {
-  const extension = path.extname(filePath).toLowerCase();
-  if (extension === ".png") return "image/png";
-  if (extension === ".webp") return "image/webp";
-  if (extension === ".gif") return "image/gif";
-  return "image/jpeg";
-};
-
 const jobImages = async (draft: ArticleDraft): Promise<ExtensionPublisherImage[]> => {
-  const inserted = insertedMediaIds(draft);
+  const inserted = [...insertedMediaIds(draft)];
+  if (draft.contentFormat === "image-post" && inserted.length !== 1) {
+    throw new Error(`图文稿必须恰好包含 1 张待上传图片，当前为 ${inserted.length} 张`);
+  }
   const captions = publisherImageCaptions(draft);
-  const placements = draft.images.filter(
-    (placement) => inserted.has(placement.id) && placement.image.localPath,
-  );
-  const results = await Promise.all(placements.map(async (placement) => {
-    try {
-      const localPath = placement.image.localPath!;
-      const mimeType = mimeTypeFor(localPath);
-      const bytes = await readFile(localPath);
-      return {
-        id: placement.id,
-        fileName: path.basename(localPath),
-        mimeType,
-        dataUrl: `data:${mimeType};base64,${bytes.toString("base64")}`,
-        caption: captions.get(placement.id)
-          || placement.caption.trim()
-          || placement.image.caption.trim()
-          || "配图",
-      };
-    } catch {
-      return undefined;
+  const placements = new Map(draft.images.map((placement) => [placement.id, placement]));
+  const results: ExtensionPublisherImage[] = [];
+  for (const placementId of inserted) {
+    const placement = placements.get(placementId);
+    if (!placement) throw new Error(`正文图片 ${placementId} 没有对应的草稿图片记录`);
+    const inspected = await inspectDraftImageFile(placement, true);
+    if (!inspected.available || !inspected.bytes || !inspected.contentType) {
+      throw new Error(`正文图片 ${placementId} 无法安全读取：${inspected.reason || "图片数据不完整"}`);
     }
-  }));
-  return results.filter((image): image is ExtensionPublisherImage => Boolean(image));
+    if (!placement.image.fingerprint || inspected.fingerprint !== placement.image.fingerprint) {
+      throw new Error(`正文图片 ${placementId} 的文件指纹与预检记录不一致，请重新插入图片`);
+    }
+    results.push({
+      id: placement.id,
+      fileName: path.basename(placement.image.localPath!),
+      mimeType: inspected.contentType,
+      dataUrl: `data:${inspected.contentType};base64,${inspected.bytes.toString("base64")}`,
+      caption: captions.get(placement.id)
+        || placement.caption.trim()
+        || placement.image.caption.trim()
+        || "配图",
+    });
+  }
+  if (results.length !== inserted.length) {
+    throw new Error(`发布图片载荷不完整：正文需要 ${inserted.length} 张，实际准备 ${results.length} 张`);
+  }
+  return results;
 };
 
-const prepareJob = async (draft: ArticleDraft, editorUrl: string): Promise<ExtensionPublisherJob> => ({
+export const prepareJob = async (draft: ArticleDraft, editorUrl: string): Promise<ExtensionPublisherJob> => ({
   id: `publish_${randomUUID()}`,
   draftId: draft.id,
   createdAt: new Date().toISOString(),
@@ -227,32 +235,45 @@ export const openRegularChromePublisher = async (editorUrl: string) => {
 };
 
 export const fillViaChromeExtension = async (
-  draftId: string,
+  draftSnapshot: ArticleDraft,
+  expectedRevisionHash: string,
   editorUrl: string,
+  dependencies: ExtensionPublisherFillDependencies = {},
 ): Promise<PublisherResult> => {
-  const state = await readState();
-  const draft = state.drafts.find((entry) => entry.id === draftId);
-  if (!draft) throw new Error("草稿不存在");
+  assertPublicationRevision(draftSnapshot, "xiaoheihe", expectedRevisionHash);
+  const job = await prepareJob(draftSnapshot, editorUrl);
+  // Wait behind any pending state mutation and compare again immediately
+  // before the job becomes visible to the Chrome helper.
+  const currentDraft = await (dependencies.loadCurrentDraft
+    ? dependencies.loadCurrentDraft(draftSnapshot.id)
+    : updateState((state) => {
+      const draft = state.drafts.find((entry) => entry.id === draftSnapshot.id);
+      return draft ? structuredClone(draft) : undefined;
+    }));
+  if (!currentDraft) {
+    throw new PublicationRevisionConflictError(
+      draftSnapshot.id,
+      expectedRevisionHash,
+      "draft-missing",
+    );
+  }
+  assertPublicationRevision(currentDraft, "xiaoheihe", expectedRevisionHash);
 
-  const report = await extensionPublisherBridge.submit(await prepareJob(draft, editorUrl));
+  const report = await (dependencies.submit
+    ? dependencies.submit(job)
+    : extensionPublisherBridge.submit(job));
   const allStepsOk = ["标题", "正文", "配图", "分区", "话题"].every(
     (name) => report.steps.find((step) => step.name === name)?.ok === true,
   ) && report.steps.every((step) => step.ok);
   const result: PublisherResult = {
     at: new Date().toISOString(),
     ok: allStepsOk,
+    revisionHash: expectedRevisionHash,
     pageUrl: report.pageUrl,
-    community: draft.community,
-    topics: [...draft.topics],
+    community: draftSnapshot.community,
+    topics: [...draftSnapshot.topics],
     steps: report.steps,
     warning: "内容通过常用 Chrome 填入；系统不会点击最终发布。请检查正文、图片、分区和话题。",
   };
-  await updateState((current) => {
-    const target = current.drafts.find((entry) => entry.id === draftId);
-    if (!target) return;
-    target.fillResult = result;
-    if (allStepsOk) target.status = "filled";
-    target.updatedAt = new Date().toISOString();
-  });
   return result;
 };

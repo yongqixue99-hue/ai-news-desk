@@ -12,6 +12,8 @@ const formatDateTime = (iso: string) =>
     hour12: false,
   }).format(new Date(iso));
 
+const displayRunStage = (stage: string) => stage.replace("生成中文速读", "生成中文摘要");
+
 export function RunsPage({
   runs,
   onOpenRun,
@@ -65,7 +67,7 @@ export function RunsPage({
               <span title={run.keywords ? `关键词：${run.keywords}` : undefined}>{run.dateFrom && run.dateTo ? `${run.dateFrom.slice(5)} 至 ${run.dateTo.slice(5)}` : `${run.windowHours} 小时`}</span>
               <span>{run.rawCount}</span>
               <span>{run.candidates.length} / {draftCount}</span>
-              <span>{run.error ?? (empty ? "完成，但未找到候选；请检查来源日志" : run.stage)}</span>
+              <span>{run.error ?? (empty ? "完成，但未找到候选；请检查来源日志" : displayRunStage(run.stage))}</span>
               <div className="run-history-actions">
                 {retryable ? <button className="icon-link retry" onClick={() => onRetry(run.id)} title="按原配置重试"><RotateCcw size={16} /></button> : null}
                 <button className="icon-link" onClick={() => onOpenRun(run.id)} title="打开本次候选"><ExternalLink size={16} /></button>
@@ -81,7 +83,7 @@ export function RunsPage({
                 <div><strong>来源结果</strong><span>{run.sourceResults?.length ?? 0} 个来源 · {failedSources.length} 个异常</span>{failedSources.map((source) => <small key={source.sourceId}>{source.sourceName}：{source.detail}</small>)}</div>
                 <div><strong>过滤漏斗</strong><span>{run.rawCount} 原始 → {run.filteredRawCount ?? run.rawCount} 符合检索 → {run.candidates.length} 候选</span></div>
                 <div><strong>AI 任务</strong>{traces.length ? traces.map((trace) => <span key={trace.id}>{trace.requestedProvider.name || trace.requestedProvider.id} · {trace.requestedProvider.model} · {trace.status === "succeeded" ? "成功" : trace.status === "failed" ? "失败" : "运行中"} · {trace.durationMs !== undefined ? `${(trace.durationMs / 1000).toFixed(1)} 秒` : "计时中"}<small>Replay {trace.replayId}{trace.errors[0] ? ` · ${trace.errors[0].category}：${trace.errors[0].message}` : ""}</small></span>) : <span>本次没有 AI 调用，或是升级前的历史记录。</span>}</div>
-                <div><strong>最近日志</strong>{run.logs.slice(-5).reverse().map((log, index) => <small key={`${log.at}-${index}`}>{formatDateTime(log.at)} · {log.stage} · {log.message}</small>)}</div>
+                <div><strong>最近日志</strong>{run.logs.slice(-5).reverse().map((log, index) => <small key={`${log.at}-${index}`}>{formatDateTime(log.at)} · {displayRunStage(log.stage)} · {log.message}</small>)}</div>
               </div>;
             })() : null}
             </div>

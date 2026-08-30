@@ -41,6 +41,8 @@ export type {
   IntakeReviewRecord,
   PublisherResult,
   PublisherStatus,
+  PlatformPublicationConfirmation,
+  PublicationPlatform,
   ProviderHealthResult,
   Settings,
   SourceConfig,

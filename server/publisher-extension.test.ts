@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ExtensionPublisherBridge, type ExtensionPublisherJob } from "./publisher-extension.js";
+import path from "node:path";
+import {
+  ExtensionPublisherBridge,
+  fillViaChromeExtension,
+  prepareJob,
+  type ExtensionPublisherJob,
+} from "./publisher-extension.js";
+import { publicationRevisionHash } from "./publication-state.js";
+import { workflowMediaRoot } from "./storage.js";
+import type { ArticleDraft } from "./types.js";
 
 const job = (id = "job-1"): ExtensionPublisherJob => ({
   id,
@@ -24,6 +33,96 @@ test("extension image jobs carry the native Xiaoheihe description", () => {
     caption: "广告示意图",
   } satisfies ExtensionPublisherJob["images"][number];
   assert.equal(image.caption, "广告示意图");
+});
+
+test("preparing an extension job rejects an inserted image whose local file is missing", async () => {
+  const missingPath = path.join(workflowMediaRoot, "publisher-extension-test", "missing.png");
+  const draft: ArticleDraft = {
+    id: "draft-with-missing-image",
+    runId: "run-1",
+    candidateId: "candidate-1",
+    createdAt: "2026-08-31T00:00:00.000Z",
+    updatedAt: "2026-08-31T00:00:00.000Z",
+    status: "ready",
+    title: "发布图片缺失测试",
+    paragraphs: ["这是一段满足发布长度要求的正文，用来验证图片缺失时任务会中止。"],
+    take: "",
+    bodyHtml: '<p>这是一段满足发布长度要求的正文。</p><img src="/media/missing.png" data-media-id="placement_missing">',
+    sources: [],
+    uncertainties: [],
+    images: [{
+      id: "placement_missing",
+      afterParagraph: 0,
+      caption: "缺失图片",
+      image: {
+        id: "image_missing",
+        url: "/media/missing.png",
+        localPath: missingPath,
+        publicPath: "/media/missing.png",
+        caption: "缺失图片",
+        attribution: "测试素材",
+        sourceUrl: "https://example.com/source",
+        selected: true,
+        rights: "owned",
+      },
+    }],
+    community: "盒友杂谈",
+    topics: ["AI"],
+    provenance: {
+      originalUrl: "https://example.com/source",
+      generatedBy: "test",
+    },
+  };
+
+  await assert.rejects(
+    prepareJob(draft, "https://xiaoheihe.cn/community/user/post_list"),
+    /placement_missing.*(?:不存在|无法读取)/u,
+  );
+});
+
+test("a preflight snapshot is rejected when the stored draft changes before extension dispatch", async () => {
+  const snapshot: ArticleDraft = {
+    id: "draft-preflight-snapshot",
+    runId: "run-1",
+    candidateId: "candidate-1",
+    createdAt: "2026-08-31T00:00:00.000Z",
+    updatedAt: "2026-08-31T00:00:00.000Z",
+    status: "ready",
+    title: "预检时的标题",
+    paragraphs: ["这是预检时冻结的正文快照。"],
+    take: "",
+    bodyHtml: "<p>这是预检时冻结的正文快照，长度足够用于发布填入测试。</p>",
+    sources: [],
+    uncertainties: [],
+    images: [],
+    community: "盒友杂谈",
+    topics: ["AI"],
+    provenance: {
+      originalUrl: "https://example.com/source",
+      generatedBy: "test",
+    },
+  };
+  const expectedRevisionHash = publicationRevisionHash(snapshot, "xiaoheihe");
+  const current = structuredClone(snapshot);
+  current.title = "用户在预检后保存的新标题";
+  let submitted = false;
+
+  await assert.rejects(
+    fillViaChromeExtension(
+      snapshot,
+      expectedRevisionHash,
+      "https://xiaoheihe.cn/community/user/post_list",
+      {
+        loadCurrentDraft: async () => current,
+        submit: async () => {
+          submitted = true;
+          return { steps: [] };
+        },
+      },
+    ),
+    /预检后.*重新预检/u,
+  );
+  assert.equal(submitted, false);
 });
 
 test("extension bridge becomes ready only after an authenticated heartbeat", () => {

@@ -52,6 +52,7 @@ export const saveUploadedDraftImage = async (
     sourceUrl: "local-upload",
     selected: true,
     rights: "check-required",
+    fingerprint: createHash("sha256").update(bytes).digest("hex"),
   };
   return {
     id: `placement_${randomUUID().slice(0, 8)}`,

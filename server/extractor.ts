@@ -394,5 +394,6 @@ export const downloadSourceImage = async (image: SourceImage, draftId: string) =
     ...image,
     localPath,
     publicPath: `/media/${encodeURIComponent(draftId)}/${encodeURIComponent(fileName)}`,
+    fingerprint: createHash("sha256").update(bytes).digest("hex"),
   } satisfies SourceImage;
 };

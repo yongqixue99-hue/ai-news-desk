@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ExternalLink, Image as ImageIcon, Info, LoaderCircle, MessageSquareText, Settings2, ShieldCheck } from "lucide-react";
 import { bodyHtmlFor } from "../editor-utils";
+import { currentPlatformPublicationConfirmation } from "../publication-view";
 import type { ArticleDraft, WeChatChannelSettings, WeChatDraftSyncReceipt } from "../types";
 
 interface WeChatDraftPanelProps {
@@ -69,7 +70,8 @@ export function WeChatDraftPanel({ draft, settings, dirty, saving, busy, onSaveD
     { label: weakFactCount ? `${weakFactCount} 条事实证据不足` : "事实证据可交付", ok: weakFactCount === 0 },
   ];
   const configured = Boolean(settings.appId && settings.appSecretConfigured);
-  const stale = Boolean(receipt && (dirty || receipt.localDraftUpdatedAt !== draft.updatedAt));
+  const wechatPublication = dirty ? undefined : currentPlatformPublicationConfirmation(draft, "wechat");
+  const stale = Boolean(receipt && (dirty || (!wechatPublication && receipt.localDraftUpdatedAt !== draft.updatedAt)));
   const canSync = configured && draft.contentFormat !== "image-post" && checks.every((check) => check.ok);
 
   const sync = async () => {
@@ -147,9 +149,9 @@ export function WeChatDraftPanel({ draft, settings, dirty, saving, busy, onSaveD
           <a href="https://mp.weixin.qq.com/" target="_blank" rel="noreferrer">打开公众平台<ExternalLink size={12} /></a>
           {!stale ? (
             <div className="wechat-publication-confirm">
-              <p>{draft.publicationConfirmedAt ? "已记录你在微信后台完成发布。" : "发布仍需你在微信后台操作；完成后再回来确认。"}</p>
-              <button type="button" disabled={busy || confirmingPublished || Boolean(draft.publicationConfirmedAt)} onClick={() => void confirmPublished()}>
-                {draft.publicationConfirmedAt ? <><CheckCircle2 size={13} />已确认发布</> : confirmingPublished ? <><LoaderCircle className="spin" size={13} />正在记录…</> : "我已在微信后台发布"}
+              <p>{wechatPublication ? "已记录你在微信后台完成发布。" : "发布仍需你在微信后台操作；完成后再回来确认。"}</p>
+              <button type="button" disabled={busy || confirmingPublished || Boolean(wechatPublication)} onClick={() => void confirmPublished()}>
+                {wechatPublication ? <><CheckCircle2 size={13} />已确认发布</> : confirmingPublished ? <><LoaderCircle className="spin" size={13} />正在记录…</> : "我已在微信后台发布"}
               </button>
             </div>
           ) : null}

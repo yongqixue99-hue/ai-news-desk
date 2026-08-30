@@ -7,8 +7,10 @@ import {
   evaluatePublishedImagePromotion,
   inspectDraftImageFile,
   isManagedDraftImagePath,
+  isPathInsideManagedRoot,
   publicPublishedImagePromotionStatus,
 } from "./published-materials.js";
+import { publicationRevisionHash } from "./publication-state.js";
 import { workflowMediaRoot } from "./storage.js";
 import type { ArticleDraft, DraftImagePlacement, ImageMaterial } from "./types.js";
 
@@ -31,44 +33,49 @@ const placement = (): DraftImagePlacement => ({
     allowedPlatforms: ["xiaoheihe"],
     expiresAt: "2027-08-13T23:59:59.999Z",
     entityTags: ["OpenAI"],
+    fingerprint: "a".repeat(64),
   },
 });
 
-const draft = (): ArticleDraft => ({
-  id: "draft_1",
-  runId: "run_1",
-  candidateId: "candidate_1",
-  createdAt: "2026-08-13T00:00:00.000Z",
-  updatedAt: "2026-08-13T01:00:00.000Z",
-  status: "published",
-  title: "OpenAI 发布新模型",
-  paragraphs: ["正文"],
-  take: "结尾",
-  bodyHtml: '<p>正文</p><img src="/media/draft/image.png" data-media-id="placement_hero">',
-  sources: [],
-  uncertainties: [],
-  images: [placement()],
-  community: "盒友杂谈",
-  topics: ["OpenAI"],
-  provenance: { originalUrl: "https://openai.com/news/launch", generatedBy: "test" },
-  publicationConfirmedAt: "2026-08-13T02:00:00.000Z",
-  publicationReceiptId: "receipt_1",
-  publisherReceipt: {
-    schemaVersion: "publisher-receipt/v1",
-    attemptId: "receipt_1",
-    draftId: "draft_1",
-    mode: "chrome-extension",
-    startedAt: "2026-08-13T01:30:00.000Z",
-    completedAt: "2026-08-13T01:31:00.000Z",
-    outcome: "filled",
-    checks: [],
-    blocking: [],
-    warnings: [],
-    usedImageIds: ["placement_hero"],
-    safety: { operation: "fill-only", finalPublishAttempted: false, finalPublishPerformed: false },
-    summary: "filled",
-  },
-});
+const draft = (): ArticleDraft => {
+  const result: ArticleDraft = {
+    id: "draft_1",
+    runId: "run_1",
+    candidateId: "candidate_1",
+    createdAt: "2026-08-13T00:00:00.000Z",
+    updatedAt: "2026-08-13T01:00:00.000Z",
+    status: "published",
+    title: "OpenAI 发布新模型",
+    paragraphs: ["正文"],
+    take: "结尾",
+    bodyHtml: '<p>正文</p><img src="/media/draft/image.png" data-media-id="placement_hero">',
+    sources: [],
+    uncertainties: [],
+    images: [placement()],
+    community: "盒友杂谈",
+    topics: ["OpenAI"],
+    provenance: { originalUrl: "https://openai.com/news/launch", generatedBy: "test" },
+    publicationConfirmedAt: "2026-08-13T02:00:00.000Z",
+    publicationReceiptId: "receipt_1",
+    publisherReceipt: {
+      schemaVersion: "publisher-receipt/v1",
+      attemptId: "receipt_1",
+      draftId: "draft_1",
+      mode: "chrome-extension",
+      startedAt: "2026-08-13T01:30:00.000Z",
+      completedAt: "2026-08-13T01:31:00.000Z",
+      outcome: "filled",
+      checks: [],
+      blocking: [],
+      warnings: [],
+      usedImageIds: ["placement_hero"],
+      safety: { operation: "fill-only", finalPublishAttempted: false, finalPublishPerformed: false },
+      summary: "filled",
+    },
+  };
+  result.publisherReceipt!.revisionHash = publicationRevisionHash(result, "xiaoheihe");
+  return result;
+};
 
 const existingMaterial = (): ImageMaterial => ({
   id: "existing",
@@ -136,6 +143,59 @@ test("publication confirmation must belong to the same fill receipt", () => {
   assert.match(result.blockers.join(" "), /发布确认.*本次填入回执/);
 });
 
+test("image promotion uses the Xiaoheihe confirmation even when WeChat is the latest global mirror", () => {
+  const platformDraft = draft();
+  const revisionHash = publicationRevisionHash(platformDraft, "xiaoheihe");
+  platformDraft.publisherReceipt!.revisionHash = revisionHash;
+  platformDraft.publicationConfirmations = {
+    xiaoheihe: {
+      platform: "xiaoheihe",
+      confirmedAt: "2026-08-13T02:00:00.000Z",
+      receiptId: "receipt_1",
+      revisionHash,
+    },
+  };
+  platformDraft.publicationConfirmedAt = "2026-08-13T02:30:00.000Z";
+  platformDraft.publicationReceiptId = "wechat-media-newer";
+
+  const result = evaluatePublishedImagePromotion({
+    draft: platformDraft,
+    placement: placement(),
+    existingMaterials: [],
+    fingerprint: "a".repeat(64),
+    localFileAvailable: true,
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.candidate?.promotion.receiptId, "receipt_1");
+});
+
+test("a stale Xiaoheihe confirmation cannot be rescued by a current global mirror", () => {
+  const platformDraft = draft();
+  const revisionHash = publicationRevisionHash(platformDraft, "xiaoheihe");
+  platformDraft.publisherReceipt!.revisionHash = revisionHash;
+  platformDraft.publicationConfirmations = {
+    xiaoheihe: {
+      platform: "xiaoheihe",
+      confirmedAt: "2026-08-13T02:00:00.000Z",
+      receiptId: "receipt_1",
+      revisionHash,
+      staleAt: "2026-08-13T02:10:00.000Z",
+    },
+  };
+
+  const result = evaluatePublishedImagePromotion({
+    draft: platformDraft,
+    placement: placement(),
+    existingMaterials: [],
+    fingerprint: "a".repeat(64),
+    localFileAvailable: true,
+  });
+
+  assert.equal(result.status, "blocked");
+  assert.match(result.blockers.join(" "), /确认.*发布/);
+});
+
 test("a new receipt still blocks an image it did not confirm as actually used", () => {
   const unusedDraft = draft();
   unusedDraft.publisherReceipt!.usedImageIds = [];
@@ -181,6 +241,37 @@ test("an exact fingerprint duplicate is reported rather than copied again", () =
   assert.equal(result.duplicateOf, "existing");
 });
 
+test("a changed local file cannot be promoted as the image bound to the successful receipt", () => {
+  const result = evaluatePublishedImagePromotion({
+    draft: draft(),
+    placement: placement(),
+    existingMaterials: [],
+    fingerprint: "b".repeat(64),
+    localFileAvailable: true,
+  });
+
+  assert.equal(result.status, "blocked");
+  assert.equal(result.canSave, false);
+  assert.match(result.blockers.join(" "), /文件.*变化|指纹.*不一致/u);
+});
+
+test("an image with no reviewed SHA-256 cannot be promoted after publication", () => {
+  const inputDraft = draft();
+  delete inputDraft.images[0]!.image.fingerprint;
+  inputDraft.publisherReceipt!.revisionHash = publicationRevisionHash(inputDraft, "xiaoheihe");
+  const result = evaluatePublishedImagePromotion({
+    draft: inputDraft,
+    placement: inputDraft.images[0]!,
+    existingMaterials: [],
+    fingerprint: "b".repeat(64),
+    localFileAvailable: true,
+  });
+
+  assert.equal(result.status, "blocked");
+  assert.equal(result.canSave, false);
+  assert.match(result.blockers.join(" "), /缺少已审核.*SHA-256.*重新插入/u);
+});
+
 test("missing publication confirmation, missing local file and duplicates remain independently visible", () => {
   const input = draft();
   delete input.publicationConfirmedAt;
@@ -201,6 +292,28 @@ test("promotion never reads an arbitrary local path from mutable draft state", (
   assert.equal(isManagedDraftImagePath("/etc/passwd"), false);
   assert.equal(isManagedDraftImagePath(path.join(workflowMediaRoot, "draft", "image.png")), true);
   assert.equal(isManagedDraftImagePath(`${workflowMediaRoot}-escape/image.png`), false);
+});
+
+test("Windows containment is case-insensitive without accepting sibling or traversal paths", () => {
+  const root = "C:\\Users\\Editor\\.workflow\\media";
+
+  assert.equal(
+    isPathInsideManagedRoot(root, "c:\\users\\EDITOR\\.WORKFLOW\\MEDIA\\draft\\image.png", "win32"),
+    true,
+  );
+  assert.equal(isPathInsideManagedRoot(root, root.toLowerCase(), "win32"), false);
+  assert.equal(
+    isPathInsideManagedRoot(root, "C:\\Users\\Editor\\.workflow\\media-escape\\image.png", "win32"),
+    false,
+  );
+  assert.equal(
+    isPathInsideManagedRoot(root, "C:\\Users\\Editor\\.workflow\\media\\..\\outside.png", "win32"),
+    false,
+  );
+  assert.equal(
+    isPathInsideManagedRoot(root, "D:\\Users\\Editor\\.workflow\\media\\image.png", "win32"),
+    false,
+  );
 });
 
 test("a symlink cannot escape the managed draft media directory", async () => {

@@ -22,6 +22,7 @@ import type {
   PublisherPreflightResult,
   PublishedImagePromotionPublicStatus,
   PublisherStatus,
+  PlatformPublicationConfirmation,
   ProviderHealthResult,
   Settings,
   SourceConfig,
@@ -78,6 +79,9 @@ export interface MaterialMetadataInput {
   rights: ImageMaterial["rights"];
   evidenceNote?: string;
   evidencePath?: string;
+  licenseId?: string;
+  licenseUrl?: string;
+  modificationNote?: string;
   allowedPlatforms: string[];
   expiresAt?: string;
   entityTags: string[];
@@ -177,6 +181,7 @@ export const api = {
       body: "{}",
     }),
   productJob: (jobId: string) => request<ProductJob>(`/api/product/jobs/${jobId}`),
+  productJobs: (limit = 12) => request<ProductJob[]>(`/api/product/jobs?limit=${encodeURIComponent(String(limit))}`),
   editorialSystem: () => request<EditorialSystemView>("/api/editorial-system"),
   saveEditorialProfile: (profile: Partial<EditorialProfile>) =>
     request<EditorialSystemView>("/api/editorial-system/profile", {
@@ -431,6 +436,9 @@ export const api = {
         "x-material-rights": metadata.rights,
         "x-material-evidence-note": encodeURIComponent(metadata.evidenceNote || ""),
         "x-material-evidence-path": encodeURIComponent(metadata.evidencePath || ""),
+        "x-material-license-id": encodeURIComponent(metadata.licenseId || ""),
+        "x-material-license-url": encodeURIComponent(metadata.licenseUrl || ""),
+        "x-material-modification-note": encodeURIComponent(metadata.modificationNote || ""),
         "x-material-allowed-platforms": encodeURIComponent(metadata.allowedPlatforms.join(",")),
         "x-material-expires-at": encodeURIComponent(metadata.expiresAt || ""),
         "x-material-entity-tags": encodeURIComponent(metadata.entityTags.join(",")),
@@ -506,7 +514,7 @@ export const api = {
       body: "{}",
     }),
   confirmPublished: (draftId: string, platform: "xiaoheihe" | "wechat" = "xiaoheihe") =>
-    request<{ recentTopics: string[]; recentCommunities: string[] }>(
+    request<{ confirmation: PlatformPublicationConfirmation; recentTopics: string[]; recentCommunities: string[] }>(
       `/api/drafts/${draftId}/publish-confirmed`,
       { method: "POST", body: JSON.stringify({ platform }) },
     ),

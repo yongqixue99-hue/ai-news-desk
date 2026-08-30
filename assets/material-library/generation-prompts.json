@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "ai-news-material-generation/v1",
+  "generatedAt": "2026-08-31T00:00:00.000Z",
+  "tool": "Codex built-in image_gen",
+  "prompts": [
+    {
+      "assetId": "generic-ai-infrastructure-neutral",
+      "prompt": "Use case: stylized-concept\nAsset type: reusable landscape editorial image for Chinese AI news articles\nPrimary request: create a brand-neutral visual metaphor for artificial intelligence infrastructure: a luminous processor core connected to layered data pathways inside a calm modern server environment\nScene/backdrop: abstract but believable technology space, no identifiable products\nSubject: one central processor-like module, fiber-like data connections, subtle server silhouettes\nStyle/medium: premium editorial 3D illustration with restrained realism, crisp enough for article use\nComposition/framing: 3:2 landscape, strong central focus with generous negative space around the subject for flexible crops\nLighting/mood: thoughtful, credible, calm; soft cool highlights with warm neutral shadows\nColor palette: charcoal, muted blue, warm off-white accents\nConstraints: no logos, no brand colors, no people, no text, no watermark, no recognizable copyrighted product design; suitable as a generic fallback image for AI infrastructure, chips, models, or data-center stories\nAvoid: neon cyberpunk excess, floating random letters, fake UI, clutter"
+    },
+    {
+      "assetId": "generic-verified-information-flow",
+      "prompt": "Use case: stylized-concept\nAsset type: reusable landscape editorial image for Chinese AI and technology news articles\nPrimary request: create a brand-neutral visual metaphor for AI agents and information flow: several distinct streams of verified documents and signals converging into a clear decision map\nScene/backdrop: clean abstract editorial environment, grounded and professional rather than futuristic fantasy\nSubject: layered paper-like information cards, connected nodes, subtle directional paths, one organized output layer\nStyle/medium: premium tactile editorial 3D illustration with paper, glass, and fine data-line textures\nComposition/framing: 3:2 landscape, readable visual hierarchy, flexible crop-safe margins\nLighting/mood: analytical, trustworthy, calm, newsroom-like\nColor palette: warm paper white, graphite, muted coral and restrained blue accents\nConstraints: no logos, no brands, no people, no text, no watermark, no fake readable UI; suitable as a generic fallback for AI agents, research, product launches, governance, or software stories\nAvoid: neon cyberpunk, humanoid robots, glowing brains, random typography, visual clutter"
+    }
+  ]
+}

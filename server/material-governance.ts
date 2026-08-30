@@ -20,6 +20,9 @@ export interface GovernedMaterial {
   rights: MaterialRightsStatus;
   sourceUrl?: string;
   evidence: MaterialRightsEvidence;
+  licenseId?: string;
+  licenseUrl?: string;
+  modificationNote?: string;
   allowedPlatforms: string[];
   expiresAt?: string;
   entityTags: string[];
@@ -37,6 +40,9 @@ export interface MaterialGovernanceInput {
   rights?: MaterialRightsStatus | string;
   sourceUrl?: string;
   evidence?: MaterialRightsEvidence;
+  licenseId?: string;
+  licenseUrl?: string;
+  modificationNote?: string;
   allowedPlatforms?: string[];
   expiresAt?: string;
   entityTags?: string[];
@@ -95,6 +101,9 @@ export const normalizeGovernedMaterial = (
       note: trimmed(input.evidence?.note),
       path: trimmed(input.evidence?.path),
     },
+    licenseId: trimmed(input.licenseId),
+    licenseUrl: trimmed(input.licenseUrl),
+    modificationNote: trimmed(input.modificationNote),
     allowedPlatforms: uniqueNormalized(
       input.allowedPlatforms,
       (value) => value.toLowerCase(),
@@ -172,6 +181,17 @@ export const evaluateMaterialPublishEligibility = (
     && !material.evidence.path?.trim()
   ) {
     blockers.push("授权素材缺少授权证据说明或证据文件路径。");
+  }
+  const claimsCreativeCommons = effectiveRights === "licensed" && /(?:creative commons|\bcc[- ]?by)/iu.test([
+    material.licenseId,
+    material.attribution,
+    material.evidence.note,
+  ].filter(Boolean).join(" "));
+  if (claimsCreativeCommons && (!material.licenseId?.trim() || !hasTraceableSourceUrl(material.licenseUrl))) {
+    blockers.push("Creative Commons 素材缺少机器可读的许可标识或许可条款 URL。");
+  }
+  if (claimsCreativeCommons && !material.modificationNote?.trim()) {
+    blockers.push("Creative Commons 素材缺少修改说明（未修改也需要明确记录）。");
   }
   if (
     effectiveRights === "editorial-screenshot"

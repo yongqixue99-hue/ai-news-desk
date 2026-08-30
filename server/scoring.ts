@@ -9,6 +9,7 @@ import type {
   CollectionTopicId,
   RawHorizonItem,
   ScoreBreakdown,
+  SourceImage,
 } from "./types.js";
 
 const consequencePattern = /launch|release|announc|acquir|funding|ban|law|regulat|safety|security|chip|model|api|pricing|partnership|lawsuit|fine|breach|open.source|benchmark/i;
@@ -189,22 +190,99 @@ const canonicalUrlForItem = (item: RawHorizonItem) => {
   }
 };
 
+const xSourceImagesForItem = (item: RawHorizonItem): SourceImage[] => {
+  if (item.source_type !== "x" || !Array.isArray(item.metadata?.x_media)) return [];
+  const attribution = item.author?.trim() || "X 官方账号";
+  const entityTags = [item.metadata?.x_user_name, item.metadata?.x_username]
+    .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+    .map((value) => value.trim());
+  const seen = new Set<string>();
+  return item.metadata.x_media.flatMap((rawMedia, index) => {
+    if (!rawMedia || typeof rawMedia !== "object") return [];
+    const media = rawMedia as Record<string, unknown>;
+    const mediaKey = typeof media.media_key === "string" ? media.media_key.trim() : "";
+    const rawUrl = typeof media.url === "string" ? media.url.trim() : "";
+    if (!mediaKey || !rawUrl || seen.has(mediaKey)) return [];
+    try {
+      const url = new URL(rawUrl);
+      if (!/^https?:$/u.test(url.protocol)) return [];
+      seen.add(mediaKey);
+      const kind = media.kind === "preview" ? "preview" : "photo";
+      const altText = typeof media.alt_text === "string" ? media.alt_text.trim().slice(0, 180) : "";
+      const width = finiteMetadataNumber(media.width);
+      const height = finiteMetadataNumber(media.height);
+      return [{
+        id: `x-media:${mediaKey || index}`,
+        url: url.toString(),
+        caption: altText || `${attribution} 发布的 X ${kind === "preview" ? "视频预览图" : "图片"}`,
+        attribution,
+        sourceUrl: item.url,
+        width: width && width > 0 ? width : undefined,
+        height: height && height > 0 ? height : undefined,
+        selected: false,
+        rights: "check-required",
+        evidenceNote: "来自 X 官方账号原帖，仅作新闻线索或评论性引用；发布前必须人工核验转载授权与平台规则。",
+        allowedPlatforms: [],
+        entityTags,
+      } satisfies SourceImage];
+    } catch {
+      return [];
+    }
+  });
+};
+
 const shanghaiBoundary = (date: string, endExclusive = false) => {
   const value = new Date(`${date}T00:00:00+08:00`);
   if (endExclusive) value.setDate(value.getDate() + 1);
   return value.getTime();
 };
 
+export type RawItemTimeRejectionReason =
+  | "missing-published-at"
+  | "invalid-published-at"
+  | "future-published-at"
+  | "outside-date-range"
+  | "outside-window";
+
+interface RawItemSearchOptions {
+  /** Required for automatic collection. Omit when only applying keyword filters. */
+  windowHours?: number;
+  /** Injectable clock for deterministic filtering and tests. */
+  now?: number;
+}
+
+export const rawItemTimeRejectionReason = (
+  item: RawHorizonItem,
+  filters: Pick<CollectionRequest, "dateFrom" | "dateTo"> = {},
+  options: RawItemSearchOptions = {},
+): RawItemTimeRejectionReason | undefined => {
+  const hasExplicitRange = Boolean(filters.dateFrom || filters.dateTo);
+  if (!hasExplicitRange && options.windowHours === undefined) return undefined;
+
+  const rawPublishedAt = item.published_at?.trim();
+  if (!rawPublishedAt) return "missing-published-at";
+  const publishedAt = Date.parse(rawPublishedAt);
+  if (!Number.isFinite(publishedAt)) return "invalid-published-at";
+
+  const currentTime = Number.isFinite(options.now) ? options.now! : Date.now();
+  if (publishedAt > currentTime) return "future-published-at";
+
+  if (hasExplicitRange) {
+    if (filters.dateFrom && publishedAt < shanghaiBoundary(filters.dateFrom)) return "outside-date-range";
+    if (filters.dateTo && publishedAt >= shanghaiBoundary(filters.dateTo, true)) return "outside-date-range";
+    return undefined;
+  }
+
+  const windowHours = Math.max(1, options.windowHours ?? 1);
+  return publishedAt < currentTime - windowHours * 3_600_000 ? "outside-window" : undefined;
+};
+
 export const rawItemMatchesSearch = (
   item: RawHorizonItem,
   filters: Pick<CollectionRequest, "dateFrom" | "dateTo" | "keywords"> = {},
+  options: RawItemSearchOptions = {},
 ) => {
-  if (filters.dateFrom || filters.dateTo) {
-    const publishedAt = Date.parse(item.published_at ?? item.fetched_at ?? "");
-    if (!Number.isFinite(publishedAt)) return false;
-    if (filters.dateFrom && publishedAt < shanghaiBoundary(filters.dateFrom)) return false;
-    if (filters.dateTo && publishedAt >= shanghaiBoundary(filters.dateTo, true)) return false;
-  }
+  if (rawItemTimeRejectionReason(item, filters, options)) return false;
   const terms = keywordTerms(filters.keywords);
   if (!terms.length) return true;
   const searchable = `${item.title} ${item.content ?? ""}`.toLocaleLowerCase();
@@ -219,11 +297,17 @@ export const rawItemToCandidate = (
   const sourceName = sourceNameFor(item);
   const sourceRole = sourceRoleForItem(item);
   const scored = candidateScore(item, sourceName, windowHours, topicIds);
-  const points = finiteMetadataNumber(item.metadata?.score);
-  const comments = finiteMetadataNumber(item.metadata?.descendants ?? item.metadata?.comment_count);
+  const xPoints = item.source_type === "x"
+    ? Math.min(Number.MAX_SAFE_INTEGER, ["like_count", "retweet_count", "quote_count"]
+      .reduce((total, key) => total + (finiteMetadataNumber(item.metadata?.[key]) ?? 0), 0))
+    : undefined;
+  const points = finiteMetadataNumber(item.metadata?.score) ?? xPoints;
+  const comments = finiteMetadataNumber(item.metadata?.descendants ?? item.metadata?.comment_count)
+    ?? (item.source_type === "x" ? finiteMetadataNumber(item.metadata?.reply_count) ?? 0 : undefined);
   const discussionUrl = typeof item.metadata?.discussion_url === "string"
     ? item.metadata.discussion_url
-    : undefined;
+    : item.source_type === "x" ? item.url : undefined;
+  const sourceImages = xSourceImagesForItem(item);
   const id = createHash("sha1").update(`${item.id}:${item.url}`).digest("hex").slice(0, 14);
   return {
     id,
@@ -255,8 +339,8 @@ export const rawItemToCandidate = (
     clusterSize: 1,
     relatedSources: [sourceName],
     evidence: scored.evidence,
-    imageCount: null,
-    images: [],
+    imageCount: item.source_type === "x" ? sourceImages.length : null,
+    images: sourceImages,
     selected: false,
     status: "candidate",
   };

@@ -170,18 +170,18 @@ export const parseCandidateBriefings = (
   options: CandidateBriefingParseOptions,
 ): ParsedCandidateBriefing[] => {
   const payload = JSON.parse(withoutCodeFence(rendered)) as { items?: RenderedBriefingItem[] };
-  if (!payload || !Array.isArray(payload.items)) throw new Error("中文速读结果缺少 items");
+  if (!payload || !Array.isArray(payload.items)) throw new Error("中文摘要结果缺少 items");
 
   const expected = new Map(evidenceInputs.map((input) => [input.candidateId, input]));
-  if (expected.size !== evidenceInputs.length) throw new Error("中文速读输入包含重复候选 ID");
-  if (payload.items.length !== expected.size) throw new Error("中文速读结果数量与候选数量不一致");
+  if (expected.size !== evidenceInputs.length) throw new Error("中文摘要输入包含重复候选 ID");
+  if (payload.items.length !== expected.size) throw new Error("中文摘要结果数量与候选数量不一致");
 
   const byId = new Map<string, ParsedCandidateBriefing>();
   for (const item of payload.items) {
     const candidateId = typeof item.candidateId === "string" ? item.candidateId.trim() : "";
     const evidence = expected.get(candidateId);
-    if (!evidence) throw new Error(`中文速读返回了未知候选：${candidateId || "空 ID"}`);
-    if (byId.has(candidateId)) throw new Error(`中文速读重复返回候选：${candidateId}`);
+    if (!evidence) throw new Error(`中文摘要返回了未知候选：${candidateId || "空 ID"}`);
+    if (byId.has(candidateId)) throw new Error(`中文摘要重复返回候选：${candidateId}`);
     const communitySummaryZh = optionalChineseText(item.communitySummaryZh, "社区摘要", 220);
     const focusZh = communityFocus(item.communityFocusZh);
     const disagreementZh = optionalChineseText(item.communityDisagreementZh, "社区分歧", 160);
@@ -215,7 +215,7 @@ export const parseCandidateBriefings = (
 
   return evidenceInputs.map((input) => {
     const briefing = byId.get(input.candidateId);
-    if (!briefing) throw new Error(`中文速读漏掉候选：${input.candidateId}`);
+    if (!briefing) throw new Error(`中文摘要漏掉候选：${input.candidateId}`);
     return briefing;
   });
 };

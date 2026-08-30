@@ -63,7 +63,7 @@ const displayTitle = (candidate: Candidate) => candidate.briefing?.titleZh
 const displaySummary = (candidate: Candidate) => candidate.briefing?.summaryZh
   ?? (containsChinese(candidate.excerpt)
     ? candidate.excerpt
-    : "系统正在读取这条社区讨论并补全中文速读，你不需要再点开英文原文才能判断内容。");
+    : "系统正在读取这条社区讨论并补全中文摘要，你不需要再点开英文原文才能判断内容。");
 
 const displayCommunitySummary = (candidate: Candidate) => candidate.communityInsight?.summaryZh;
 
@@ -200,7 +200,7 @@ export function CommunitySquare({
     return count ? [{ ...item, count }] : [];
   }), [feed.items]);
   const risingCount = feed.items.filter((entry) => entry.trend?.direction === "rising").length;
-  const imageReadyCount = feed.items.filter((entry) => entry.candidate.images.length > 0).length;
+  const imageReadyCount = feed.items.filter((entry) => entry.candidate.images.some((image) => Boolean(image.publicPath))).length;
   const communitySources = useMemo(() => sources.filter((source) => source.role === "community"), [sources]);
 
   const filteredItems = useMemo(() => sortEntries(
@@ -274,7 +274,7 @@ export function CommunitySquare({
         <div>
           <span className="community-page-kicker"><MessagesSquare size={15} />COMMUNITY SIGNALS</span>
           <h1>社区广场</h1>
-          <p>直接看社区正在讨论什么。后台负责更新、去重和中文速读，你只负责判断要不要做。</p>
+          <p>直接看社区正在讨论什么。后台负责更新、去重和中文摘要，你只负责判断要不要做。</p>
         </div>
         <div className="community-update-state" role="status">
           {briefingState === "loading" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}
@@ -288,7 +288,7 @@ export function CommunitySquare({
       <section className="community-overview" aria-label="社区广场概览">
         <div><strong>{feed.items.length}</strong><span>条有效热点</span></div>
         <div><strong>{risingCount}</strong><span>条正在升温</span></div>
-        <div><strong>{imageReadyCount}</strong><span>条已有原图</span></div>
+        <div><strong>{imageReadyCount}</strong><span>条原图已缓存</span></div>
         <p><TrendingUp size={16} />已利用 {feed.duplicateCount} 个历史快照计算变化，{feed.expiredCount} 条过期内容已退出。</p>
       </section>
 
@@ -330,7 +330,7 @@ export function CommunitySquare({
 
       {briefingState === "error" ? (
         <div className="community-inline-warning" role="status">
-          社区观点本轮未补全；事件速读仍可浏览，后台下次进入时会再尝试。
+          社区观点本轮未补全；事件摘要仍可浏览，后台下次进入时会再尝试。
         </div>
       ) : null}
 
@@ -355,7 +355,7 @@ export function CommunitySquare({
                   <span>{topicLabel(featured.candidate)}</span>
                   <span>{formatRelativeTime(featured.candidate.publishedAt)}</span>
                   <span className={featured.candidate.briefing ? "translated" : "translating"}>
-                    <Languages size={11} />{featured.candidate.briefing ? "中文速读已就绪" : "中文速读生成中"}
+                    <Languages size={11} />{featured.candidate.briefing ? "中文摘要已就绪" : "中文摘要生成中"}
                   </span>
                 </div>
                 <h2 id="community-featured-title">{displayTitle(featured.candidate)}</h2>

@@ -1,15 +1,18 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "./components/AppShell";
 import { AISettingsPage } from "./components/AISettingsPage";
+import { BootstrapStatusPage } from "./components/BootstrapStatusPage";
 import { CommunitySquare } from "./components/CommunitySquare";
 import { EditorialSystemPage } from "./components/EditorialSystemPage";
 import { Notice, type NoticeState } from "./components/Notice";
+import { ProductJobCenter } from "./components/ProductJobCenter";
 import { RunsPage } from "./components/RunsPage";
 import { SchedulePage } from "./components/SchedulePage";
 import { SourcesPage } from "./components/SourcesPage";
 import { TodayPage } from "./components/TodayPage";
 import { Workbench } from "./components/Workbench";
 import { api, type MaterialMetadataInput, type ShellView } from "./api";
+import { resolveBootstrap, type BootstrapState } from "./bootstrap-state";
 import { useHashPageNavigation } from "./hooks/useHashPageNavigation";
 import type {
   ArticleDraft,
@@ -21,6 +24,7 @@ import type {
   HealthState,
   PublisherResult,
   PublisherPreflightResult,
+  PlatformPublicationConfirmation,
   PublishedImagePromotionPublicStatus,
   ProviderHealthResult,
   AiProviderConfig,
@@ -56,6 +60,7 @@ function App() {
   const [health, setHealth] = useState<HealthState>();
   const [shell, setShell] = useState<ShellView>({ notifications: [], notificationsMuted: false, activeRunCount: 0 });
   const [pendingQuickDraft, setPendingQuickDraft] = useState<{ runId: string; draftId: string }>();
+  const [bootstrapState, setBootstrapState] = useState<BootstrapState>({ status: "idle" });
 
   const refresh = useCallback(async () => {
     const [next, nextEditorialSystem] = await Promise.all([
@@ -100,17 +105,22 @@ function App() {
   }, []);
   const loadStorageUsage = useCallback(() => api.storageUsage(), []);
 
+  const bootstrap = useCallback(async () => {
+    setBootstrapState({ status: "loading" });
+    const result = await resolveBootstrap(refresh);
+    setBootstrapState(result);
+    if (result.status === "ready") void refreshHealth();
+  }, [refresh, refreshHealth]);
+
   useEffect(() => {
     void refreshShell();
   }, [refreshShell]);
 
   useEffect(() => {
     if (page === "today" || (state && editorialSystem)) return;
-    void refresh().catch((error) =>
-      setNotice({ kind: "error", message: error instanceof Error ? error.message : String(error) }),
-    );
-    void refreshHealth();
-  }, [editorialSystem, page, refresh, refreshHealth, state]);
+    if (bootstrapState.status === "loading" || bootstrapState.status === "error") return;
+    void bootstrap();
+  }, [bootstrap, bootstrapState.status, editorialSystem, page, state]);
 
   useEffect(() => {
     if (state?.settings.publisherMode !== "chrome-extension") return;
@@ -209,6 +219,16 @@ function App() {
     navigate(notification.target.page);
   };
 
+  const openLatestDraft = async () => {
+    try {
+      const next = await refresh();
+      setActiveDraftId(next.drafts[0]?.id);
+      navigate("drafts");
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
   if ((!state || !editorialSystem) && page === "today") {
     return (
       <AppShell
@@ -222,13 +242,14 @@ function App() {
         onOpenNotification={openShellNotification}
       >
         <Notice notice={notice} onClose={() => setNotice(null)} />
+        <ProductJobCenter onOpenDrafts={() => void openLatestDraft()} />
         <TodayPage onNavigate={navigate} onNotice={(kind, message) => setNotice({ kind, message })} />
       </AppShell>
     );
   }
 
   if (!state || !editorialSystem) {
-    return <div className="app-loading"><span className="loading-mark" />正在启动 AI 新闻台…</div>;
+    return <BootstrapStatusPage state={bootstrapState} onRetry={() => void bootstrap()} />;
   }
 
   const reportError = (error: unknown) =>
@@ -492,7 +513,7 @@ function App() {
       setNotice({
         kind: result.failed ? "info" : "success",
         message: result.requested === 0
-          ? "这批候选已经都有中文速读。"
+          ? "这批候选已经都有中文摘要。"
           : result.failed
             ? `已补全 ${result.completed} 条，另有 ${result.failed} 条仍保留原标题，可稍后重试。`
             : `已补全 ${result.completed} 条中文标题和一句话摘要。`,
@@ -1023,10 +1044,10 @@ function App() {
     }
   };
 
-  const confirmPublished = async (draftId: string, platform: "xiaoheihe" | "wechat") => {
+  const confirmPublished = async (draftId: string, platform: "xiaoheihe" | "wechat"): Promise<PlatformPublicationConfirmation> => {
     setActionBusy(true);
     try {
-      await api.confirmPublished(draftId, platform);
+      const result = await api.confirmPublished(draftId, platform);
       setNotice({
         kind: "success",
         message: platform === "wechat"
@@ -1034,6 +1055,7 @@ function App() {
           : "本次使用的分区和标签已保存到发布历史。",
       });
       await refresh();
+      return result.confirmation;
     } catch (error) {
       reportError(error);
       throw error;
@@ -1097,6 +1119,7 @@ function App() {
       onOpenNotification={openNotification}
     >
       <Notice notice={notice} onClose={() => setNotice(null)} />
+      <ProductJobCenter onOpenDrafts={() => void openLatestDraft()} />
       {page === "today" ? (
         <TodayPage
           onNavigate={navigate}
@@ -1160,6 +1183,8 @@ function App() {
             wechatSettings={state.settings.wechat}
             recentTopics={state.settings.recentTopics}
             recentCommunities={state.settings.recentCommunities}
+            onGoToday={() => navigate("today")}
+            onOpenWorkbench={() => navigate("workbench")}
             onSelectDraft={setActiveDraftId}
             onSave={saveDraft}
             onLoadRevisions={loadDraftRevisions}

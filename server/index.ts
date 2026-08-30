@@ -42,6 +42,16 @@ import {
 } from "./data-management.js";
 import { evaluateDraftReadiness } from "./draft-readiness.js";
 import { assertDraftTransition } from "./draft-lifecycle.js";
+import {
+  attachWeChatDeliveryReceipt,
+  attachXiaoheiheDeliveryReceipt,
+  confirmDraftPublication,
+  currentPublicationConfirmation,
+  PublicationRevisionConflictError,
+  publicationRevisionHash,
+  reconcileDraftPublicationAfterEdit,
+  recordXiaoheiheFillAttempt,
+} from "./publication-state.js";
 import { importDraftImageFromUrl, saveUploadedDraftImage } from "./media.js";
 import {
   buildScreenshotImagePostDraft,
@@ -57,6 +67,10 @@ import {
   saveMaterialBytes,
   saveUploadedMaterial,
 } from "./materials.js";
+import {
+  loadOptionalMaterialLibraryCatalog,
+  seedMaterialLibrary,
+} from "./material-library-seed.js";
 import {
   evaluatePublishedImagePromotion,
   inspectDraftImageFile,
@@ -110,7 +124,7 @@ import { createWeChatDraftDesk } from "./wechat-draft.js";
 import { createWeChatHttpGateway } from "./wechat-http.js";
 import { loadWeChatPlacementImage } from "./wechat-image.js";
 import { createDeliveryDesk } from "./delivery-desk.js";
-import { buildContentPackage } from "./package-desk.js";
+import { buildContentPackage, freezeContentPackageAssets } from "./package-desk.js";
 import { buildTodayView, storyById } from "./story-desk.js";
 import { enrichStoryExplanation } from "./story-explanation-service.js";
 import { createDraftFromPackage } from "./draft-desk.js";
@@ -245,11 +259,32 @@ const respondMaterialError = (response: express.Response, error: unknown) => {
   return true;
 };
 
-const publisherPreflightFor = async (draft: ArticleDraft, settings: Settings) => {
+const publisherPreflightFor = async (
+  draft: ArticleDraft,
+  settings: Settings,
+  expectedRevisionHash = publicationRevisionHash(draft, "xiaoheihe"),
+) => {
   const status = await publisherStatus(settings);
   const inserted = insertedMediaIds(draft);
   const captions = publisherImageCaptions(draft);
+  const placementsById = new Map(draft.images.map((placement) => [placement.id, placement]));
+  const inspectedImages = await Promise.all([...inserted].map(async (placementId) => {
+    const placement = placementsById.get(placementId);
+    if (!placement) return { id: placementId, available: false, caption: "" };
+    const inspected = await inspectDraftImageFile(placement);
+    const fingerprintMatches = Boolean(
+      inspected.fingerprint
+      && placement.image.fingerprint
+      && inspected.fingerprint === placement.image.fingerprint,
+    );
+    return {
+      id: placement.id,
+      available: inspected.available && fingerprintMatches,
+      caption: captions.get(placement.id) || placement.caption || placement.image.caption,
+    };
+  }));
   const preflight = evaluatePublisherPreflight({
+    expectedRevisionHash,
     runtime: publisherRuntimeFromStatus(status, {
       loggedIn: status.loggedIn,
       editorReady: status.editorReady,
@@ -264,15 +299,9 @@ const publisherPreflightFor = async (draft: ArticleDraft, settings: Settings) =>
         : publisherBodyHtml(draft),
       community: draft.community,
       topics: draft.topics,
-      images: draft.images
-        .filter((placement) => inserted.has(placement.id))
-        .map((placement) => ({
-          id: placement.id,
-          available: Boolean(placement.image.localPath || placement.image.publicPath),
-          caption: captions.get(placement.id) || placement.caption || placement.image.caption,
-        })),
+      images: inspectedImages,
     },
-    minimumProtocolVersion: draft.contentFormat === "image-post" ? "0.1.17" : "0.1.14",
+    minimumProtocolVersion: "0.1.18",
   });
   // Only media actually referenced by the article can block delivery. Drafts
   // may keep unused source images as a research tray, and those should not
@@ -337,7 +366,7 @@ app.get(
     const view = buildTodayView(await readState());
     const database = await getLocalDatabase();
     for (const story of [...view.mustReads, ...view.secondary].slice(0, 5)) {
-      if (story.imageCount >= 2) continue;
+      if ((story.localImageCount ?? 0) >= 2) continue;
       database.enqueueJob({
         type: "hydrate-story-assets",
         idempotencyKey: `hydrate-story-assets:${story.id}:${story.lastSeenAt}`,
@@ -480,7 +509,7 @@ app.post(
       hydrateStoryAssets(storyId, 2),
       hydrateStoryDiscussion(storyId),
     ]);
-    const contentPackage = buildContentPackage(await readState(), {
+    const builtPackage = buildContentPackage(await readState(), {
       storyId,
       mode: requestedMode as Exclude<AssignmentMode, "watch" | "skip"> | undefined,
       discussionSamples,
@@ -492,7 +521,8 @@ app.post(
       subjectId: storyId,
       payload: visualResult,
     });
-    const existing = database.getContentPackage<ContentPackage>(contentPackage.id);
+    const existing = database.getContentPackage<ContentPackage>(builtPackage.id);
+    const contentPackage = existing ?? await freezeContentPackageAssets(builtPackage);
     const saved = existing ?? database.saveContentPackage(contentPackage);
     if (!existing) {
       database.recordFeedback({
@@ -1122,6 +1152,9 @@ app.post(
           rights: request.get("x-material-rights") as ImageMaterial["rights"],
           evidenceNote: request.get("x-material-evidence-note"),
           evidencePath: decodedHeader(request, "x-material-evidence-path"),
+          licenseId: request.get("x-material-license-id"),
+          licenseUrl: decodedHeader(request, "x-material-license-url"),
+          modificationNote: request.get("x-material-modification-note"),
           allowedPlatforms: decodedHeaderList(request, "x-material-allowed-platforms"),
           expiresAt: decodedHeader(request, "x-material-expires-at"),
           entityTags: decodedHeaderList(request, "x-material-entity-tags"),
@@ -1158,6 +1191,9 @@ app.post(
         rights: request.body?.rights,
         evidenceNote: typeof request.body?.evidenceNote === "string" ? request.body.evidenceNote : undefined,
         evidencePath: typeof request.body?.evidencePath === "string" ? request.body.evidencePath : undefined,
+        licenseId: typeof request.body?.licenseId === "string" ? request.body.licenseId : undefined,
+        licenseUrl: typeof request.body?.licenseUrl === "string" ? request.body.licenseUrl : undefined,
+        modificationNote: typeof request.body?.modificationNote === "string" ? request.body.modificationNote : undefined,
         allowedPlatforms: strings(request.body?.allowedPlatforms),
         expiresAt: typeof request.body?.expiresAt === "string" ? request.body.expiresAt : undefined,
         entityTags: strings(request.body?.entityTags),
@@ -1176,7 +1212,12 @@ app.delete(
     const removed = await updateState((state) => {
       const index = state.materials.findIndex((material) => material.id === request.params.materialId);
       if (index < 0) return undefined;
-      return state.materials.splice(index, 1)[0];
+      const material = state.materials.splice(index, 1)[0];
+      if (material?.seedAssetId && !state.materialSeedTombstones.includes(material.seedAssetId)) {
+        state.materialSeedTombstones.push(material.seedAssetId);
+        state.materialSeedTombstones = state.materialSeedTombstones.slice(-1_000);
+      }
+      return material;
     });
     if (!removed) {
       response.status(404).json({ error: "图片素材不存在" });
@@ -1507,7 +1548,7 @@ app.post(
       return;
     }
     if (["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status)) {
-      response.status(409).json({ error: "任务仍在运行，中文速读会在采集后自动生成" });
+      response.status(409).json({ error: "任务仍在运行，中文摘要会在采集后自动生成" });
       return;
     }
     const candidateIds = Array.isArray(request.body?.candidateIds)
@@ -1784,6 +1825,7 @@ app.patch(
       const target = state.drafts.find((entry) => entry.id === request.params.draftId);
       if (!target) return undefined;
       const body = request.body as Partial<ArticleDraft> & { _saveMode?: DraftSaveMode };
+      const beforeDraft = structuredClone(target);
       const before = snapshotDraft(target);
       const saveMode: DraftSaveMode = body._saveMode === "auto" ? "auto" : "manual";
       if (body.status !== undefined) assertDraftTransition(target, body.status);
@@ -1791,7 +1833,9 @@ app.patch(
         if (body[key] !== undefined) (target[key] as unknown) = body[key];
       }
       if (body.bodyHtml !== undefined) target.bodyHtml = sanitizeDraftHtml(body.bodyHtml);
-      target.updatedAt = new Date().toISOString();
+      const updatedAt = new Date().toISOString();
+      reconcileDraftPublicationAfterEdit(beforeDraft, target, updatedAt);
+      target.updatedAt = updatedAt;
       appendDraftRevision(state, target, saveMode);
       return { draft: target, before, after: snapshotDraft(target), saveMode };
     });
@@ -2014,10 +2058,11 @@ app.post(
         contentSourceUrl,
         previousReceipt: latestDraft.wechatDraft,
       });
+      receipt.revisionHash = publicationRevisionHash(latestDraft, "wechat");
       const updatedDraft = await updateState((current) => {
         const target = current.drafts.find((entry) => entry.id === draftId);
         if (!target) return undefined;
-        target.wechatDraft = receipt;
+        attachWeChatDeliveryReceipt(target, receipt, receipt.syncedAt);
         return target;
       });
       return { receipt, draft: updatedDraft };
@@ -2134,6 +2179,9 @@ app.post(
           rights: candidate.rights,
           evidenceNote: candidate.evidence.note,
           evidencePath: candidate.evidence.path,
+          licenseId: candidate.licenseId,
+          licenseUrl: candidate.licenseUrl,
+          modificationNote: candidate.modificationNote,
           allowedPlatforms: candidate.allowedPlatforms,
           expiresAt: candidate.expiresAt,
           entityTags: candidate.entityTags,
@@ -2175,7 +2223,12 @@ app.get(
       response.status(404).json({ error: "草稿不存在" });
       return;
     }
-    response.json(await publisherPreflightFor(draft, state.settings));
+    const draftSnapshot = structuredClone(draft);
+    response.json(await publisherPreflightFor(
+      draftSnapshot,
+      state.settings,
+      publicationRevisionHash(draftSnapshot, "xiaoheihe"),
+    ));
   }),
 );
 
@@ -2243,15 +2296,31 @@ app.post(
       response.status(404).json({ error: "草稿不存在" });
       return;
     }
-    const preflight = await publisherPreflightFor(draft, state.settings);
+    const draftSnapshot = structuredClone(draft);
+    const expectedRevisionHash = publicationRevisionHash(draftSnapshot, "xiaoheihe");
+    const preflight = await publisherPreflightFor(
+      draftSnapshot,
+      state.settings,
+      expectedRevisionHash,
+    );
     const attempt = createPublisherAttempt(preflight);
     if (!preflight.canQueueFill) {
       const receipt = completePublisherAttempt(attempt, { steps: [] });
+      receipt.revisionHash = expectedRevisionHash;
+      const blockedResult = {
+        at: receipt.completedAt,
+        ok: false,
+        revisionHash: expectedRevisionHash,
+        steps: [],
+        warning: preflight.summary,
+        preflight,
+        receipt,
+      };
       await updateState((current) => {
         current.publisherReceipts.unshift(receipt);
         current.publisherReceipts = current.publisherReceipts.slice(0, 100);
         const target = current.drafts.find((entry) => entry.id === draftId);
-        if (target) target.publisherReceipt = receipt;
+        if (target) recordXiaoheiheFillAttempt(target, blockedResult, receipt, receipt.completedAt);
         if (preflight.blocking.some((issue) => issue.code === "PREFLIGHT_TRANSPORT_DISCONNECTED")) {
           appendWorkflowNotification(current, {
             type: "publisher-offline",
@@ -2266,13 +2335,46 @@ app.post(
       response.status(409).json({ error: preflight.summary, preflight, receipt });
       return;
     }
-    const result = await fillDraftInPublisher(draftId, state.settings);
+    let result;
+    try {
+      result = await fillDraftInPublisher(
+        draftSnapshot,
+        expectedRevisionHash,
+        state.settings,
+      );
+    } catch (error) {
+      if (error instanceof PublicationRevisionConflictError) {
+        response.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+          expectedRevisionHash: error.expectedRevisionHash,
+          actualRevisionHash: error.actualRevisionHash,
+        });
+        return;
+      }
+      throw error;
+    }
+    if (result.revisionHash !== expectedRevisionHash) {
+      const error = new PublicationRevisionConflictError(
+        draftId,
+        expectedRevisionHash,
+        result.revisionHash || "transport-unversioned",
+      );
+      response.status(error.statusCode).json({
+        error: error.message,
+        code: error.code,
+        expectedRevisionHash: error.expectedRevisionHash,
+        actualRevisionHash: error.actualRevisionHash,
+      });
+      return;
+    }
     const receipt = completePublisherAttempt(attempt, {
       pageUrl: result.pageUrl,
       diagnosticScreenshot: result.diagnosticScreenshot,
       steps: result.steps,
       completedAt: result.at,
     });
+    receipt.revisionHash = expectedRevisionHash;
     const enriched = { ...result, ok: receipt.outcome === "filled", preflight, receipt };
     await updateState((current) => {
       current.publisherReceipts.unshift(receipt);
@@ -2289,15 +2391,7 @@ app.post(
       }
       const target = current.drafts.find((entry) => entry.id === draftId);
       if (!target) return;
-      target.fillResult = enriched;
-      target.publisherReceipt = receipt;
-      target.status = enriched.ok ? "filled" : "editing";
-      if (enriched.ok) {
-        // A new platform fill is a new revision. Any earlier manual publication
-        // confirmation must not authorize images from this newer receipt.
-        delete target.publicationConfirmedAt;
-        delete target.publicationReceiptId;
-      }
+      recordXiaoheiheFillAttempt(target, enriched, receipt, receipt.completedAt);
       target.updatedAt = new Date().toISOString();
     });
     response.json(enriched);
@@ -2311,29 +2405,35 @@ app.post(
       ? request.params.draftId[0]
       : request.params.draftId;
     const platform = request.body?.platform === "wechat" ? "wechat" : "xiaoheihe";
+    const snapshotState = await readState();
+    const snapshot = snapshotState.drafts.find((entry) => entry.id === draftId);
+    if (!snapshot) {
+      response.status(404).json({ error: "草稿不存在" });
+      return;
+    }
+    const expectedRevisionHash = publicationRevisionHash(snapshot, platform);
+    const expectedInsertedIds = [...insertedMediaIds(snapshot)].sort();
+    const actualImageFingerprints = Object.fromEntries(await Promise.all(
+      expectedInsertedIds.map(async (placementId) => {
+        const placement = snapshot.images.find((entry) => entry.id === placementId);
+        if (!placement) return [placementId, undefined] as const;
+        const inspected = await inspectDraftImageFile(placement);
+        return [placementId, inspected.available ? inspected.fingerprint : undefined] as const;
+      }),
+    ));
     const result = await updateState((state) => {
       const draft = state.drafts.find((entry) => entry.id === draftId);
       if (!draft) return { status: 404 as const, error: "草稿不存在" };
-      if (draft.status === "published" && draft.publicationConfirmedAt) {
-        return {
-          status: 200 as const,
-          platform,
-          storyId: draft.provenance.storyId,
-          receiptId: draft.publicationReceiptId,
-          recentTopics: state.settings.recentTopics,
-          recentCommunities: state.settings.recentCommunities,
-          feedbackCount: state.candidateFeedback.length,
-          alreadyConfirmed: true,
-        };
+      const currentInsertedIds = [...insertedMediaIds(draft)].sort();
+      if (
+        publicationRevisionHash(draft, platform) !== expectedRevisionHash
+        || currentInsertedIds.length !== expectedInsertedIds.length
+        || currentInsertedIds.some((placementId, index) => placementId !== expectedInsertedIds[index])
+      ) {
+        return { status: 409 as const, error: "草稿在图片核验后已发生变化，请重新确认发布" };
       }
-      if (platform === "wechat") {
-        if (!draft.wechatDraft) {
-          return { status: 409 as const, error: "请先同步到微信公众号草稿箱" };
-        }
-        if (draft.wechatDraft.localDraftUpdatedAt !== draft.updatedAt) {
-          return { status: 409 as const, error: "本地正文在上次同步后有修改，请先更新公众号草稿" };
-        }
-      } else {
+      const alreadyCurrent = currentPublicationConfirmation(draft, platform);
+      if (platform === "xiaoheihe" && !alreadyCurrent) {
         if (!draft.fillResult?.ok) {
           return { status: 409 as const, error: "请先成功填入小黑盒编辑器，再记录发布标签" };
         }
@@ -2345,13 +2445,30 @@ app.post(
         }
       }
       const confirmedAt = new Date().toISOString();
-      draft.publicationConfirmedAt = confirmedAt;
-      draft.publicationReceiptId = platform === "wechat"
-        ? draft.wechatDraft?.mediaId
-        : draft.publisherReceipt?.outcome === "filled"
-          ? draft.publisherReceipt.attemptId
-          : undefined;
-      draft.status = "published";
+      let publication;
+      try {
+        publication = confirmDraftPublication(draft, platform, confirmedAt, {
+          actualImageFingerprints,
+        });
+      } catch (error) {
+        return {
+          status: 409 as const,
+          error: error instanceof Error ? error.message : "当前版本没有可确认的发布回执",
+        };
+      }
+      if (publication.alreadyConfirmed) {
+        return {
+          status: 200 as const,
+          platform,
+          storyId: draft.provenance.storyId,
+          receiptId: publication.confirmation.receiptId,
+          confirmation: publication.confirmation,
+          recentTopics: state.settings.recentTopics,
+          recentCommunities: state.settings.recentCommunities,
+          feedbackCount: state.candidateFeedback.length,
+          alreadyConfirmed: true,
+        };
+      }
       if (platform === "xiaoheihe") {
         const topics = draft.fillResult?.topics ?? draft.topics;
         const community = draft.fillResult?.community ?? draft.community;
@@ -2368,7 +2485,8 @@ app.post(
         status: 200 as const,
         platform,
         storyId: draft.provenance.storyId,
-        receiptId: draft.publicationReceiptId,
+        receiptId: publication.confirmation.receiptId,
+        confirmation: publication.confirmation,
         recentTopics: state.settings.recentTopics,
         recentCommunities: state.settings.recentCommunities,
         feedbackCount: state.candidateFeedback.length,
@@ -2419,23 +2537,50 @@ app.use(
   },
 );
 
-// Warm the title-token index before the HTTP port becomes visible. With a
-// few hundred historical signals this keeps the very first Today request,
-// not only subsequent requests, inside the personal-product latency budget.
-const startupDatabase = await getLocalDatabase();
-const startupNow = Date.now();
-startupDatabase.pruneOperationalHistory({
-  terminalJobsOlderThan: new Date(startupNow - 30 * 86_400_000).toISOString(),
-  workflowEventsOlderThan: new Date(startupNow - 90 * 86_400_000).toISOString(),
-  maxTerminalJobs: 1_000,
-  maxWorkflowEvents: 5_000,
-});
-await pruneJobArtifacts(workflowJobsRoot, { maxAgeMs: 14 * 86_400_000, maxFiles: 200 });
-buildTodayView(await readState());
+// Only the process that owns the HTTP port may prune or seed persisted state.
+// Keep the previous initialization order, then recover interrupted runs before
+// the scheduler is started by startOwnedServer.
+const initializeOwnedWorkspace = async () => {
+  const startupDatabase = await getLocalDatabase();
+  const startupNow = Date.now();
+  startupDatabase.pruneOperationalHistory({
+    terminalJobsOlderThan: new Date(startupNow - 30 * 86_400_000).toISOString(),
+    workflowEventsOlderThan: new Date(startupNow - 90 * 86_400_000).toISOString(),
+    maxTerminalJobs: 1_000,
+    maxWorkflowEvents: 5_000,
+  });
+  await pruneJobArtifacts(workflowJobsRoot, { maxAgeMs: 14 * 86_400_000, maxFiles: 200 });
+  const optionalCatalog = await loadOptionalMaterialLibraryCatalog();
+  if (optionalCatalog.warning) console.warn(optionalCatalog.warning);
+  if (optionalCatalog.catalog) {
+    const materialSeed = await updateState(async (state) => {
+      const seeded = await seedMaterialLibrary({
+        catalog: optionalCatalog.catalog,
+        existingMaterials: state.materials,
+        tombstonedAssetIds: state.materialSeedTombstones,
+        // Brand cards are useful for search and manual review, but remain
+        // `check-required`; only owned/licensed files can be selected as an
+        // automatic article fallback.
+        includeReviewRequired: true,
+      });
+      for (const material of seeded.updated) {
+        const index = state.materials.findIndex((entry) => entry.id === material.id);
+        if (index >= 0) state.materials[index] = material;
+      }
+      state.materials.unshift(...seeded.created);
+      return seeded;
+    });
+    if (materialSeed.failed.length) {
+      console.warn("Material library seed completed with failures", materialSeed.failed);
+    }
+  }
+  buildTodayView(await readState());
+  await recoverInterruptedRuns();
+};
 
 await startOwnedServer({
   listen: () => app.listen(port, "127.0.0.1"),
-  recoverInterruptedRuns,
+  recoverInterruptedRuns: initializeOwnedWorkspace,
   startScheduler,
 });
 const durableJobDesk = createJobDesk({

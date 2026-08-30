@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test, { after } from "node:test";
 import { createWeChatDraftDesk } from "./wechat-draft.js";
 import type { ArticleDraft } from "./types.js";
+
+const wechatFixtureRoot = mkdtempSync(path.join(tmpdir(), "ai-news-wechat-images-"));
+const wechatImagePath = path.join(wechatFixtureRoot, "cover.png");
+writeFileSync(wechatImagePath, Buffer.from("image-bytes"));
+after(() => rmSync(wechatFixtureRoot, { recursive: true, force: true }));
 
 const articleDraft = (): ArticleDraft => ({
   id: "draft-1",
@@ -36,7 +44,7 @@ const articleDraft = (): ArticleDraft => ({
     image: {
       id: "image-1",
       url: "/media/draft-1/cover.png",
-      localPath: "/safe/media/draft-1/cover.png",
+      localPath: wechatImagePath,
       publicPath: "/media/draft-1/cover.png",
       caption: "产品界面",
       attribution: "OpenAI",
@@ -135,6 +143,45 @@ test("syncing an article uploads its image and creates a WeChat draft without lo
   assert.equal(result.mediaId, "draft-media-1");
   assert.equal(result.imageCount, 1);
   assert.equal(result.syncedAt, "2026-08-26T03:10:00.000Z");
+});
+
+test("WeChat delivery restores a deleted Creative Commons attribution caption", async () => {
+  let submittedContent = "";
+  const desk = createWeChatDraftDesk({
+    gateway: {
+      countDrafts: async () => 0,
+      uploadContentImage: async () => ({ url: "https://mmbiz.qpic.cn/licensed-image" }),
+      uploadPermanentImage: async () => ({ mediaId: "licensed-cover" }),
+      addDraft: async (article) => {
+        submittedContent = article.content;
+        return { mediaId: "licensed-draft" };
+      },
+      updateDraft: async () => { throw new Error("unused"); },
+    },
+    loadImage: async () => ({
+      bytes: new Uint8Array([1, 2, 3]),
+      fileName: "person.jpg",
+      contentType: "image/jpeg",
+    }),
+  });
+  const licensed = articleDraft();
+  licensed.bodyHtml = '<p>正文</p><img src="/media/draft-1/cover.png" data-media-id="placement-1" data-caption="人物资料图">';
+  licensed.images[0].caption = "人物资料图";
+  licensed.images[0].image.caption = "人物资料图";
+  licensed.images[0].image.rights = "licensed";
+  licensed.images[0].image.attribution = "TechCrunch / Wikimedia Commons，CC BY 2.0";
+  licensed.images[0].image.sourceUrl = "https://commons.wikimedia.org/wiki/File:Person.jpg";
+  licensed.images[0].image.evidenceNote = "Commons 文件页确认 CC BY 2.0。";
+  licensed.images[0].image.licenseId = "CC-BY-2.0";
+  licensed.images[0].image.licenseUrl = "https://creativecommons.org/licenses/by/2.0/";
+  licensed.images[0].image.modificationNote = "仅缩放，未裁切或调色";
+
+  await desk.syncDraft({ draft: licensed, now: new Date("2026-08-26T03:20:00.000Z") });
+
+  assert.match(submittedContent, /图：人物资料图/);
+  assert.match(submittedContent, /TechCrunch \/ Wikimedia Commons，CC BY 2\.0/);
+  assert.match(submittedContent, /creativecommons\.org\/licenses\/by\/2\.0/);
+  assert.match(submittedContent, /修改：仅缩放，未裁切或调色/);
 });
 
 test("a repeated sync skips unchanged content and later updates the existing WeChat draft", async () => {

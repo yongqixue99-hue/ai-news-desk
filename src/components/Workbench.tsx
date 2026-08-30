@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowDownUp,
@@ -93,7 +93,7 @@ const stageNames = ["采集原始条目", "去重与评分", "核验一手来源
 const containsChinese = (value: string) => /[\u3400-\u9fff]/u.test(value);
 
 const briefingBasisLabel = (candidate: Candidate, generating = false) => {
-  if (!candidate.briefing) return generating ? "中文速读生成中" : "中文速读待生成";
+  if (!candidate.briefing) return generating ? "中文摘要生成中" : "中文摘要待生成";
   if (candidate.briefing.basis === "full-source") return "已读原文";
   if (candidate.briefing.basis === "excerpt") return "据来源摘要";
   return "仅据标题";
@@ -103,7 +103,9 @@ const candidateDisplayTitle = (candidate: Candidate) => candidate.briefing?.titl
   ?? candidate.title;
 
 const candidateDisplaySummary = (candidate: Candidate) => candidate.briefing?.summaryZh
-  ?? (candidate.excerpt.trim() || "中文标题和一句话摘要尚未生成。");
+  ?? (candidate.excerpt.trim() || "中文标题和摘要尚未生成。");
+
+const stageDisplayLabel = (stage: string) => stage === "生成中文速读" ? "生成中文摘要" : stage;
 
 const candidateSupportsCommunityDraft = (candidate: Candidate) => {
   return isCommunityCandidate(candidate);
@@ -198,6 +200,8 @@ export function Workbench({
   const [rankingHelpOpen, setRankingHelpOpen] = useState(false);
   const [feedbackBusy, setFeedbackBusy] = useState<string>();
   const [communityDraftCandidate, setCommunityDraftCandidate] = useState<Candidate>();
+  const [keyboardCursor, setKeyboardCursor] = useState(0);
+  const keywordInputRef = useRef<HTMLInputElement>(null);
   const candidates = (run?.candidates ?? []).filter((candidate) => !isCommunityCandidate(candidate));
   const sortedCandidates = useMemo(() => [...candidates].sort((left, right) => {
     if (candidateSort === "heat") return right.heatScore - left.heatScore;
@@ -229,6 +233,56 @@ export function Workbench({
   );
   const missingBriefingCount = candidates.filter((candidate) => !candidate.briefing).length;
   const selected = candidates.filter((candidate) => candidate.selected);
+
+  useEffect(() => {
+    setKeyboardCursor((current) => Math.min(current, Math.max(0, sortedCandidates.length - 1)));
+  }, [sortedCandidates.length]);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const target = event.target;
+      const typing = target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || (target instanceof HTMLElement && target.isContentEditable);
+      const interactive = target instanceof Element && Boolean(target.closest(
+        "button, a, summary, [role='button'], [role='link'], [role='menuitem']",
+      ));
+      if (event.key === "/" && !typing && !interactive && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        keywordInputRef.current?.focus();
+        return;
+      }
+      if (typing || interactive || event.metaKey || event.ctrlKey || event.altKey || !sortedCandidates.length) return;
+      const key = event.key.toLowerCase();
+      if (key === "j" || key === "k") {
+        event.preventDefault();
+        const delta = key === "j" ? 1 : -1;
+        const next = (keyboardCursor + delta + sortedCandidates.length) % sortedCandidates.length;
+        setKeyboardCursor(next);
+        const candidate = sortedCandidates[next];
+        window.requestAnimationFrame(() => {
+          const element = document.getElementById(`candidate-${candidate.id}`);
+          element?.focus({ preventScroll: true });
+          element?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+        return;
+      }
+      const current = sortedCandidates[keyboardCursor];
+      if ((key === "a" || event.key === " ") && current) {
+        event.preventDefault();
+        onSelect(current.id, !current.selected);
+        if (!current.selected) setRunRailOpen(true);
+        return;
+      }
+      if (key === "g" && selected.length && run && ["ready", "complete"].includes(run.status) && !busy) {
+        event.preventDefault();
+        onGenerate();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [busy, keyboardCursor, onGenerate, onSelect, run, selected.length, sortedCandidates]);
   const comprehensive = allCollectionTopicIds.every((topicId) => settings.collectionTopics.includes(topicId));
   const activeChannel: "all" | CollectionTopicId = comprehensive
     ? "all"
@@ -315,9 +369,9 @@ export function Workbench({
             <label className="field-control date-range-control">
               <span className="control-label"><CalendarRange size={15} />搜寻日期</span>
               <span className="date-range-fields">
-                <input type="date" value={dateFrom} max={dateTo || relativeInputDate(0)} onChange={(event) => setDateFrom(event.target.value)} />
+                <input type="date" aria-label="开始日期" value={dateFrom} max={dateTo || relativeInputDate(0)} onChange={(event) => setDateFrom(event.target.value)} />
                 <ArrowRight size={15} />
-                <input type="date" value={dateTo} min={dateFrom} max={relativeInputDate(0)} onChange={(event) => setDateTo(event.target.value)} />
+                <input type="date" aria-label="结束日期" value={dateTo} min={dateFrom} max={relativeInputDate(0)} onChange={(event) => setDateTo(event.target.value)} />
               </span>
               <small>{dateFrom > dateTo ? "开始日期不能晚于结束日期" : dateRangeDays > 31 ? "单次最多搜索 31 天" : `本次包含 ${dateRangeDays} 天`}</small>
             </label>
@@ -326,6 +380,7 @@ export function Workbench({
               <span className="input-with-icon">
                 <Search size={16} />
                 <input
+                  ref={keywordInputRef}
                   type="search"
                   value={keywords}
                   maxLength={120}
@@ -338,17 +393,12 @@ export function Workbench({
             <label className="field-control">
               <span className="control-label">成稿模式</span>
               <span className="select-wrap">
-                <select
-                  value={settings.draftMode}
-                  onChange={(event) =>
-                    onSettings({ draftMode: event.target.value as Settings["draftMode"] })
-                  }
-                >
+                <select value="separate" disabled aria-label="成稿模式：分别成稿">
                   <option value="separate">分别成稿</option>
-                  <option value="roundup">合并汇总（预留）</option>
                 </select>
                 <ChevronDown size={16} />
               </span>
+              <small>每条待写候选独立生成一篇草稿</small>
             </label>
             <label className="field-control image-policy-control">
               <span className="control-label">图片策略</span>
@@ -466,6 +516,7 @@ export function Workbench({
                 <span>{run ? `${run.rawCount} 条原始记录${run.filteredRawCount !== undefined ? ` · ${run.filteredRawCount} 条符合搜索条件` : ""} · ${candidates.length} 条候选` : "尚未启动今日采集"}</span>
               </div>
               <div className="candidate-toolbar">
+                <span className="candidate-shortcuts" title="键盘快捷键：J/K 浏览，A 或空格加入待写，G 生成，/ 搜索">J/K 浏览 · A 加入 · G 生成</span>
                 <label className="personalization-toggle" title="只调整综合推荐顺序，不改新闻价值或公开传播证据">
                   <input
                     type="checkbox"
@@ -505,9 +556,9 @@ export function Workbench({
                   <button
                     className="secondary-button compact candidate-briefing-trigger"
                     disabled={runIsActive || busy}
-                    title={`补全 ${missingBriefingCount} 条中文标题和一句话摘要；失败不会影响候选`}
+                    title={`补全 ${missingBriefingCount} 条中文标题和摘要；失败不会影响候选`}
                     onClick={() => void onBriefCandidates()}
-                  >{busy ? <LoaderCircle className="spin" size={14} /> : <Languages size={14} />}补全中文速读</button>
+                  >{busy ? <LoaderCircle className="spin" size={14} /> : <Languages size={14} />}补全中文摘要</button>
                 ) : null}
                 <button className="secondary-button compact quick-draft-trigger" onClick={() => setQuickDraftOpen(true)}><ScanText size={15} />截图／链接成稿</button>
                 <button
@@ -532,15 +583,19 @@ export function Workbench({
               </div>
             ) : null}
             {candidateHome.featured ? (
-              <section className="candidate-recommendation-board" aria-labelledby="today-recommendation-title">
+              <section className="candidate-recommendation-board" aria-labelledby="collection-priority-title">
                 <header className="candidate-recommendation-heading">
                   <div>
                     <span className="candidate-section-kicker"><Pin size={13} />置顶</span>
-                    <div><h3 id="today-recommendation-title">今日推荐</h3><p>综合新闻价值、时效、证据和你的历史偏好排序</p></div>
+                    <div><h3 id="collection-priority-title">本次采集优先候选</h3><p>这是本次采集中的候选级排序；同一事件可能有多条来源，且只保留 48 小时有效窗口内的条目。</p></div>
                   </div>
                   <span>{candidateHome.active.length} 条仍在 48 小时有效窗口内</span>
                 </header>
-                <article className={candidateHome.featured.selected ? "candidate-featured selected" : "candidate-featured"}>
+                <article
+                  id={`candidate-${candidateHome.featured.id}`}
+                  tabIndex={0}
+                  className={`${candidateHome.featured.selected ? "candidate-featured selected" : "candidate-featured"}${sortedCandidates[keyboardCursor]?.id === candidateHome.featured.id ? " keyboard-active" : ""}`}
+                >
                   <div className="candidate-featured-copy">
                     <div className="candidate-card-meta">
                       <span>{candidateHome.featured.sourceName}</span>
@@ -563,7 +618,7 @@ export function Workbench({
                         onSelect(candidateHome.featured!.id, !candidateHome.featured!.selected);
                         if (!candidateHome.featured!.selected) setRunRailOpen(true);
                       }}
-                    >{candidateHome.featured.selected ? <Check size={14} /> : <Plus size={14} />}{candidateHome.featured.selected ? "已加入成稿" : "加入成稿"}</button>
+                    >{candidateHome.featured.selected ? <Check size={14} /> : <Plus size={14} />}{candidateHome.featured.selected ? "已加入待写" : "加入待写"}</button>
                     {candidateSupportsCommunityDraft(candidateHome.featured) ? (
                       <button
                         type="button"
@@ -576,10 +631,15 @@ export function Workbench({
                 </article>
                 {candidateHome.recommended.length ? (
                   <div className="candidate-secondary-section">
-                    <div className="candidate-secondary-heading"><strong>其他推荐</strong><span>不用打开英文原文，也能先判断是否值得写</span></div>
+                    <div className="candidate-secondary-heading"><strong>其他优先候选</strong><span>同属本次采集，可先看中文摘要再决定是否加入待写</span></div>
                     <div className="candidate-secondary-grid">
                       {candidateHome.recommended.map((candidate) => (
-                        <article className={candidate.selected ? "candidate-secondary-card selected" : "candidate-secondary-card"} key={candidate.id}>
+                        <article
+                          id={`candidate-${candidate.id}`}
+                          tabIndex={0}
+                          className={`${candidate.selected ? "candidate-secondary-card selected" : "candidate-secondary-card"}${sortedCandidates[keyboardCursor]?.id === candidate.id ? " keyboard-active" : ""}`}
+                          key={candidate.id}
+                        >
                           <div className="candidate-card-meta">
                             <span>{candidate.sourceName}</span>
                             <span className={`briefing-basis ${candidate.briefing?.basis ?? "pending"}`}>{briefingBasisLabel(candidate, briefingGenerationActive)}</span>
@@ -592,8 +652,8 @@ export function Workbench({
                             <div>
                               <button
                                 type="button"
-                                aria-label={`${candidate.selected ? "取消" : "选择"}：${candidate.title}`}
-                                title={candidate.selected ? "取消选择" : "加入成稿"}
+                                aria-label={`${candidate.selected ? "从待写移除" : "加入待写"}：${candidate.title}`}
+                                title={candidate.selected ? "从待写移除" : "加入待写"}
                                 onClick={() => {
                                   onSelect(candidate.id, !candidate.selected);
                                   if (!candidate.selected) setRunRailOpen(true);
@@ -682,11 +742,17 @@ export function Workbench({
                         ? `可核验传播证据：${candidate.relatedSources.length} 家独立来源跟进`
                         : "来源没有公开阅读/互动数据，也没有检测到多家独立跟进；这表示暂无数据，不代表热度低";
                     return (
-                    <tr key={candidate.id} className={candidate.selected ? "selected" : undefined}>
+                    <tr
+                      id={`candidate-${candidate.id}`}
+                      key={candidate.id}
+                      tabIndex={0}
+                      className={`${candidate.selected ? "selected" : ""}${sortedCandidates[keyboardCursor]?.id === candidate.id ? " keyboard-active" : ""}`.trim() || undefined}
+                    >
                       <td>
                         <label className="row-checkbox">
                           <input
                             type="checkbox"
+                            aria-label={`加入待写：${candidateDisplayTitle(candidate)}`}
                             checked={candidate.selected}
                             onChange={(event) => {
                               onSelect(candidate.id, event.target.checked);
@@ -789,7 +855,7 @@ export function Workbench({
                     <tr className="empty-row compact">
                       <td colSpan={8}>
                         <Check size={24} />
-                        <strong>{candidateHome.featured ? "今日候选已集中在上方推荐区" : "当前没有仍在有效期内的候选"}</strong>
+                        <strong>{candidateHome.featured ? "优先候选已集中在上方推荐区" : "当前没有仍在有效期内的候选"}</strong>
                         <span>{candidateHome.featured ? "继续采集后，更多候选会显示在这里。" : "超过 48 小时的未处理候选已自动退出首页，运行记录仍然保留。"}</span>
                       </td>
                     </tr>
@@ -822,7 +888,7 @@ export function Workbench({
               return (
                 <div className={`run-stage ${state}`} key={stage}>
                   <span className="run-stage-node">{state === "complete" ? <Check size={14} /> : state === "current" ? <LoaderCircle className="spin" size={14} /> : null}</span>
-                  <div><strong>{stage}</strong><span>{state === "complete" ? "已完成" : state === "current" ? "进行中" : runHasNoResults && index >= 2 ? "无候选，未执行" : "等待"}</span></div>
+                  <div><strong>{stageDisplayLabel(stage)}</strong><span>{state === "complete" ? "已完成" : state === "current" ? "进行中" : runHasNoResults && index >= 2 ? "无候选，未执行" : "等待"}</span></div>
                 </div>
               );
             })}
@@ -834,15 +900,50 @@ export function Workbench({
             </div>
           ) : null}
           {run?.error ? <div className="run-error">{run.error}</div> : null}
+          <section className="selection-summary" aria-labelledby="selection-summary-title">
+            <header className="selection-summary-heading">
+              <strong id="selection-summary-title">选型总结</strong>
+              <span>已加入 {selected.length} 条待写</span>
+            </header>
+            {selected.length ? (
+              <ol className="selection-summary-list">
+                {selected.map((candidate) => (
+                  <li key={candidate.id}>
+                    <div>
+                      <strong>{candidateDisplayTitle(candidate)}</strong>
+                      <span>{candidate.sourceName} · {candidate.evidence}</span>
+                      <small>
+                        {candidate.imageCount === null
+                          ? "来源图待读取"
+                          : candidate.imageCount > 0
+                            ? `${candidate.imageCount} 张来源图`
+                            : "缺少来源图"}
+                        {candidate.relatedSources.length > 1 ? ` · ${candidate.relatedSources.length} 家来源跟进` : ""}
+                      </small>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={`从待写移除：${candidateDisplayTitle(candidate)}`}
+                      title="从待写移除"
+                      onClick={() => onSelect(candidate.id, false)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="selection-summary-empty">还没有待写候选。可从左侧优先候选或表格中加入。</p>
+            )}
+          </section>
           <div className="run-rail-actions">
-            <span>已选择 {selected.length} 条</span>
             <button
               className="primary-button full"
               onClick={onGenerate}
               disabled={!run || !["ready", "complete"].includes(run.status) || !selected.length || busy}
             >
               {busy || run?.status === "generating" ? <LoaderCircle className="spin" size={17} /> : null}
-              {run?.status === "generating" ? "正在分别成稿" : "生成所选文章"}
+              {run?.status === "generating" ? `正在生成 ${selected.length} 篇草稿` : `生成 ${selected.length} 篇草稿`}
             </button>
           </div>
         </aside>

@@ -1,8 +1,20 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test, { after } from "node:test";
 import { createDefaultState } from "./defaults.js";
 import { buildStories, buildTodayView } from "./story-desk.js";
 import type { Candidate, WorkflowRun } from "./types.js";
+
+const imageFixtureRoot = mkdtempSync(path.join(tmpdir(), "ai-news-story-images-"));
+after(() => rmSync(imageFixtureRoot, { recursive: true, force: true }));
+
+const imageFixture = (name: string) => {
+  const localPath = path.join(imageFixtureRoot, name);
+  writeFileSync(localPath, Buffer.from("image-bytes"));
+  return localPath;
+};
 
 const candidate = (id: string, overrides: Partial<Candidate> = {}): Candidate => ({
   id,
@@ -185,6 +197,77 @@ test("today excludes unhandled stories after the 48-hour editorial window", () =
 
   assert.deepEqual(visibleTitles, ["Acme ships a recent model update"]);
   assert.equal(today.coverage.activeStoryCount, 1);
+});
+
+test("StoryDesk counts only existing local files and requires both platforms for publication readiness", () => {
+  const state = createDefaultState();
+  const sourceImage = (id: string, overrides: Partial<Candidate["images"][number]> = {}) => ({
+    id,
+    url: `https://images.example/${id}.jpg`,
+    caption: `Image ${id}`,
+    attribution: "Acme",
+    sourceUrl: "https://acme.example/news",
+    selected: false,
+    rights: "owned" as const,
+    allowedPlatforms: ["*"],
+    ...overrides,
+  });
+  const deletedPath = imageFixture("deleted.jpg");
+  rmSync(deletedPath);
+  const migratedPath = process.platform === "win32"
+    ? "/Users/old-mac/ai-news-desk/media/migrated.jpg"
+    : "C:\\Users\\old-windows\\ai-news-desk\\media\\migrated.jpg";
+  state.runs = [run("run-images", [
+    candidate("remote-only", {
+      title: "Remote image story",
+      url: "https://acme.example/remote-images",
+      canonicalUrl: "https://acme.example/remote-images",
+      briefing: { titleZh: "远程图片事件", summaryZh: "只有远程图片。", basis: "full-source", generatedAt: "2026-08-30T01:10:00.000Z", providerId: "test" },
+      imageCount: 2,
+      images: [sourceImage("remote-1"), sourceImage("remote-2")],
+    }),
+    candidate("cached", {
+      title: "Cached image story",
+      url: "https://acme.example/cached-images",
+      canonicalUrl: "https://acme.example/cached-images",
+      briefing: { titleZh: "本地图片事件", summaryZh: "具有真实本地图片。", basis: "full-source", generatedAt: "2026-08-30T01:10:00.000Z", providerId: "test" },
+      imageCount: 2,
+      images: [
+        sourceImage("cached-1", {
+          localPath: imageFixture("cached-1.jpg"),
+          publicPath: "/media/cached-1.jpg",
+          allowedPlatforms: ["wechat"],
+        }),
+        sourceImage("cached-2", {
+          localPath: imageFixture("cached-2.jpg"),
+          publicPath: "/media/cached-2.jpg",
+          allowedPlatforms: ["wechat", "xiaoheihe"],
+        }),
+      ],
+    }),
+    candidate("stale-paths", {
+      title: "Stale local path story",
+      url: "https://acme.example/stale-image-paths",
+      canonicalUrl: "https://acme.example/stale-image-paths",
+      briefing: { titleZh: "失效路径事件", summaryZh: "路径指向已删除或异机文件。", basis: "full-source", generatedAt: "2026-08-30T01:10:00.000Z", providerId: "test" },
+      imageCount: 2,
+      images: [
+        sourceImage("deleted", { localPath: deletedPath, publicPath: "/media/deleted.jpg" }),
+        sourceImage("migrated", { localPath: migratedPath, publicPath: "/media/migrated.jpg" }),
+      ],
+    }),
+  ])];
+
+  const stories = buildStories(state, "2026-08-30T02:00:00.000Z");
+  const cached = stories.find((item) => item.originalTitle === "Cached image story")!;
+  const stale = stories.find((item) => item.originalTitle === "Stale local path story")!;
+
+  assert.equal(cached.localImageCount, 2);
+  assert.equal(cached.publishReadyImageCount, 1, "WeChat-only permission is not neutral publication readiness");
+  assert.equal(cached.rightsReviewImageCount, 1);
+  assert.equal(stale.localImageCount, 0);
+  assert.equal(stale.publishReadyImageCount, 0);
+  assert.equal(buildTodayView(state, "2026-08-30T02:00:00.000Z").coverage.imageReadyCount, 1);
 });
 
 test("today recommendations show each available source before repeating one", () => {
