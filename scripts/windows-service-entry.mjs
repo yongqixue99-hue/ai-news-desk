@@ -1,9 +1,27 @@
-import { createWriteStream, existsSync, mkdirSync, renameSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { format } from "node:util";
+import { windowsServicePath } from "../server/windows-service-environment.ts";
 
 process.env.NODE_ENV = "production";
+
+const codexBinRoot = process.env.LOCALAPPDATA
+  ? path.join(process.env.LOCALAPPDATA, "OpenAI", "Codex", "bin")
+  : "";
+const codexExecutableDirectories = codexBinRoot && existsSync(codexBinRoot)
+  ? readdirSync(codexBinRoot, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isDirectory()) return [];
+    const directory = path.join(codexBinRoot, entry.name);
+    return existsSync(path.join(directory, "codex.exe")) ? [directory] : [];
+  })
+  : [];
+process.env.PATH = windowsServicePath({
+  currentPath: process.env.PATH,
+  nodeExecutable: process.execPath,
+  appData: process.env.APPDATA,
+  codexExecutableDirectories,
+});
 
 const projectPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const configuredRoot = process.env.AI_NEWS_DESK_WORKFLOW_ROOT?.trim();
