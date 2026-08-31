@@ -303,14 +303,16 @@ const StoryDrawer = ({
                       <figure key={image.id}>
                         <img src={image.publicPath || image.url} alt={image.caption || "来源图片"} loading="lazy" />
                         <figcaption>
-                          <strong>{image.rights === "editorial-screenshot" || image.rights === "commentary-screenshot" ? "优先级 2 · 原文截图" : "优先级 1 · 原新闻图片"}</strong>
+                          <strong>
+                            优先级 {image.editorialPriority ?? (image.rights === "editorial-screenshot" || image.rights === "commentary-screenshot" ? 2 : 1)} · {editorialAssetLabels[image.editorialPriority ?? (image.rights === "editorial-screenshot" || image.rights === "commentary-screenshot" ? 2 : 1)]}
+                          </strong>
                           <span>{image.caption || "来源图片"}</span>
                           <span>{image.attribution || "来源待核对"} · {image.localPath && image.publicPath ? "已缓存" : "仅远程"} · {image.rights}</span>
                         </figcaption>
                       </figure>
                     ))}
                   </div>
-                ) : <p className="story-empty-copy">没有发现相关原图；建立素材包时会优先推荐已授权的实体资料图或明确标注“非事件现场”的主题示意图。</p>}
+                ) : <p className="story-empty-copy">暂未发现原图；建立素材包时会继续尝试原文截图、联网检索可核权的人物／公司身份图、事件相关图，全部失败后才现场生成非纪实封面。</p>}
               </section>
             </aside>
 
@@ -430,7 +432,7 @@ const StoryDrawer = ({
                     {["brief", "synthesis", "community", "playbook", "curate"].map((value) => <option key={value} value={value}>{modeLabels[value as AssignmentMode]}</option>)}
                   </select></label>
                   <button type="button" className="primary-button" disabled={busy} onClick={() => onBuildPackage(mode)}>
-                    {busy ? <RefreshCw className="spin" size={16} /> : <FileStack size={16} />}生成素材包
+                    {busy ? <><RefreshCw className="spin" size={16} />按 1→5 顺序补图</> : <><FileStack size={16} />生成素材包</>}
                   </button>
                 </div>
               ) : null}

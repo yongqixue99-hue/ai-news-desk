@@ -63,11 +63,21 @@ const memoryDependencies = (input: {
   images?: SourceImage[];
   extracted?: SourceImage[];
   screenshots?: SourceImage[];
+  searched?: SourceImage[];
+  generated?: SourceImage[];
+  stylized?: SourceImage;
 }) => {
   let images = input.images ?? [];
-  const calls = { extract: 0, localize: 0, capture: 0, requested: [] as number[] };
+  const calls = { extract: 0, localize: 0, capture: 0, search: 0, stylize: 0, generate: 0, requested: [] as number[] };
   const dependencies: VisualHydrationDependencies = {
-    getStory: async () => ({ images, signals: [signal] }),
+    getStory: async () => ({
+      id: "story-test",
+      title: signal.title,
+      originalTitle: signal.title,
+      summary: "Example story summary",
+      images,
+      signals: [signal],
+    }),
     extract: async () => {
       calls.extract += 1;
       return page(input.extracted ?? []);
@@ -91,6 +101,18 @@ const memoryDependencies = (input: {
       calls.requested.push(requested);
       return input.screenshots ?? [];
     },
+    searchOnline: async () => {
+      calls.search += 1;
+      return input.searched ?? [];
+    },
+    stylizeIdentity: async (source) => {
+      calls.stylize += 1;
+      return input.stylized ?? source;
+    },
+    generateFallback: async () => {
+      calls.generate += 1;
+      return input.generated ?? [];
+    },
   };
   return { dependencies, calls, images: () => images };
 };
@@ -111,6 +133,83 @@ test("two remote URLs do not satisfy local readiness and are downloaded", async 
   assert.equal(result.publishReadyImageCount, 0);
   assert.equal(result.rightsReviewImageCount, 2);
   assert.equal(memory.images().length, 2, "localized copies replace, rather than duplicate, remote records");
+});
+
+test("online identity art keeps its real-source tier after editorial styling", async () => {
+  const remotePortrait = image("commons-portrait", {
+    editorialPriority: 3,
+    editorialOrigin: "entity-library",
+  });
+  const styledPortrait = image("grounded-cover", {
+    url: "/media/story/grounded-cover.png",
+    localPath: imageFixture("grounded-cover.png"),
+    publicPath: "/media/story/grounded-cover.png",
+    caption: "资料封面：真实人物肖像（人物保持来源原貌）",
+    editorialPriority: 3,
+    editorialOrigin: "entity-library",
+  });
+  const memory = memoryDependencies({ searched: [remotePortrait], stylized: styledPortrait });
+
+  await runVisualHydration("story-styled", 1, memory.dependencies);
+
+  assert.equal(memory.calls.stylize, 1);
+  assert.equal(memory.images()[0]?.id, "grounded-cover");
+  assert.equal(memory.images()[0]?.editorialPriority, 3);
+});
+
+test("licensed online identity search runs after screenshots and before generated fallback", async () => {
+  const commonsPortrait = image("commons-person", {
+    url: "https://upload.wikimedia.org/person.jpg",
+    sourceUrl: "https://commons.wikimedia.org/wiki/File:Person.jpg",
+    attribution: "Example Photographer / Wikimedia Commons",
+    rights: "licensed",
+    licenseId: "CC-BY-4.0",
+    licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+    modificationNote: "未修改。",
+    allowedPlatforms: ["wechat", "xiaoheihe"],
+    editorialPriority: 3,
+    editorialOrigin: "entity-library",
+  });
+  const generated = image("generated", {
+    localPath: imageFixture("generated.png"),
+    publicPath: "/media/story/generated.png",
+    rights: "owned",
+    allowedPlatforms: ["*"],
+    editorialPriority: 5,
+    editorialOrigin: "generated-fallback",
+  });
+  const memory = memoryDependencies({ searched: [commonsPortrait], generated: [generated] });
+
+  const result = await runVisualHydration("story-online", 2, memory.dependencies);
+
+  assert.equal(memory.calls.capture, 1, "the source screenshot tier is exhausted first");
+  assert.equal(memory.calls.search, 1);
+  assert.equal(memory.calls.generate, 0, "a real identity image suppresses synthetic filler");
+  assert.equal(result.onlineSearchCount, 1);
+  assert.equal(result.generatedCount, 0);
+  assert.equal(memory.images()[0]?.editorialPriority, 3);
+});
+
+test("live generation runs only when source, screenshot and online search all return nothing", async () => {
+  const generated = image("generated-last-resort", {
+    url: "/media/story/generated-last-resort.png",
+    localPath: imageFixture("generated-last-resort.png"),
+    publicPath: "/media/story/generated-last-resort.png",
+    caption: "系统生成议题封面（非事件现场）",
+    rights: "owned",
+    allowedPlatforms: ["*"],
+    editorialPriority: 5,
+    editorialOrigin: "generated-fallback",
+  });
+  const memory = memoryDependencies({ generated: [generated] });
+
+  const result = await runVisualHydration("story-generate-last", 2, memory.dependencies);
+
+  assert.equal(memory.calls.capture, 1);
+  assert.equal(memory.calls.search, 1);
+  assert.equal(memory.calls.generate, 1);
+  assert.equal(result.generatedCount, 1);
+  assert.equal(memory.images()[0]?.editorialPriority, 5);
 });
 
 test("one locally extracted image satisfies a one-image target without screenshots", async () => {

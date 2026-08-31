@@ -1,7 +1,13 @@
+import path from "node:path";
 import { downloadSourceImage, extractPage } from "./extractor.js";
+import {
+  createGeneratedEditorialFallback,
+  createGroundedEditorialCover,
+} from "./editorial-visual-generator.js";
 import { captureRenderedPageImages } from "./page-screenshot.js";
 import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
-import { readState, updateState } from "./storage.js";
+import { searchLicensedEditorialImages } from "./online-image-search.js";
+import { readState, updateState, workflowMediaRoot } from "./storage.js";
 import { storyById } from "./story-desk.js";
 import type { StorySignalView } from "./product-types.js";
 import type { ExtractedPage, SourceImage, SourceRole } from "./types.js";
@@ -21,9 +27,15 @@ export interface VisualHydrationResult extends VisualAssetCounts {
   imageCount: number;
   extractedSources: number;
   screenshotCount: number;
+  onlineSearchCount: number;
+  generatedCount: number;
 }
 
 interface VisualStorySnapshot {
+  id: string;
+  title: string;
+  originalTitle: string;
+  summary: string;
   images: SourceImage[];
   signals: StorySignalView[];
 }
@@ -35,6 +47,9 @@ export interface VisualHydrationDependencies {
   persistImages: (signal: StorySignalView, images: SourceImage[]) => Promise<void>;
   localize: (image: SourceImage, assetRoot: string) => Promise<SourceImage>;
   capture: (url: string, assetRoot: string, requestedLimit: number) => Promise<SourceImage[]>;
+  searchOnline?: (story: VisualStorySnapshot, requestedLimit: number) => Promise<SourceImage[]>;
+  stylizeIdentity?: (image: SourceImage, story: VisualStorySnapshot, assetRoot: string) => Promise<SourceImage>;
+  generateFallback?: (story: VisualStorySnapshot, assetRoot: string) => Promise<SourceImage[]>;
 }
 
 const inFlight = new Map<string, Promise<VisualHydrationResult>>();
@@ -159,6 +174,8 @@ const resultFor = (
   story: VisualStorySnapshot | undefined,
   extractedSources: number,
   screenshotCount: number,
+  onlineSearchCount: number,
+  generatedCount: number,
 ): VisualHydrationResult => {
   const counts = countVisualAssets(story?.images ?? []);
   return {
@@ -166,6 +183,8 @@ const resultFor = (
     ...counts,
     extractedSources,
     screenshotCount,
+    onlineSearchCount,
+    generatedCount,
   };
 };
 
@@ -185,7 +204,7 @@ export const runVisualHydration = async (
   let story = await dependencies.getStory();
   if (!story) throw new Error("Story 不存在");
   let counts = countVisualAssets(story.images);
-  if (counts.localReadyImageCount >= minimum) return resultFor(story, 0, 0);
+  if (counts.localReadyImageCount >= minimum) return resultFor(story, 0, 0, 0, 0);
 
   const signals = story.signals
     .filter((signal) => !signal.isCommunity)
@@ -265,7 +284,59 @@ export const runVisualHydration = async (
     }
   }
 
-  return resultFor(await dependencies.getStory(), extractedSources, screenshotCount);
+  let onlineSearchCount = 0;
+  story = await dependencies.getStory();
+  counts = countVisualAssets(story?.images ?? []);
+  if (story && primarySignal && counts.localReadyImageCount < minimum && dependencies.searchOnline) {
+    const searchStory = story;
+    try {
+      const searched = await dependencies.searchOnline(searchStory, minimum - counts.localReadyImageCount);
+      for (const image of searched) {
+        const localized = isLocalVisualAsset(image)
+          ? image
+          : canDownload(image)
+            ? await dependencies.localize(image, assetRoot)
+            : undefined;
+        if (!localized || !isLocalVisualAsset(localized)) continue;
+        const prepared = dependencies.stylizeIdentity && (localized.editorialPriority === 3 || localized.editorialPriority === 4)
+          ? await dependencies.stylizeIdentity(localized, searchStory, assetRoot).catch(() => localized)
+          : localized;
+        if (!isLocalVisualAsset(prepared)) continue;
+        await dependencies.persistImages(primarySignal, [prepared]);
+        onlineSearchCount += 1;
+        story = await dependencies.getStory();
+        counts = countVisualAssets(story?.images ?? []);
+        if (counts.localReadyImageCount >= minimum) break;
+      }
+    } catch {
+      // A licensed-web lookup is an optional fallback, never a reason to fail
+      // an otherwise usable evidence package.
+    }
+  }
+
+  let generatedCount = 0;
+  story = await dependencies.getStory();
+  counts = countVisualAssets(story?.images ?? []);
+  if (story && primarySignal && counts.localReadyImageCount === 0 && dependencies.generateFallback) {
+    try {
+      const generated = (await dependencies.generateFallback(story, assetRoot)).filter(isLocalVisualAsset);
+      if (generated.length) {
+        await dependencies.persistImages(primarySignal, generated.slice(0, 1));
+        generatedCount = 1;
+      }
+    } catch {
+      // Generation is the last resort; a failure leaves the package honestly
+      // image-less instead of substituting an unrelated visual.
+    }
+  }
+
+  return resultFor(
+    await dependencies.getStory(),
+    extractedSources,
+    screenshotCount,
+    onlineSearchCount,
+    generatedCount,
+  );
 };
 
 const candidateForSignal = (state: Awaited<ReturnType<typeof readState>>, signal: StorySignalView) =>
@@ -312,6 +383,20 @@ const productionDependencies = (storyId: string): VisualHydrationDependencies =>
   persistImages: (signal, images) => persistImagesForStory(storyId, signal, images),
   localize: downloadSourceImage,
   capture: captureRenderedPageImages,
+  searchOnline: (story, requestedLimit) => searchLicensedEditorialImages(story, requestedLimit),
+  stylizeIdentity: (image, story, assetRoot) => createGroundedEditorialCover({
+    source: image,
+    storyTitle: story.title,
+    assetDirectory: path.join(workflowMediaRoot, assetRoot),
+    publicDirectory: `/media/${encodeURIComponent(assetRoot)}`,
+  }),
+  generateFallback: async (story, assetRoot) => [await createGeneratedEditorialFallback({
+    storyId: story.id,
+    storyTitle: story.title,
+    sourceUrl: story.signals.find((signal) => !signal.isCommunity)?.url || story.signals[0]?.url || "",
+    assetDirectory: path.join(workflowMediaRoot, assetRoot),
+    publicDirectory: `/media/${encodeURIComponent(assetRoot)}`,
+  })],
 });
 
 /**
