@@ -311,6 +311,53 @@ test("today recommendations show each available source before repeating one", ()
   );
 });
 
+test("today explains recommendation shortages without promoting evidence-blocked stories", () => {
+  const state = createDefaultState();
+  const uniqueCandidate = (id: string, overrides: Partial<Candidate> = {}) => candidate(id, {
+    title: `Company ${id} announces product ${id}`,
+    url: `https://${id}.example/news/${id}`,
+    canonicalUrl: `https://${id}.example/news/${id}`,
+    sourceName: `Source ${id}`,
+    briefing: {
+      titleZh: `公司 ${id} 发布产品 ${id}`,
+      summaryZh: `公司 ${id} 正式发布产品 ${id}。`,
+      basis: "full-source",
+      generatedAt: "2026-08-30T01:10:00.000Z",
+      providerId: "codex",
+    },
+    ...overrides,
+  });
+  state.runs = [run("run-shortage", [
+    ...Array.from({ length: 6 }, (_, index) => uniqueCandidate(`ready-${index + 1}`)),
+    uniqueCandidate("already-drafted", { status: "drafted" }),
+    uniqueCandidate("stale", { publishedAt: "2026-08-27T00:00:00.000Z" }),
+    uniqueCandidate("community-only", {
+      sourceType: "hackernews",
+      sourceName: "Hacker News",
+      sourceRole: "community",
+      briefing: {
+        titleZh: "社区流传未经核验的产品消息",
+        summaryZh: "目前只有社区标题。",
+        basis: "title",
+        generatedAt: "2026-08-30T01:10:00.000Z",
+        providerId: "codex",
+      },
+    }),
+  ])];
+
+  const today = buildTodayView(state, "2026-08-30T02:00:00.000Z");
+
+  assert.equal(today.funnel.recommendationTarget, 8);
+  assert.equal(today.funnel.visibleRecommendationCount, 6);
+  assert.equal(today.funnel.recommendationShortageCount, 2);
+  assert.deepEqual(today.funnel.recommendationDropReasons, [
+    { code: "outside-window", label: "超过 48 小时时效窗口", count: 1 },
+    { code: "already-drafted", label: "已经进入成稿流程", count: 1 },
+    { code: "evidence-blocked", label: "证据不足，暂留观察", count: 1 },
+  ]);
+  assert.ok([...today.mustReads, ...today.secondary].every((story) => story.assignment.canDraft));
+});
+
 test("Story id remains stable when extraction adds a canonical URL", () => {
   const state = createDefaultState();
   state.runs = [run("run-1", [candidate("official", {

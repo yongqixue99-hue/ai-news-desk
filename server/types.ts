@@ -362,6 +362,10 @@ export interface Candidate {
   title: string;
   url: string;
   canonicalUrl?: string;
+  /** Stable source URL of the Story this independently discovered evidence verifies. */
+  evidenceGroupUrl?: string;
+  /** Only independently verified reports may use evidenceGroupUrl to join an existing Story. */
+  evidenceRelation?: "independent-report";
   excerpt: string;
   publishedAt: string;
   fetchedAt: string;
@@ -488,7 +492,7 @@ export interface WorkflowRun {
   candidates: Candidate[];
   briefingTraceIds?: string[];
   candidatesClearedAt?: string;
-  origin?: "collection" | "link-intake" | "screenshot-intake";
+  origin?: "collection" | "link-intake" | "screenshot-intake" | "evidence-supplement";
   intake?: {
     sourceLabel: string;
     sourceUrl?: string;

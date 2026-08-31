@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import express from "express";
@@ -124,13 +124,13 @@ import { createWeChatDraftDesk } from "./wechat-draft.js";
 import { createWeChatHttpGateway } from "./wechat-http.js";
 import { loadWeChatPlacementImage } from "./wechat-image.js";
 import { createDeliveryDesk } from "./delivery-desk.js";
-import { buildContentPackage, freezeContentPackageAssets } from "./package-desk.js";
+import { contentPackageDesk } from "./content-package-desk.js";
 import { buildTodayView, storyById } from "./story-desk.js";
 import { enrichStoryExplanation } from "./story-explanation-service.js";
+import { storyEvidenceDesk } from "./story-evidence-desk.js";
 import { createDraftFromPackage } from "./draft-desk.js";
 import { createJobDesk } from "./job-desk.js";
 import { hydrateStoryAssets } from "./visual-desk.js";
-import { hydrateStoryDiscussion } from "./community-intelligence.js";
 import {
   confirmIntakeReview,
   createLinkIntakeReview,
@@ -207,6 +207,7 @@ const draftableAssignmentModes = new Set<Exclude<AssignmentMode, "watch" | "skip
   "playbook",
   "curate",
 ]);
+
 const storyEventTypes = new Set([
   "opened",
   "interested",
@@ -383,6 +384,39 @@ app.get(
         maxAttempts: 2,
       });
     }
+    const evidencePool = [
+      ...view.watching,
+      ...view.mustReads,
+      ...view.secondary,
+    ].filter((story, index, stories) => story.evidenceStrength !== "strong"
+      && stories.findIndex((entry) => entry.id === story.id) === index);
+    const evidenceJobs = database.listJobs(500).filter((job) => job.type === "supplement-story-evidence");
+    const activeEvidenceStoryIds = new Set(evidenceJobs
+      .filter((job) => ["queued", "running", "retrying"].includes(job.status))
+      .map((job) => job.payload && typeof job.payload === "object" && "storyId" in job.payload
+        ? String((job.payload as { storyId: unknown }).storyId)
+        : "")
+      .filter(Boolean));
+    const recentCutoff = Date.now() - 6 * 60 * 60_000;
+    const recentlyAttemptedStoryIds = new Set(evidenceJobs
+      .filter((job) => Date.parse(job.updatedAt) >= recentCutoff)
+      .map((job) => job.payload && typeof job.payload === "object" && "storyId" in job.payload
+        ? String((job.payload as { storyId: unknown }).storyId)
+        : "")
+      .filter(Boolean));
+    const availableSlots = Math.max(0, 5 - activeEvidenceStoryIds.size);
+    const evidenceCandidates = evidencePool
+      .filter((story) => !activeEvidenceStoryIds.has(story.id) && !recentlyAttemptedStoryIds.has(story.id))
+      .slice(0, availableSlots);
+    const evidenceRetryWindow = Math.floor(Date.now() / (6 * 60 * 60_000));
+    for (const story of evidenceCandidates) {
+      database.enqueueJob({
+        type: "supplement-story-evidence",
+        idempotencyKey: `supplement-story-evidence:auto:${story.id}:${story.lastSeenAt}:${evidenceRetryWindow}`,
+        payload: { storyId: story.id, trigger: "auto" },
+        maxAttempts: 2,
+      });
+    }
     response.json(view);
   }),
 );
@@ -514,40 +548,47 @@ app.post(
       response.status(400).json({ error: "请选择可成稿的稿型" });
       return;
     }
-    const [visualResult, discussionSamples] = await Promise.all([
-      hydrateStoryAssets(storyId, 2),
-      hydrateStoryDiscussion(storyId),
-    ]);
-    const builtPackage = buildContentPackage(await readState(), {
-      storyId,
-      mode: requestedMode as Exclude<AssignmentMode, "watch" | "skip"> | undefined,
-      discussionSamples,
-    });
-    const database = await getLocalDatabase();
-    database.recordWorkflowEvent({
-      type: "story.assets_hydrated",
-      subjectType: "story",
-      subjectId: storyId,
-      payload: visualResult,
-    });
-    const existing = database.getContentPackage<ContentPackage>(builtPackage.id);
-    const contentPackage = existing ?? await freezeContentPackageAssets(builtPackage);
-    const saved = existing ?? database.saveContentPackage(contentPackage);
-    if (!existing) {
-      database.recordFeedback({
-        type: "package_created",
-        subjectType: "story",
-        subjectId: storyId,
-        payload: { packageId: saved.id, mode: saved.mode, status: saved.status },
-      });
-      database.recordWorkflowEvent({
-        type: "package.created",
-        subjectType: "package",
-        subjectId: saved.id,
-        payload: { storyId, mode: saved.mode, status: saved.status },
-      });
+    const story = storyById(await readState(), storyId);
+    if (!story) {
+      response.status(404).json({ error: "Story 不存在" });
+      return;
     }
-    response.status(existing ? 200 : 201).json({ contentPackage: saved, reused: Boolean(existing) });
+    if (!story.assignment.canDraft) {
+      response.status(409).json({
+        error: story.assignment.blockers[0] || "这条事件还不满足素材包建立条件",
+      });
+      return;
+    }
+    const mode = requestedMode as Exclude<AssignmentMode, "watch" | "skip"> | undefined;
+    const force = request.body?.force === true;
+    const database = await getLocalDatabase();
+    const assetRevision = createHash("sha256")
+      .update(JSON.stringify(story.images.map((image) => [
+        image.id,
+        image.localPath,
+        image.fingerprint,
+        image.rights,
+        image.editorialPriority,
+      ])))
+      .digest("hex")
+      .slice(0, 16);
+    const queued = database.enqueueJob({
+      type: "build-content-package",
+      idempotencyKey: force
+        ? `build-content-package:refresh:${storyId}:${randomUUID()}`
+        : `build-content-package:${storyId}:${mode ?? story.assignment.mode}:${story.lastSeenAt}:${assetRevision}`,
+      payload: { storyId, mode, minimumImages: force ? 4 : 2 },
+      maxAttempts: 2,
+    });
+    if (queued.job.status === "complete") {
+      const packageId = (queued.job.result as { packageId?: string } | undefined)?.packageId;
+      const contentPackage = packageId ? database.getContentPackage<ContentPackage>(packageId) : undefined;
+      if (contentPackage) {
+        response.json({ job: queued.job, contentPackage, reused: true });
+        return;
+      }
+    }
+    response.status(202).json({ job: queued.job, reused: queued.reused });
   }),
 );
 
@@ -628,7 +669,15 @@ app.get(
     response.flushHeaders();
     const database = await getLocalDatabase();
     let latestId = database.listWorkflowEvents(1)[0]?.id;
+    let latestJobsJson = "";
+    const writeJobs = () => {
+      const jobsJson = JSON.stringify(database.listJobs(20));
+      if (jobsJson === latestJobsJson) return;
+      latestJobsJson = jobsJson;
+      response.write(`event: jobs\ndata: ${jobsJson}\n\n`);
+    };
     response.write(`event: ready\ndata: ${JSON.stringify({ at: new Date().toISOString() })}\n\n`);
+    writeJobs();
     const timer = setInterval(() => {
       try {
         const events = database.listWorkflowEvents(50);
@@ -640,6 +689,7 @@ app.get(
           response.write(`event: workflow\ndata: ${JSON.stringify(event)}\n\n`);
         }
         latestId = events[0]?.id ?? latestId;
+        writeJobs();
         response.write(`: heartbeat ${Date.now()}\n\n`);
       } catch {
         // The next interval retries. A transient read error must not terminate
@@ -839,6 +889,46 @@ app.get(
       publisherStatus(state.settings),
     ]);
     response.json({ ok: true, codex, publisher, horizon: { ok: true, detail: "本地 Horizon 已接入" } });
+  }),
+);
+
+app.post(
+  "/api/stories/:storyId/evidence",
+  asyncRoute(async (request, response) => {
+    const storyId = routeParam(request.params.storyId);
+    const story = storyById(await readState(), storyId);
+    if (!story) {
+      response.status(404).json({ error: "Story 不存在" });
+      return;
+    }
+    if (story.evidenceStrength === "strong") {
+      response.json({ story, reused: true });
+      return;
+    }
+    const database = await getLocalDatabase();
+    const activeJob = database.listJobs(100).find((job) => job.type === "supplement-story-evidence"
+      && ["queued", "running", "retrying"].includes(job.status)
+      && job.payload && typeof job.payload === "object" && "storyId" in job.payload
+      && String((job.payload as { storyId: unknown }).storyId) === storyId);
+    if (activeJob) {
+      response.status(202).json({ job: activeJob, story, reused: true });
+      return;
+    }
+    const queued = database.enqueueJob({
+      type: "supplement-story-evidence",
+      idempotencyKey: `supplement-story-evidence:manual:${story.id}:${randomUUID()}`,
+      payload: { storyId, trigger: "manual" },
+      maxAttempts: 2,
+    });
+    if (queued.job.status === "complete") {
+      response.json({
+        job: queued.job,
+        story: storyById(await readState(), storyId),
+        reused: true,
+      });
+      return;
+    }
+    response.status(202).json({ job: queued.job, story, reused: queued.reused });
   }),
 );
 
@@ -2650,6 +2740,45 @@ const durableJobDesk = createJobDesk({
       const story = await enrichStoryExplanation(storyId);
       context.progress(0.96, "整理证据说明");
       return { storyId: story.id, explanationStatus: story.explanation.status };
+    },
+    "supplement-story-evidence": async (payload, context) => {
+      const storyId = payload && typeof payload === "object" && "storyId" in payload
+        ? String((payload as { storyId: unknown }).storyId)
+        : "";
+      if (!storyId) throw new Error("任务缺少 Story ID");
+      context.progress(0.05, "准备补强独立来源");
+      return storyEvidenceDesk.supplement(storyId, {
+        progress: (progress, stage) => context.progress(progress, stage),
+      });
+    },
+    "build-content-package": async (payload, context) => {
+      const storyId = payload && typeof payload === "object" && "storyId" in payload
+        ? String((payload as { storyId: unknown }).storyId)
+        : "";
+      const rawMode = payload && typeof payload === "object" && "mode" in payload
+        ? (payload as { mode?: unknown }).mode
+        : undefined;
+      const minimumImages = payload && typeof payload === "object" && "minimumImages" in payload
+        ? Number((payload as { minimumImages?: unknown }).minimumImages)
+        : 2;
+      const mode = typeof rawMode === "string" && draftableAssignmentModes.has(rawMode as Exclude<AssignmentMode, "watch" | "skip">)
+        ? rawMode as Exclude<AssignmentMode, "watch" | "skip">
+        : undefined;
+      if (!storyId) throw new Error("任务缺少 Story ID");
+      context.progress(0.03, "准备按 1→5 优先级建立素材包");
+      const result = await contentPackageDesk.buildAndSave(
+        storyId,
+        mode,
+        (progress, stage) => context.progress(progress, stage),
+        Number.isFinite(minimumImages) ? minimumImages : 2,
+      );
+      context.progress(0.98, "素材包已保存，可开始成稿");
+      return {
+        packageId: result.contentPackage.id,
+        status: result.contentPackage.status,
+        reused: result.reused,
+        visualResult: result.visualResult,
+      };
     },
     "draft-from-package": async (payload, context) => {
       const packageId = payload && typeof payload === "object" && "packageId" in payload

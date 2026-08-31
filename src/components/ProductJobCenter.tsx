@@ -26,6 +26,9 @@ export const jobActivitySummary = (job: ProductJob, now = Date.now()) => {
 };
 
 const jobLabel = (job: ProductJob) => {
+  if (job.type === "build-content-package") return "按 1→5 建立素材包";
+  if (job.type === "supplement-story-evidence") return "补强独立新闻来源";
+  if (job.type === "hydrate-story-assets") return "缓存新闻来源图片";
   if (job.type.includes("draft")) return "生成新闻草稿";
   if (job.type.includes("explanation")) return "读取新闻正文";
   return "后台处理任务";
@@ -76,12 +79,18 @@ export function ProductJobCenter({ onOpenDrafts }: ProductJobCenterProps) {
 
   useEffect(() => {
     void refresh();
+    const events = new EventSource("/api/events");
+    events.addEventListener("jobs", (event) => {
+      try {
+        setJobs(JSON.parse((event as MessageEvent<string>).data) as ProductJob[]);
+        setError(undefined);
+      } catch {
+        // Ignore one malformed frame; the next server snapshot is complete.
+      }
+    });
+    events.onerror = () => setError("后台任务实时连接暂时中断，浏览器会自动重连");
+    return () => events.close();
   }, [refresh]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => void refresh(), activeCount ? 1_500 : 10_000);
-    return () => window.clearInterval(timer);
-  }, [activeCount, refresh]);
 
   if (!visibleJobs.length && !error) return null;
 

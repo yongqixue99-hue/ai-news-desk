@@ -140,6 +140,14 @@ export interface TodaySourceDiagnostic {
 export interface TodayFunnel {
   candidateCount: number;
   storyCount: number;
+  recommendationTarget: number;
+  visibleRecommendationCount: number;
+  recommendationShortageCount: number;
+  recommendationDropReasons: Array<{
+    code: "outside-window" | "already-drafted" | "evidence-blocked" | "ignored-or-published" | "below-display-limit";
+    label: string;
+    count: number;
+  }>;
   selectedCount: number;
   draftCount: number;
   syncedCount: number;

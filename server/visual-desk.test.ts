@@ -64,6 +64,7 @@ const memoryDependencies = (input: {
   extracted?: SourceImage[];
   screenshots?: SourceImage[];
   searched?: SourceImage[];
+  searchedRelated?: SourceImage[];
   generated?: SourceImage[];
   stylized?: SourceImage;
 }) => {
@@ -101,9 +102,9 @@ const memoryDependencies = (input: {
       calls.requested.push(requested);
       return input.screenshots ?? [];
     },
-    searchOnline: async () => {
+    searchOnline: async (_story, _requested, priority) => {
       calls.search += 1;
-      return input.searched ?? [];
+      return priority === 3 ? input.searched ?? [] : input.searchedRelated ?? [];
     },
     stylizeIdentity: async (source) => {
       calls.stylize += 1;
@@ -183,7 +184,7 @@ test("licensed online identity search runs after screenshots and before generate
   const result = await runVisualHydration("story-online", 2, memory.dependencies);
 
   assert.equal(memory.calls.capture, 1, "the source screenshot tier is exhausted first");
-  assert.equal(memory.calls.search, 1);
+  assert.equal(memory.calls.search, 2, "identity and related search are separate real stages");
   assert.equal(memory.calls.generate, 0, "a real identity image suppresses synthetic filler");
   assert.equal(result.onlineSearchCount, 1);
   assert.equal(result.generatedCount, 0);
@@ -206,10 +207,37 @@ test("live generation runs only when source, screenshot and online search all re
   const result = await runVisualHydration("story-generate-last", 2, memory.dependencies);
 
   assert.equal(memory.calls.capture, 1);
-  assert.equal(memory.calls.search, 1);
+  assert.equal(memory.calls.search, 2, "both grounded web tiers are exhausted before generation");
   assert.equal(memory.calls.generate, 1);
   assert.equal(result.generatedCount, 1);
   assert.equal(memory.images()[0]?.editorialPriority, 5);
+});
+
+test("visual hydration reports the editorial 1-to-5 search stages in order", async () => {
+  const { dependencies } = memoryDependencies({
+    extracted: [],
+    screenshots: [],
+    searched: [],
+    generated: [image("generated", {
+      localPath: imageFixture("generated-progress.png"),
+      publicPath: "/media/story/generated-progress.png",
+      editorialPriority: 5,
+      editorialOrigin: "generated-fallback",
+    })],
+  });
+  const stages: string[] = [];
+
+  await runVisualHydration("story-test", 2, dependencies, {
+    progress: (_value, stage) => stages.push(stage),
+  });
+
+  assert.deepEqual(stages, [
+    "1/5 提取原新闻图片",
+    "2/5 截取新闻页面",
+    "3/5 搜索人物、公司与 Logo",
+    "4/5 搜索事件相关素材并核对授权",
+    "5/5 生成兜底封面（非新闻现场）",
+  ]);
 });
 
 test("one locally extracted image satisfies a one-image target without screenshots", async () => {

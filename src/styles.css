@@ -2633,6 +2633,15 @@ a.source-homepage-link:active {
 .today-funnel li span { color: var(--muted); font-size: 9px; }
 .today-funnel li strong { font-family: Georgia, serif; font-size: 25px; font-weight: 500; }
 .today-funnel li svg { position: absolute; z-index: 1; right: -8px; top: 33px; padding: 2px; background: #fff; color: #aaa; }
+.today-recommendation-health { display: grid; grid-template-columns: minmax(210px, .7fr) 1.3fr; gap: 20px; margin-top: 12px; padding: 14px 16px; border: 1px solid #cdd9cf; background: #f7faf7; }
+.today-recommendation-health.has-shortage { border-color: #e5c9ad; background: #fffaf4; }
+.today-recommendation-health > div { display: grid; gap: 4px; }
+.today-recommendation-health > div strong { font-family: Georgia, "Songti SC", serif; font-size: 16px; font-weight: 600; }
+.today-recommendation-health > div span { color: var(--muted); font-size: 10px; }
+.today-recommendation-health ul { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.today-recommendation-health li { position: static; display: inline-flex; align-items: center; justify-content: flex-start; flex-direction: row; gap: 6px; min-height: auto; padding: 6px 8px; border: 1px solid var(--line-soft); background: #fff; }
+.today-recommendation-health li span { color: var(--muted); font-size: 9px; }
+.today-recommendation-health li strong { font-size: 11px; }
 .today-empty, .today-error, .today-loading { min-height: 150px; display: flex; align-items: center; justify-content: center; gap: 13px; border-top: 1px solid #222; border-bottom: 1px solid var(--line); color: #7b7d82; }
 .today-empty > div, .today-error > div { display: grid; gap: 4px; }
 .today-empty strong, .today-error strong { color: #3d3f43; font-size: 13px; }
@@ -2666,6 +2675,7 @@ a.source-homepage-link:active {
 .story-detail-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #222; }
 .story-detail-heading h3 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 18px; }
 .story-detail-heading > span { color: var(--muted); font-size: 9px; }
+.story-detail-heading .evidence-ready-copy { display: inline-flex; align-items: center; gap: 4px; color: #25734b; }
 .story-source-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .story-reader-sidebar .story-source-groups { grid-template-columns: 1fr; gap: 18px; }
 .story-source-groups h4, .package-community-samples h4 { margin: 5px 0 7px; color: var(--muted); font-size: 9px; }
@@ -2737,6 +2747,11 @@ a.source-homepage-link:active {
 .story-package-actions { display: flex; align-items: flex-end; gap: 8px; flex: 0 0 auto; }
 .story-package-actions label { display: grid; gap: 4px; color: var(--muted); font-size: 8px; }
 .story-package-actions select { height: 40px; min-width: 116px; padding: 0 9px; border: 1px solid #c9cacf; border-radius: 7px; background: #fff; font-size: 11px; }
+.story-package-job { display: grid; gap: 8px; margin: 12px 0; padding: 12px 14px; border: 1px solid #d8d9de; background: #fafafa; }
+.story-package-job > div { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
+.story-package-job strong { font-size: 11px; }
+.story-package-job span, .story-package-job small { color: var(--muted); font-size: 9px; }
+.story-package-job progress { width: 100%; height: 5px; accent-color: var(--accent); }
 .today-package-status { min-height: 37px; display: flex; align-items: center; gap: 7px; padding: 0 10px; border-left: 3px solid var(--success); background: #f3f9f5; color: var(--success); font-size: 9px; font-weight: 700; }
 .today-package-status.blocked { border-color: var(--warning); background: #fff9ef; color: #82571d; }
 .package-draft-action { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--line); }
@@ -2889,6 +2904,8 @@ a.source-homepage-link:active {
   .today-story-actions button { width: 100%; }
   .today-funnel ol { overflow-x: auto; grid-template-columns: repeat(6, minmax(105px, 1fr)); }
   .today-funnel li:nth-child(n) { border-bottom: 0; border-right: 1px solid var(--line-soft); }
+  .today-recommendation-health { grid-template-columns: 1fr; gap: 10px; }
+  .today-recommendation-health ul { justify-content: flex-start; }
   .story-drawer { width: 100vw; }
   .story-drawer-header { padding: 18px 16px 15px; }
   .story-drawer-header h2 { font-size: 23px; }

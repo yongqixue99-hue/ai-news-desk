@@ -47,12 +47,15 @@ export interface VisualHydrationDependencies {
   persistImages: (signal: StorySignalView, images: SourceImage[]) => Promise<void>;
   localize: (image: SourceImage, assetRoot: string) => Promise<SourceImage>;
   capture: (url: string, assetRoot: string, requestedLimit: number) => Promise<SourceImage[]>;
-  searchOnline?: (story: VisualStorySnapshot, requestedLimit: number) => Promise<SourceImage[]>;
+  searchOnline?: (story: VisualStorySnapshot, requestedLimit: number, priority: 3 | 4) => Promise<SourceImage[]>;
   stylizeIdentity?: (image: SourceImage, story: VisualStorySnapshot, assetRoot: string) => Promise<SourceImage>;
   generateFallback?: (story: VisualStorySnapshot, assetRoot: string) => Promise<SourceImage[]>;
 }
 
-const inFlight = new Map<string, Promise<VisualHydrationResult>>();
+const inFlight = new Map<string, {
+  promise: Promise<VisualHydrationResult>;
+  listeners: Set<NonNullable<NonNullable<Parameters<typeof runVisualHydration>[3]>["progress"]>>;
+}>();
 
 const roleRank = (role: SourceRole | undefined) => ({
   official: 5,
@@ -199,6 +202,7 @@ export const runVisualHydration = async (
   storyId: string,
   minimumImages: number,
   dependencies: VisualHydrationDependencies,
+  options: { progress?: (value: number, stage: string) => void } = {},
 ): Promise<VisualHydrationResult> => {
   const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
   let story = await dependencies.getStory();
@@ -212,6 +216,7 @@ export const runVisualHydration = async (
     .slice(0, 3);
   const assetRoot = `story_assets_${storyId.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 70)}`;
   const primarySignal = signals[0];
+  if (primarySignal) options.progress?.(0.08, "1/5 提取原新闻图片");
 
   // Prefer already-discovered article images before fetching the source page
   // again. Persisting replaces the matching remote record in its candidate.
@@ -266,7 +271,8 @@ export const runVisualHydration = async (
   let screenshotCount = 0;
   story = await dependencies.getStory();
   counts = countVisualAssets(story?.images ?? []);
-  if (counts.localReadyImageCount < minimum) {
+  if (counts.localReadyImageCount < minimum && signals.length) {
+    options.progress?.(0.32, "2/5 截取新闻页面");
     for (const signal of signals.slice(0, 2)) {
       const requested = Math.min(3, minimum - counts.localReadyImageCount);
       if (requested <= 0) break;
@@ -287,18 +293,26 @@ export const runVisualHydration = async (
   let onlineSearchCount = 0;
   story = await dependencies.getStory();
   counts = countVisualAssets(story?.images ?? []);
-  if (story && primarySignal && counts.localReadyImageCount < minimum && dependencies.searchOnline) {
+  const persistOnlineTier = async (priority: 3 | 4) => {
+    if (!story || !primarySignal || counts.localReadyImageCount >= minimum || !dependencies.searchOnline) return;
     const searchStory = story;
+    options.progress?.(priority === 3 ? 0.52 : 0.72, priority === 3
+      ? "3/5 搜索人物、公司与 Logo"
+      : "4/5 搜索事件相关素材并核对授权");
     try {
-      const searched = await dependencies.searchOnline(searchStory, minimum - counts.localReadyImageCount);
-      for (const image of searched) {
+      const searched = await dependencies.searchOnline(
+        searchStory,
+        minimum - counts.localReadyImageCount,
+        priority,
+      );
+      for (const image of searched.filter((entry) => (entry.editorialPriority ?? priority) === priority)) {
         const localized = isLocalVisualAsset(image)
           ? image
           : canDownload(image)
             ? await dependencies.localize(image, assetRoot)
             : undefined;
         if (!localized || !isLocalVisualAsset(localized)) continue;
-        const prepared = dependencies.stylizeIdentity && (localized.editorialPriority === 3 || localized.editorialPriority === 4)
+        const prepared = priority === 3 && dependencies.stylizeIdentity
           ? await dependencies.stylizeIdentity(localized, searchStory, assetRoot).catch(() => localized)
           : localized;
         if (!isLocalVisualAsset(prepared)) continue;
@@ -309,15 +323,17 @@ export const runVisualHydration = async (
         if (counts.localReadyImageCount >= minimum) break;
       }
     } catch {
-      // A licensed-web lookup is an optional fallback, never a reason to fail
-      // an otherwise usable evidence package.
+      // A rights-auditable web lookup is optional. The next real tier still runs.
     }
-  }
+  };
+  await persistOnlineTier(3);
+  await persistOnlineTier(4);
 
   let generatedCount = 0;
   story = await dependencies.getStory();
   counts = countVisualAssets(story?.images ?? []);
   if (story && primarySignal && counts.localReadyImageCount === 0 && dependencies.generateFallback) {
+    options.progress?.(0.84, "5/5 生成兜底封面（非新闻现场）");
     try {
       const generated = (await dependencies.generateFallback(story, assetRoot)).filter(isLocalVisualAsset);
       if (generated.length) {
@@ -383,7 +399,7 @@ const productionDependencies = (storyId: string): VisualHydrationDependencies =>
   persistImages: (signal, images) => persistImagesForStory(storyId, signal, images),
   localize: downloadSourceImage,
   capture: captureRenderedPageImages,
-  searchOnline: (story, requestedLimit) => searchLicensedEditorialImages(story, requestedLimit),
+  searchOnline: (story, requestedLimit, priority) => searchLicensedEditorialImages(story, requestedLimit, { priority }),
   stylizeIdentity: (image, story, assetRoot) => createGroundedEditorialCover({
     source: image,
     storyTitle: story.title,
@@ -404,13 +420,25 @@ const productionDependencies = (storyId: string): VisualHydrationDependencies =>
  * cost of reading image-heavy pages, downloading source images and rendering
  * screenshot fallbacks.
  */
-export const hydrateStoryAssets = (storyId: string, minimumImages = 2) => {
+export const hydrateStoryAssets = (
+  storyId: string,
+  minimumImages = 2,
+  options: { progress?: (value: number, stage: string) => void } = {},
+) => {
   const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
   const key = `${storyId}:${minimum}`;
   const existing = inFlight.get(key);
-  if (existing) return existing;
-  const operation = runVisualHydration(storyId, minimum, productionDependencies(storyId))
+  if (existing) {
+    if (options.progress) existing.listeners.add(options.progress);
+    return existing.promise;
+  }
+  const listeners = new Set<NonNullable<typeof options.progress>>();
+  if (options.progress) listeners.add(options.progress);
+  const report = (value: number, stage: string) => {
+    for (const listener of listeners) listener(value, stage);
+  };
+  const operation = runVisualHydration(storyId, minimum, productionDependencies(storyId), { progress: report })
     .finally(() => inFlight.delete(key));
-  inFlight.set(key, operation);
+  inFlight.set(key, { promise: operation, listeners });
   return operation;
 };

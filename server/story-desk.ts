@@ -91,6 +91,9 @@ const recordTitles = (record: CandidateRecord) => [
 const exactKeysFor = (candidate: Candidate) => [...new Set([
   normalizedUrl(candidate.url),
   normalizedUrl(candidate.canonicalUrl),
+  candidate.evidenceRelation === "independent-report"
+    ? normalizedUrl(candidate.evidenceGroupUrl)
+    : "",
   normalizedUrl(candidate.engagement?.discussionUrl),
 ].filter(Boolean))];
 
@@ -437,6 +440,7 @@ const diagnosticsFor = (sources: SourceConfig[]) => sources
   }));
 
 export const buildTodayView = (state: WorkflowState, now = new Date().toISOString()): TodayView => {
+  const recommendationTarget = 8;
   const stories = buildStories(state, now);
   const active = stories.filter((story) => story.ageHours <= 48 && !story.ignored && !story.published);
   const ready = interleaveBySource(
@@ -461,16 +465,45 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
   const autoUsableMaterials = state.materials.filter((material) => isNeutralImagePublishReady(material, now));
   const sourceImageReadyCount = active.filter((story) => (story.localImageCount ?? 0) >= 2).length;
   const publishReadyStoryCount = active.filter((story) => (story.publishReadyImageCount ?? 0) >= 2).length;
+  const visibleRecommendations = ready.slice(0, recommendationTarget);
+  const diagnosticStories = stories.filter((story) => story.ageHours <= 7 * 24);
+  const dropCounts = diagnosticStories.reduce((counts, story) => {
+    if (story.ignored || story.published) counts["ignored-or-published"] += 1;
+    else if (story.ageHours > 48) counts["outside-window"] += 1;
+    else if (story.drafted) counts["already-drafted"] += 1;
+    else if (!story.assignment.canDraft) counts["evidence-blocked"] += 1;
+    return counts;
+  }, {
+    "outside-window": 0,
+    "already-drafted": 0,
+    "evidence-blocked": 0,
+    "ignored-or-published": 0,
+  });
+  const recommendationDropReasons = [
+    { code: "outside-window" as const, label: "超过 48 小时时效窗口", count: dropCounts["outside-window"] },
+    { code: "already-drafted" as const, label: "已经进入成稿流程", count: dropCounts["already-drafted"] },
+    { code: "evidence-blocked" as const, label: "证据不足，暂留观察", count: dropCounts["evidence-blocked"] },
+    { code: "ignored-or-published" as const, label: "已忽略或已发布", count: dropCounts["ignored-or-published"] },
+    {
+      code: "below-display-limit" as const,
+      label: `证据合格但暂未进入前 ${recommendationTarget} 条`,
+      count: Math.max(0, ready.length - recommendationTarget),
+    },
+  ].filter((reason) => reason.count > 0);
   return {
     generatedAt: now,
-    mustReads: ready.slice(0, 3),
-    secondary: ready.slice(3, 8),
+    mustReads: visibleRecommendations.slice(0, 3),
+    secondary: visibleRecommendations.slice(3),
     backlog,
     watching,
     diagnostics: diagnosticsFor(state.sources),
     funnel: {
       candidateCount: state.runs.reduce((total, run) => total + run.candidates.length, 0),
       storyCount: stories.length,
+      recommendationTarget,
+      visibleRecommendationCount: visibleRecommendations.length,
+      recommendationShortageCount: Math.max(0, recommendationTarget - visibleRecommendations.length),
+      recommendationDropReasons,
       selectedCount: state.runs.reduce((total, run) => total + run.candidates.filter((candidate) => candidate.selected).length, 0),
       draftCount: drafts.length,
       syncedCount: drafts.filter((draft) => Boolean(draft.wechatDraft) || draft.status === "filled").length,

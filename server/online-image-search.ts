@@ -32,6 +32,7 @@ interface CommonsSearchResponse {
 
 export interface OnlineImageSearchOptions {
   fetcher?: typeof fetch;
+  priority?: 3 | 4;
 }
 
 export type EditorialImageSearchStory = Pick<StoryView, "id" | "title" | "originalTitle" | "summary">;
@@ -248,10 +249,13 @@ export const searchLicensedEditorialImages = async (
   const limit = Math.max(0, Math.min(4, Math.floor(requestedLimit)));
   if (!limit) return [];
   const fetcher = options.fetcher ?? fetch;
-  for (const query of identityQueriesForStory(story)) {
-    const images = await fetchCommons(query, 3, limit, fetcher).catch(() => []);
-    if (images.length) return images;
+  if (options.priority !== 4) {
+    for (const query of identityQueriesForStory(story)) {
+      const images = await fetchCommons(query, 3, limit, fetcher).catch(() => []);
+      if (images.length) return images;
+    }
   }
+  if (options.priority === 3) return [];
   const relatedQueries = [...new Set([story.originalTitle, story.title]
     .map((value) => value?.replace(/\s+/gu, " ").trim())
     .filter((value): value is string => Boolean(value)))]

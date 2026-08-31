@@ -127,6 +127,18 @@ export interface StoryExplanationRequestResult {
   reused: boolean;
 }
 
+export interface StoryEvidenceRequestResult {
+  job?: ProductJob;
+  story: StoryView;
+  reused: boolean;
+}
+
+export interface ContentPackageRequestResult {
+  job: ProductJob;
+  contentPackage?: ContentPackage;
+  reused: boolean;
+}
+
 export interface ShellView {
   notifications: WorkflowNotification[];
   notificationsMuted: boolean;
@@ -162,6 +174,10 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ force }),
   }),
+  supplementStoryEvidence: (storyId: string) => request<StoryEvidenceRequestResult>(`/api/stories/${storyId}/evidence`, {
+    method: "POST",
+    body: "{}",
+  }),
   recordStoryEvent: (
     storyId: string,
     type: "opened" | "interested" | "not_interested" | "package_created" | "drafted" | "synced" | "published",
@@ -173,10 +189,10 @@ export const api = {
   }),
   restoreStoryFeedback: (storyId: string) =>
     request<{ event: ProductFeedbackEvent; story: StoryView }>(`/api/stories/${storyId}/feedback`, { method: "DELETE" }),
-  createContentPackage: (storyId: string, mode?: Exclude<AssignmentMode, "watch" | "skip">) =>
-    request<{ contentPackage: ContentPackage; reused: boolean }>(`/api/stories/${storyId}/packages`, {
+  createContentPackage: (storyId: string, mode?: Exclude<AssignmentMode, "watch" | "skip">, force = false) =>
+    request<ContentPackageRequestResult>(`/api/stories/${storyId}/packages`, {
       method: "POST",
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({ mode, force }),
     }),
   contentPackage: (packageId: string) => request<ContentPackage>(`/api/packages/${packageId}`),
   createDraftFromPackage: (packageId: string) =>
