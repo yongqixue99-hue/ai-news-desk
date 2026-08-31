@@ -1205,7 +1205,7 @@ export const defaultSources: SourceConfig[] = configuredDefaultSources.map((sour
   role: sourceRoleFor(source),
 }));
 
-const presetTimestamp = "2026-08-18T00:00:00.000Z";
+const presetTimestamp = "2026-08-31T13:26:12.000Z";
 
 export const defaultSourcePresets: SourcePreset[] = [
   {
@@ -1251,6 +1251,48 @@ export const defaultSourcePresets: SourcePreset[] = [
       "36kr-technology",
       "last30days-community",
       "zhihu-community",
+    ],
+    createdAt: presetTimestamp,
+    updatedAt: presetTimestamp,
+  },
+  {
+    id: "preset_ai_expanded",
+    name: "AI 扩展覆盖（较慢）",
+    sourceIds: [
+      "openai-official",
+      "x-ai-official",
+      "anthropic-official",
+      "deepmind-official",
+      "microsoft-official",
+      "nvidia-official",
+      "aws-ml-official",
+      "github-official",
+      "qwen-official",
+      "deepseek-official",
+      "zhipu-official",
+      "kimi-official",
+      "reuters-ai",
+      "ap-ai",
+      "bbc-technology",
+      "techcrunch-ai",
+      "ars-ai",
+      "mit-technology-review",
+      "venturebeat-ai",
+      "the-verge",
+      "wired",
+      "microsoft-research",
+      "mit-news-ai",
+      "nist-news",
+      "ftc-press",
+      "cisa-advisories",
+      "cloudflare-blog",
+      "qbitai",
+      "jiqizhixin",
+      "36kr-technology",
+      "hackernews",
+      "v2ex-community",
+      "github-project-community",
+      "google-news-ai"
     ],
     createdAt: presetTimestamp,
     updatedAt: presetTimestamp,
@@ -1500,7 +1542,7 @@ const normalizeProviderHealth = (
 
 export const upgradeState = (state: WorkflowState): WorkflowState => {
   const previousVersion = Number(state.version || 0);
-  state.version = 13;
+  state.version = 14;
   state.settings = { ...defaultSettings, ...state.settings };
   state.settings.wechat = {
     ...defaultSettings.wechat,
@@ -1665,6 +1707,12 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
       dailyPreset.updatedAt = presetTimestamp;
     }
   }
+  if (previousVersion < 14) {
+    const expandedPreset = defaultSourcePresets.find((preset) => preset.id === "preset_ai_expanded");
+    if (expandedPreset && !state.sourcePresets.some((preset) => preset.id === expandedPreset.id)) {
+      state.sourcePresets.push({ ...expandedPreset, sourceIds: [...expandedPreset.sourceIds] });
+    }
+  }
   const availableSourceIds = new Set(state.sources.map((source) => source.id));
   state.sourcePresets = state.sourcePresets.flatMap((preset) => {
     if (!preset || typeof preset.id !== "string" || typeof preset.name !== "string") return [];
@@ -1762,7 +1810,7 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
 };
 
 export const createDefaultState = (): WorkflowState => ({
-  version: 13,
+  version: 14,
   settings: { ...defaultSettings, wechat: { ...defaultSettings.wechat } },
   editorialSystem: { profile: defaultEditorialProfile(), suggestionDecisions: [] },
   aiSettings: defaultAiSettings(),

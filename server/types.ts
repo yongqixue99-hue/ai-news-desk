@@ -564,6 +564,8 @@ export interface ArticleSkillConfig {
   description: string;
   sourcePath: string;
   enabled: boolean;
+  /** Runtime-only hint returned by the API; it is not persisted. */
+  available?: boolean;
   builtIn: boolean;
   compatibility: SkillCompatibility;
   /** Tasks that may load this Skill. Missing values are inferred for legacy records. */
@@ -1008,7 +1010,7 @@ export interface WorkflowNotification {
 }
 
 export interface WorkflowState {
-  version: 13;
+  version: 14;
   settings: Settings;
   editorialSystem: EditorialSystemState;
   aiSettings: AiSettings;

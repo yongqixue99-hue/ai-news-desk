@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   acquireWindowsServiceLogLock,
   classifyWindowsServiceLogEncoding,
+  formatWindowsServiceFatal,
   prepareWindowsServiceLog,
 } from "./windows-service-log.js";
 
@@ -135,4 +136,11 @@ test("an active OS lock rejects a competing writer before it can touch the log",
   await first.release();
   const next = await acquireWindowsServiceLogLock({ logPath });
   await next.release();
+});
+
+test("fatal service errors keep their type, message and stack in one log-safe value", () => {
+  const formatted = formatWindowsServiceFatal("unhandledRejection", new Error("database unavailable"));
+  assert.match(formatted, /^unhandledRejection: Error: database unavailable/u);
+  assert.match(formatted, /windows-service-log\.test/u);
+  assert.equal(formatWindowsServiceFatal("startup", "import failed"), "startup: import failed");
 });

@@ -145,6 +145,10 @@ export interface TodayFunnel {
   syncedCount: number;
   publishedCount: number;
   feedbackCount: number;
+  materialLibraryTotal: number;
+  autoUsableMaterialCount: number;
+  rightsReviewMaterialCount: number;
+  /** @deprecated Use autoUsableMaterialCount. */
   reusableMaterialCount: number;
 }
 
@@ -152,12 +156,16 @@ export interface TodayView {
   generatedAt: string;
   mustReads: StoryView[];
   secondary: StoryView[];
+  backlog: StoryView[];
   watching: StoryView[];
   diagnostics: TodaySourceDiagnostic[];
   funnel: TodayFunnel;
   coverage: {
     activeStoryCount: number;
     risingCount: number;
+    sourceImageReadyCount: number;
+    publishReadyStoryCount: number;
+    /** @deprecated Use sourceImageReadyCount. */
     imageReadyCount: number;
     strongEvidenceCount: number;
     topicIds: CollectionTopicId[];

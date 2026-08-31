@@ -35,11 +35,12 @@ test("mode choice cannot hide limited community sampling", () => {
   assert.match(assignment.warnings[0] ?? "", /不能概括共识/u);
 });
 
-test("unhandled stories become ineligible after 48 hours while protected work remains available", () => {
-  const expired = assignStory({ ...base, ageHours: 49 });
+test("unhandled stories move to a seven-day backlog before expiring", () => {
+  const backlog = assignStory({ ...base, ageHours: 49 });
   const protectedStory = assignStory({ ...base, ageHours: 49, protected: true });
 
-  assert.equal(expired.mode, "skip");
-  assert.equal(expired.canDraft, false);
+  assert.equal(backlog.mode, "brief");
+  assert.equal(backlog.canDraft, true);
+  assert.match(backlog.warnings[0] ?? "", /近 7 日补看区/u);
   assert.equal(protectedStory.canDraft, true);
 });

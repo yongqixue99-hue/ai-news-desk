@@ -4,7 +4,7 @@ import { copyFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-export const LOCAL_DATABASE_SCHEMA_VERSION = 4;
+export const LOCAL_DATABASE_SCHEMA_VERSION = 5;
 
 export type DurableJobStatus = "queued" | "running" | "retrying" | "complete" | "failed" | "cancelled";
 
@@ -16,6 +16,8 @@ export interface DurableJobRecord {
   payload: unknown;
   result?: unknown;
   progress: number;
+  stage?: string;
+  heartbeatAt?: string;
   attempts: number;
   maxAttempts: number;
   createdAt: string;
@@ -74,6 +76,8 @@ interface JobRow {
   payload_json: string;
   result_json: string | null;
   progress: number;
+  stage: string | null;
+  heartbeat_at: string | null;
   attempts: number;
   max_attempts: number;
   created_at: string;
@@ -118,6 +122,8 @@ const jobFromRow = (row: JobRow): DurableJobRecord => ({
   payload: parseJson(row.payload_json),
   result: parseJson(row.result_json),
   progress: row.progress,
+  stage: row.stage ?? undefined,
+  heartbeatAt: row.heartbeat_at ?? undefined,
   attempts: row.attempts,
   maxAttempts: row.max_attempts,
   createdAt: row.created_at,
@@ -198,6 +204,8 @@ export class LocalDatabase {
         payload_json TEXT NOT NULL,
         result_json TEXT,
         progress REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
+        stage TEXT,
+        heartbeat_at TEXT,
         attempts INTEGER NOT NULL DEFAULT 0,
         max_attempts INTEGER NOT NULL DEFAULT 3,
         created_at TEXT NOT NULL,
@@ -271,6 +279,11 @@ export class LocalDatabase {
         evidence_json TEXT NOT NULL
       ) STRICT;
     `);
+    const workflowJobColumns = new Set(
+      (this.db.prepare("PRAGMA table_info(workflow_jobs)").all() as Array<{ name: string }>).map((column) => column.name),
+    );
+    if (!workflowJobColumns.has("stage")) this.db.exec("ALTER TABLE workflow_jobs ADD COLUMN stage TEXT");
+    if (!workflowJobColumns.has("heartbeat_at")) this.db.exec("ALTER TABLE workflow_jobs ADD COLUMN heartbeat_at TEXT");
     this.db.prepare(`
       INSERT INTO metadata(key, value) VALUES ('schema_version', ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -425,6 +438,8 @@ export class LocalDatabase {
         next_attempt_at = NULL,
         lease_owner = NULL,
         lease_expires_at = NULL,
+        stage = NULL,
+        heartbeat_at = NULL,
         error = NULL
     `).run(
       job.id,
@@ -457,9 +472,10 @@ export class LocalDatabase {
     this.db.prepare(`
       UPDATE workflow_jobs
       SET status = 'cancelled', updated_at = ?, next_attempt_at = NULL,
-          lease_owner = NULL, lease_expires_at = NULL, error = '已由用户取消'
+          lease_owner = NULL, lease_expires_at = NULL, stage = '已取消',
+          heartbeat_at = ?, error = '已由用户取消'
       WHERE idempotency_key = ? AND status IN ('queued','retrying')
-    `).run(updatedAt, idempotencyKey);
+    `).run(updatedAt, updatedAt, idempotencyKey);
     const row = this.db.prepare("SELECT * FROM workflow_jobs WHERE idempotency_key = ?").get(idempotencyKey) as unknown as JobRow | undefined;
     return row ? jobFromRow(row) : undefined;
   }
@@ -471,9 +487,10 @@ export class LocalDatabase {
       UPDATE workflow_jobs
       SET status = 'retrying', updated_at = ?, next_attempt_at = ?,
           lease_owner = NULL, lease_expires_at = NULL,
+          stage = '等待自动重试', heartbeat_at = ?,
           error = '任务进程中断，已在启动时恢复'
       WHERE status = 'running'
-    `).run(recoveredAt, recoveredAt).changes;
+    `).run(recoveredAt, recoveredAt, recoveredAt).changes;
   }
 
   claimNextJob(input: {
@@ -491,9 +508,10 @@ export class LocalDatabase {
       this.db.prepare(`
         UPDATE workflow_jobs
         SET status = 'retrying', lease_owner = NULL, lease_expires_at = NULL,
-            next_attempt_at = ?, updated_at = ?, error = COALESCE(error, '任务进程中断，已自动恢复')
+            next_attempt_at = ?, updated_at = ?, stage = '等待自动重试', heartbeat_at = ?,
+            error = COALESCE(error, '任务进程中断，已自动恢复')
         WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
-      `).run(now, now, now);
+      `).run(now, now, now, now);
       const typeClause = types.length ? `AND type IN (${types.map(() => "?").join(",")})` : "";
       const row = this.db.prepare(`
         SELECT * FROM workflow_jobs
@@ -510,9 +528,10 @@ export class LocalDatabase {
       this.db.prepare(`
         UPDATE workflow_jobs
         SET status = 'running', attempts = attempts + 1, lease_owner = ?,
-            lease_expires_at = ?, updated_at = ?, error = NULL
+            lease_expires_at = ?, updated_at = ?, stage = COALESCE(stage, '开始处理'),
+            heartbeat_at = ?, error = NULL
         WHERE id = ?
-      `).run(input.workerId, leaseExpiresAt, now, row.id);
+      `).run(input.workerId, leaseExpiresAt, now, now, row.id);
       const claimed = this.db.prepare("SELECT * FROM workflow_jobs WHERE id = ?").get(row.id) as unknown as JobRow;
       this.db.exec("COMMIT");
       return jobFromRow(claimed);
@@ -522,14 +541,35 @@ export class LocalDatabase {
     }
   }
 
-  updateJobProgress(jobId: string, workerId: string, progress: number) {
+  updateJobProgress(jobId: string, workerId: string, progress: number, stage?: string, leaseMs = 10 * 60_000) {
     const updatedAt = this.now();
+    const leaseExpiresAt = new Date(Date.parse(updatedAt) + Math.max(5_000, leaseMs)).toISOString();
     const result = this.db.prepare(`
       UPDATE workflow_jobs
-      SET progress = ?, updated_at = ?
+      SET progress = ?, stage = COALESCE(?, stage), heartbeat_at = ?,
+          lease_expires_at = ?, updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
-    `).run(Math.max(0, Math.min(1, progress)), updatedAt, jobId, workerId);
+    `).run(
+      Math.max(0, Math.min(1, progress)),
+      stage?.trim() || null,
+      updatedAt,
+      leaseExpiresAt,
+      updatedAt,
+      jobId,
+      workerId,
+    );
     if (!result.changes) throw new Error("任务租约已失效，不能继续更新进度");
+  }
+
+  heartbeatJob(jobId: string, workerId: string, stage?: string, leaseMs = 10 * 60_000) {
+    const heartbeatAt = this.now();
+    const leaseExpiresAt = new Date(Date.parse(heartbeatAt) + Math.max(5_000, leaseMs)).toISOString();
+    const result = this.db.prepare(`
+      UPDATE workflow_jobs
+      SET stage = COALESCE(?, stage), heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'running' AND lease_owner = ?
+    `).run(stage?.trim() || null, heartbeatAt, leaseExpiresAt, heartbeatAt, jobId, workerId);
+    if (!result.changes) throw new Error("任务租约已失效，不能继续发送心跳");
   }
 
   completeJob(jobId: string, workerId: string, result?: unknown): DurableJobRecord {
@@ -537,9 +577,10 @@ export class LocalDatabase {
     const update = this.db.prepare(`
       UPDATE workflow_jobs
       SET status = 'complete', result_json = ?, progress = 1, updated_at = ?,
-          next_attempt_at = NULL, lease_owner = NULL, lease_expires_at = NULL, error = NULL
+          heartbeat_at = ?, next_attempt_at = NULL, lease_owner = NULL,
+          lease_expires_at = NULL, error = NULL
       WHERE id = ? AND status = 'running' AND lease_owner = ?
-    `).run(result === undefined ? null : json(result), updatedAt, jobId, workerId);
+    `).run(result === undefined ? null : json(result), updatedAt, updatedAt, jobId, workerId);
     if (!update.changes) throw new Error("任务租约已失效，不能标记完成");
     return jobFromRow(this.db.prepare("SELECT * FROM workflow_jobs WHERE id = ?").get(jobId) as unknown as JobRow);
   }
@@ -557,9 +598,17 @@ export class LocalDatabase {
     this.db.prepare(`
       UPDATE workflow_jobs
       SET status = ?, updated_at = ?, next_attempt_at = ?, lease_owner = NULL,
-          lease_expires_at = NULL, error = ?
+          lease_expires_at = NULL, stage = ?, heartbeat_at = ?, error = ?
       WHERE id = ?
-    `).run(retrying ? "retrying" : "failed", updatedAt, nextAttemptAt, error.slice(0, 1_500), jobId);
+    `).run(
+      retrying ? "retrying" : "failed",
+      updatedAt,
+      nextAttemptAt,
+      retrying ? "等待自动重试" : "处理失败",
+      updatedAt,
+      error.slice(0, 1_500),
+      jobId,
+    );
     return jobFromRow(this.db.prepare("SELECT * FROM workflow_jobs WHERE id = ?").get(jobId) as unknown as JobRow);
   }
 

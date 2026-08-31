@@ -22,9 +22,9 @@ export const assignStory = (input: EditorialAssignmentInput): AssignmentDecision
   const warnings: string[] = [];
   let mode: AssignmentMode;
   let reason: string;
-  if (input.ageHours > 48 && !input.protected) {
+  if (input.ageHours > 7 * 24 && !input.protected) {
     mode = "skip";
-    reason = "内容已经超过当前编辑窗口，且没有进入编辑流程";
+    reason = "内容已经超过七日补看窗口，且没有进入编辑流程";
     blockers.push("内容已过期");
   } else if (input.evidenceStrength === "weak") {
     mode = "watch";
@@ -50,6 +50,9 @@ export const assignStory = (input: EditorialAssignmentInput): AssignmentDecision
   }
   if (input.communitySourceCount > 0 && input.communitySampleCount < 5) {
     warnings.push("社区样本不足，只能呈现有限观点，不能概括共识");
+  }
+  if (input.ageHours > 48 && input.ageHours <= 7 * 24 && !input.protected) {
+    warnings.push("已超过 48 小时今日窗口，仅在近 7 日补看区展示");
   }
   return {
     mode,

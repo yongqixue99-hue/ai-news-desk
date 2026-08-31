@@ -12,9 +12,11 @@ test("default sources are classified by editorial role and ship useful topic bun
   const state = createDefaultState();
   const dailyAi = state.sourcePresets.find((preset) => preset.id === "preset_ai_daily");
   const discovery = state.sourcePresets.find((preset) => preset.id === "preset_discovery");
+  const expanded = state.sourcePresets.find((preset) => preset.id === "preset_ai_expanded");
   const esports = state.sourcePresets.find((preset) => preset.id === "preset_esports");
   assert.ok(dailyAi);
   assert.ok(discovery);
+  assert.ok(expanded);
   assert.ok(esports);
   assert.equal(state.sources.find((source) => source.id === "hackernews")?.role, "community");
   assert.ok(dailyAi.sourceIds.includes("openai-official"));
@@ -23,6 +25,9 @@ test("default sources are classified by editorial role and ship useful topic bun
   assert.ok(discovery.sourceIds.includes("google-news-ai"));
   assert.ok(discovery.sourceIds.includes("last30days-community"));
   assert.ok(discovery.sourceIds.includes("zhihu-community"));
+  assert.ok(expanded.sourceIds.includes("venturebeat-ai"));
+  assert.ok(expanded.sourceIds.includes("microsoft-research"));
+  assert.ok(expanded.sourceIds.includes("qbitai"));
   assert.ok(esports.sourceIds.includes("lpl-official"));
 });
 
@@ -104,7 +109,7 @@ test("Horizon receives comprehensive news search as RSS instead of its empty ada
 
 test("v11 personal state gains classified V2EX and GitHub sources without losing stored source choices", () => {
   const legacy = createDefaultState();
-  legacy.version = 11 as 13;
+  legacy.version = 11 as 14;
   legacy.sources = legacy.sources.filter((source) => !["v2ex-community", "github-project-community"].includes(source.id));
   const openai = legacy.sources.find((source) => source.id === "openai-official");
   assert.ok(openai);
@@ -114,7 +119,7 @@ test("v11 personal state gains classified V2EX and GitHub sources without losing
   }
 
   const upgraded = upgradeState(legacy);
-  assert.equal(upgraded.version, 13);
+  assert.equal(upgraded.version, 14);
   assert.equal(upgraded.sources.find((source) => source.id === "openai-official")?.selected, false);
   assert.equal(upgraded.sources.find((source) => source.id === "v2ex-community")?.role, "community");
   assert.equal(upgraded.sources.find((source) => source.id === "github-project-community")?.kind, "github");
@@ -131,6 +136,6 @@ test("v12 personal state adds the new X source to the AI daily preset exactly on
 
   const upgraded = upgradeState(legacy);
   const sourceIds = upgraded.sourcePresets.find((preset) => preset.id === "preset_ai_daily")?.sourceIds ?? [];
-  assert.equal(upgraded.version, 13);
+  assert.equal(upgraded.version, 14);
   assert.equal(sourceIds.filter((sourceId) => sourceId === "x-ai-official").length, 1);
 });

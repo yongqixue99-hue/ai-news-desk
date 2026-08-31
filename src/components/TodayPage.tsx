@@ -10,6 +10,7 @@ import {
   Eye,
   FileStack,
   Image as ImageIcon,
+  Images,
   MessageSquareText,
   RefreshCw,
   RotateCcw,
@@ -172,7 +173,7 @@ const Funnel = ({ data }: { data: TodayView["funnel"] }) => {
     <section className="today-funnel" aria-label="内容生产漏斗">
       <div className="today-section-heading">
         <div><span>生产闭环</span><h2>哪里正在掉队</h2></div>
-        <small>{data.feedbackCount} 次选择反馈 · {data.reusableMaterialCount} 个可复用素材</small>
+        <small>{data.feedbackCount} 次选择反馈 · 素材库 {data.materialLibraryTotal} 张：{data.autoUsableMaterialCount} 张可自动使用，{data.rightsReviewMaterialCount} 张待处理</small>
       </div>
       <ol>
         {steps.map(([label, count], index) => (
@@ -676,7 +677,8 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
   const metrics = useMemo(() => [
     { label: "活跃事件", value: coverage?.activeStoryCount ?? 0, icon: BookOpen },
     { label: "正在升温", value: coverage?.risingCount ?? 0, icon: TrendingUp },
-    { label: "已缓存 2+ 图", value: coverage?.imageReadyCount ?? 0, icon: ImageIcon },
+    { label: "来源图 2+", value: coverage?.sourceImageReadyCount ?? coverage?.imageReadyCount ?? 0, icon: ImageIcon },
+    { label: "发布图 2+", value: coverage?.publishReadyStoryCount ?? 0, icon: Images },
     { label: "强证据", value: coverage?.strongEvidenceCount ?? 0, icon: ShieldCheck },
   ], [coverage]);
 
@@ -751,6 +753,20 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
               ) : null}
             </aside>
           </div>
+
+          {today.backlog.length ? (
+            <section className="today-section today-backlog">
+              <div className="today-section-heading">
+                <div><span>近 7 日补看</span><h2>错过但仍值得写的事件</h2></div>
+                <p>不挤占 48 小时内的今日推荐；只补回尚未写过、证据足够的旧事件。</p>
+              </div>
+              <div className="today-secondary-list">
+                {today.backlog.map((story) => (
+                  <StoryRow key={story.id} story={story} busy={busy} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickDraft} />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <Funnel data={today.funnel} />
         </>

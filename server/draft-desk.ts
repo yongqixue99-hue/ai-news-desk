@@ -97,7 +97,13 @@ const packageEvidenceText = (contentPackage: ContentPackage) => [
   ...contentPackage.uncertainties,
 ].join("\n");
 
-const create = async (packageId: string): Promise<{ draft: ArticleDraft; reused: boolean }> => {
+export type DraftProgressReporter = (progress: number, stage: string) => void;
+
+const create = async (
+  packageId: string,
+  onProgress?: DraftProgressReporter,
+): Promise<{ draft: ArticleDraft; reused: boolean }> => {
+  onProgress?.(0.08, "校验冻结素材包");
   const database = await getLocalDatabase();
   const contentPackage = database.getContentPackage<ContentPackage>(packageId);
   if (!contentPackage) throw new Error("素材包不存在");
@@ -107,7 +113,11 @@ const create = async (packageId: string): Promise<{ draft: ArticleDraft; reused:
 
   const initialState = await readState();
   const existing = initialState.drafts.find((draft) => draft.provenance.contentPackageId === packageId);
-  if (existing) return { draft: existing, reused: true };
+  if (existing) {
+    onProgress?.(0.95, "复用已有草稿");
+    return { draft: existing, reused: true };
+  }
+  onProgress?.(0.14, "读取冻结证据");
   const { runId, candidate } = sourceCandidateFor(initialState, contentPackage);
   const provider = initialState.aiSettings.providers.find((entry) => entry.id === initialState.aiSettings.activeProviderId)
     ?? initialState.aiSettings.providers[0];
@@ -116,6 +126,7 @@ const create = async (packageId: string): Promise<{ draft: ArticleDraft; reused:
     throw new Error(`请先在 AI 设置中配置 ${provider.name} 的 API Key`);
   }
   const images = await sourceImagesFromContentPackage(contentPackage);
+  onProgress?.(0.22, "准备成稿材料");
   database.recordWorkflowEvent({
     type: "draft.started",
     subjectType: "package",
@@ -138,8 +149,10 @@ const create = async (packageId: string): Promise<{ draft: ArticleDraft; reused:
         contentPackage,
         draftStrategy: contentPackage.mode,
         writingGuidelines: activeWritingGuidelines(database),
+        onProgress,
       },
     );
+    onProgress?.(0.96, "保存草稿与修订记录");
     const saved = await updateState((state) => {
       const duplicate = state.drafts.find((entry) => entry.provenance.contentPackageId === packageId);
       if (duplicate) return { draft: duplicate, reused: true };
@@ -181,10 +194,10 @@ const create = async (packageId: string): Promise<{ draft: ArticleDraft; reused:
  * passes a locked ContentPackage to the model, so raw feeds and model memory
  * cannot silently expand the article's fact boundary.
  */
-export const createDraftFromPackage = (packageId: string) => {
+export const createDraftFromPackage = (packageId: string, onProgress?: DraftProgressReporter) => {
   const current = inFlight.get(packageId);
   if (current) return current;
-  const operation = create(packageId).finally(() => inFlight.delete(packageId));
+  const operation = create(packageId, onProgress).finally(() => inFlight.delete(packageId));
   inFlight.set(packageId, operation);
   return operation;
 };

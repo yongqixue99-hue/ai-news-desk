@@ -119,7 +119,7 @@ import {
 } from "./secrets.js";
 import { readXCredentialStatus } from "./x-credentials.js";
 import { accountsForXSource } from "./x-official.js";
-import { importArticleSkill } from "./skill-registry.js";
+import { importArticleSkill, readSkillInstructions } from "./skill-registry.js";
 import { createWeChatDraftDesk } from "./wechat-draft.js";
 import { createWeChatHttpGateway } from "./wechat-http.js";
 import { loadWeChatPlacementImage } from "./wechat-image.js";
@@ -341,10 +341,19 @@ app.get(
   "/api/bootstrap",
   asyncRoute(async (_request, response) => {
     const state = await readState();
+    const skills = await Promise.all(state.aiSettings.skills.map(async (skill) => ({
+      ...skill,
+      available: Boolean((await readSkillInstructions(skill, 512)).trim()),
+    })));
     // Revision snapshots are fetched only when the Versions drawer opens;
     // keeping them out of the initial payload prevents old article bodies from
     // slowing down every page load as the local archive grows.
-    response.json({ ...state, draftRevisions: [], articleAgentThreads: [] });
+    response.json({
+      ...state,
+      aiSettings: { ...state.aiSettings, skills },
+      draftRevisions: [],
+      articleAgentThreads: [],
+    });
   }),
 );
 
@@ -2593,7 +2602,7 @@ const durableJobDesk = createJobDesk({
         ? String((payload as { runId: unknown }).runId)
         : "";
       if (!runId) throw new Error("任务缺少采集 Run ID");
-      context.progress(0.03);
+      context.progress(0.03, "启动新闻采集");
       try {
         await executeCollection(runId);
       } catch (error) {
@@ -2615,7 +2624,7 @@ const durableJobDesk = createJobDesk({
         }
         throw error;
       }
-      context.progress(0.98);
+      context.progress(0.98, "整理采集结果");
       const run = (await readState()).runs.find((entry) => entry.id === runId);
       return { runId, status: run?.status, candidateCount: run?.candidates.length ?? 0 };
     },
@@ -2627,9 +2636,9 @@ const durableJobDesk = createJobDesk({
         ? Number((payload as { minimumImages: unknown }).minimumImages)
         : 2;
       if (!storyId) throw new Error("任务缺少 Story ID");
-      context.progress(0.08);
+      context.progress(0.08, "读取来源图片");
       const result = await hydrateStoryAssets(storyId, Number.isFinite(minimumImages) ? minimumImages : 2);
-      context.progress(0.96);
+      context.progress(0.96, "保存来源图片");
       return result;
     },
     "explain-story": async (payload, context) => {
@@ -2637,9 +2646,9 @@ const durableJobDesk = createJobDesk({
         ? String((payload as { storyId: unknown }).storyId)
         : "";
       if (!storyId) throw new Error("任务缺少 Story ID");
-      context.progress(0.08);
+      context.progress(0.08, "读取新闻正文");
       const story = await enrichStoryExplanation(storyId);
-      context.progress(0.96);
+      context.progress(0.96, "整理证据说明");
       return { storyId: story.id, explanationStatus: story.explanation.status };
     },
     "draft-from-package": async (payload, context) => {
@@ -2647,9 +2656,9 @@ const durableJobDesk = createJobDesk({
         ? String((payload as { packageId: unknown }).packageId)
         : "";
       if (!packageId) throw new Error("任务缺少素材包 ID");
-      context.progress(0.08);
-      const result = await createDraftFromPackage(packageId);
-      context.progress(0.96);
+      context.progress(0.05, "准备生成草稿");
+      const result = await createDraftFromPackage(packageId, (progress, stage) => context.progress(progress, stage));
+      context.progress(0.98, "完成草稿入库");
       return { draftId: result.draft.id, reused: result.reused, imageCount: result.draft.images.length };
     },
   },

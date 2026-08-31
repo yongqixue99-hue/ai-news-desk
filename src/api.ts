@@ -141,11 +141,15 @@ export interface ProductJob {
   payload: unknown;
   result?: { draftId?: string; reused?: boolean; imageCount?: number } | unknown;
   progress: number;
+  stage?: string;
+  heartbeatAt?: string;
   attempts: number;
   maxAttempts: number;
   createdAt: string;
   updatedAt: string;
   nextAttemptAt?: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
   error?: string;
 }
 

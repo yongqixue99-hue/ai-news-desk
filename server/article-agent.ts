@@ -16,7 +16,7 @@ import { normalizedDraftBodyHtml, sanitizeDraftHtml } from "./article-html.js";
 import { extractPage } from "./extractor.js";
 import { runGenerationProvider } from "./provider-runtime.js";
 import {
-  readSkillInstructions,
+  loadAvailableArticleSkills,
   skillsForArticleTask,
   skillsForWritingReview,
 } from "./skill-registry.js";
@@ -557,14 +557,14 @@ const skillSnapshot = async (
   state: Awaited<ReturnType<typeof readState>>,
   role: ArticleAgentRole,
   strategy: ArticleDraftStrategy = "brief",
-) => Promise.all((role === "optimization"
+) => loadAvailableArticleSkills((role === "optimization"
   ? skillsForWritingReview(state.aiSettings, strategy)
-  : skillsForArticleTask(state.aiSettings.skills, role)).map(async (skill) => ({
+  : skillsForArticleTask(state.aiSettings.skills, role)), 24_000).then((loaded) => loaded.map(({ skill, instructions }) => ({
     id: skill.id,
     name: skill.name,
     revision: skill.importedAt,
     compatibility: skill.compatibility,
-    instructions: await readSkillInstructions(skill, 24_000),
+    instructions,
   })));
 
 const persistAiRunTrace = async (trace: AiRunTrace) => {

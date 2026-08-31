@@ -8,7 +8,7 @@ import { generateCandidateDraft } from "./generator.js";
 import { saveUploadedDraftImage } from "./media.js";
 import { runGenerationProvider } from "./provider-runtime.js";
 import { retainWorkflowRuns } from "./run-retention.js";
-import { readSkillInstructions, skillsForArticleTask } from "./skill-registry.js";
+import { loadAvailableArticleSkills, skillsForArticleTask } from "./skill-registry.js";
 import {
   readState,
   updateState,
@@ -430,11 +430,11 @@ export const analyzeScreenshotEvidence = async (input: {
   skills: ArticleSkillConfig[];
   note?: string;
 }) => {
-  const selectedSkills = await Promise.all(input.skills.map(async (skill) => ({
+  const selectedSkills = (await loadAvailableArticleSkills(input.skills, 20_000)).map(({ skill, instructions }) => ({
     name: skill.name,
     compatibility: skill.compatibility,
-    instructions: await readSkillInstructions(skill, 20_000),
-  })));
+    instructions,
+  }));
   const jobPath = path.join(workflowJobsRoot, `${input.jobId}-screenshot-evidence-job.json`);
   const schemaPath = path.join(workflowJobsRoot, "screenshot-output-schema.json");
   const outputPath = path.join(workflowJobsRoot, `${input.jobId}-screenshot-evidence-output.json`);
@@ -491,11 +491,11 @@ const executeScreenshotIntake = async (
     });
     await appendLog(claim.run.id, "视觉识别与去噪", "正在识别正文、忽略登录与导航信息，并定位正文图片");
 
-    const selectedSkills = await Promise.all(claim.skills.map(async (skill) => ({
+    const selectedSkills = (await loadAvailableArticleSkills(claim.skills, 20_000)).map(({ skill, instructions }) => ({
       name: skill.name,
       compatibility: skill.compatibility,
-      instructions: await readSkillInstructions(skill, 20_000),
-    })));
+      instructions,
+    }));
     const jobPath = path.join(workflowJobsRoot, `${claim.run.id}-screenshot-job.json`);
     const schemaPath = path.join(workflowJobsRoot, "screenshot-output-schema.json");
     const outputPath = path.join(workflowJobsRoot, `${claim.run.id}-screenshot-output.json`);

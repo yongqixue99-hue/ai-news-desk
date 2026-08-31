@@ -9,6 +9,22 @@ export const jobProgressPercent = (progress: number) => {
   return Math.round(Math.max(0, Math.min(1, progress)) * 100);
 };
 
+export const jobActivitySummary = (job: ProductJob, now = Date.now()) => {
+  const startedAt = Date.parse(job.createdAt);
+  const heartbeatAt = Date.parse(job.heartbeatAt || job.updatedAt);
+  const elapsedMinutes = Number.isFinite(startedAt)
+    ? Math.max(0, Math.floor((now - startedAt) / 60_000))
+    : 0;
+  const heartbeatAge = Number.isFinite(heartbeatAt) ? Math.max(0, now - heartbeatAt) : Number.POSITIVE_INFINITY;
+  const stale = heartbeatAge > 60_000;
+  return {
+    stage: job.stage?.trim() || statusLabel(job),
+    elapsed: elapsedMinutes < 1 ? "已运行不到 1 分钟" : `已运行 ${elapsedMinutes} 分钟`,
+    freshness: stale ? "超过 1 分钟没有响应，可能已中断" : "刚刚有响应",
+    stale,
+  };
+};
+
 const jobLabel = (job: ProductJob) => {
   if (job.type.includes("draft")) return "生成新闻草稿";
   if (job.type.includes("explanation")) return "读取新闻正文";
@@ -89,13 +105,16 @@ export function ProductJobCenter({ onOpenDrafts }: ProductJobCenterProps) {
             {visibleJobs.map((job) => {
               const draftId = draftIdFrom(job);
               const progressPercent = jobProgressPercent(job.progress);
+              const active = activeStatuses.has(job.status);
+              const activity = active ? jobActivitySummary(job) : undefined;
               return (
-                <li key={job.id} className={`status-${job.status}`}>
+                <li key={job.id} className={`status-${job.status}${activity?.stale ? " status-stale" : ""}`}>
                   <span className="product-job-icon">{activeStatuses.has(job.status) ? <LoaderCircle className="spin" size={14} /> : job.status === "complete" ? <Check size={14} /> : <TriangleAlert size={14} />}</span>
                   <div>
                     <strong>{jobLabel(job)}</strong>
-                    <span>{statusLabel(job)}{activeStatuses.has(job.status) ? ` · ${progressPercent}%` : ""}</span>
-                    {activeStatuses.has(job.status) ? <progress value={job.progress} max={1}>{progressPercent}%</progress> : null}
+                    <span>{active ? `${activity?.stage} · ${progressPercent}%` : statusLabel(job)}</span>
+                    {active ? <progress value={job.progress} max={1}>{progressPercent}%</progress> : null}
+                    {activity ? <small>{activity.elapsed} · {activity.freshness}</small> : null}
                     {job.error ? <small>{job.error}</small> : null}
                   </div>
                   {draftId ? <button type="button" onClick={onOpenDrafts}><FileText size={13} />打开草稿</button> : null}

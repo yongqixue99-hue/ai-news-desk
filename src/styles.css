@@ -285,6 +285,8 @@ a { color: inherit; }
 .product-job-panel li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; gap: 9px; padding: 12px 13px; border-bottom: 1px solid var(--line-soft); }
 .product-job-panel li:last-child { border-bottom: 0; }
 .product-job-panel li.status-failed { background: #fff8f7; }
+.product-job-panel li.status-stale { background: #fff8f1; }
+.product-job-panel li.status-stale .product-job-icon, .product-job-panel li.status-stale small { color: #b96a18; }
 .product-job-panel li > div { min-width: 0; display: grid; gap: 4px; }
 .product-job-panel li > div strong { font-size: 12px; }
 .product-job-panel li > div span, .product-job-panel li > div small { overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
@@ -293,6 +295,8 @@ a { color: inherit; }
 .product-job-icon { color: var(--accent); }
 .status-complete .product-job-icon { color: var(--success); }
 .status-failed .product-job-icon { color: var(--danger); }
+.skill-row.unavailable { background: #fff8f1; }
+.skill-row.unavailable .skill-file, .skill-row.unavailable small { color: #b96a18; }
 .product-job-error { display: grid; grid-template-columns: 18px 1fr; gap: 6px; padding: 10px 13px; background: #fff8f7; color: var(--danger); font-size: 11px; }
 
 /* Draft editor */
@@ -2561,7 +2565,7 @@ a.source-homepage-link:active {
 .today-header p { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
 .today-header-actions { display: flex; align-items: center; gap: 10px; padding-top: 24px; }
 .today-updated { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
-.today-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+.today-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
 .today-metrics > div { min-height: 70px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 0 18px; border-right: 1px solid var(--line-soft); }
 .today-metrics > div:first-child { padding-left: 0; }
 .today-metrics > div:last-child { border-right: 0; padding-right: 0; }

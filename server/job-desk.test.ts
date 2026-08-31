@@ -25,7 +25,7 @@ test("JobDesk executes a persisted job and records durable progress", async () =
       database,
       handlers: {
         package: async (payload, context) => {
-          context.progress(0.4);
+          context.progress(0.4, "正在采集正文");
           assert.deepEqual(payload, { storyId: "story-1" });
           return { packageId: "package-1" };
         },
@@ -37,6 +37,8 @@ test("JobDesk executes a persisted job and records durable progress", async () =
     const completed = database.getJob(queued.id);
     assert.equal(completed?.status, "complete");
     assert.equal(completed?.progress, 1);
+    assert.equal(completed?.stage, "正在采集正文");
+    assert.ok(completed?.heartbeatAt);
     assert.deepEqual(completed?.result, { packageId: "package-1" });
     assert.deepEqual(
       database.listWorkflowEvents(10).map((event) => event.type),
@@ -93,6 +95,43 @@ test("JobDesk can run an interactive job while a long job is still active", asyn
     releaseSlow();
     await slowTick;
     assert.equal(database.getJob(slow.id)?.status, "complete");
+  } finally {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("JobDesk reports polling failures instead of leaking an unhandled rejection", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-job-desk-errors-"));
+  const legacyStatePath = path.join(root, "state.json");
+  await writeFile(legacyStatePath, JSON.stringify({ version: 11 }), "utf8");
+  const database = await LocalDatabase.open({
+    workflowRoot: root,
+    legacyStatePath,
+    initialState: () => ({ version: 11 }),
+  });
+  try {
+    const originalClaim = database.claimNextJob.bind(database);
+    let shouldFail = true;
+    database.claimNextJob = (input) => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("database temporarily unavailable");
+      }
+      return originalClaim(input);
+    };
+    const errors: string[] = [];
+    const desk = createJobDesk({
+      database,
+      handlers: { noop: async () => ({ ok: true }) },
+      onError: (error) => errors.push(error instanceof Error ? error.message : String(error)),
+    });
+
+    desk.start();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    desk.stop();
+
+    assert.deepEqual(errors, ["database temporarily unavailable"]);
   } finally {
     database.close();
     await rm(root, { recursive: true, force: true });

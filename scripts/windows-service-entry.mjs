@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { format } from "node:util";
 import {
   acquireWindowsServiceLogLock,
+  formatWindowsServiceFatal,
   prepareWindowsServiceLog,
 } from "../server/windows-service-log.ts";
 import { windowsServicePath } from "../server/windows-service-environment.ts";
@@ -70,10 +71,30 @@ if (logPreparation.archivedPath) {
   ]);
 }
 process.on("warning", (warning) => console.warn(warning.stack || warning.message));
+let fatalShutdownStarted = false;
+const shutdownWithFatalError = async (kind, reason) => {
+  if (fatalShutdownStarted) return;
+  fatalShutdownStarted = true;
+  write("FATAL", [formatWindowsServiceFatal(kind, reason)]);
+  await new Promise((resolve) => log.end(resolve));
+  await logLock.release().catch(() => undefined);
+  process.exit(1);
+};
+process.on("uncaughtException", (error) => {
+  void shutdownWithFatalError("uncaughtException", error);
+});
+process.on("unhandledRejection", (reason) => {
+  void shutdownWithFatalError("unhandledRejection", reason);
+});
 process.on("exit", (code) => {
+  if (fatalShutdownStarted) return;
   write("INFO", [`service process exited with code ${code}`]);
   log.end();
   void logLock.release();
 });
 
-await import("../server/index.ts");
+try {
+  await import("../server/index.ts");
+} catch (error) {
+  await shutdownWithFatalError("startup", error);
+}

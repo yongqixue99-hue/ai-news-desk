@@ -197,6 +197,7 @@ test("today excludes unhandled stories after the 48-hour editorial window", () =
 
   assert.deepEqual(visibleTitles, ["Acme ships a recent model update"]);
   assert.equal(today.coverage.activeStoryCount, 1);
+  assert.deepEqual(today.backlog.map((story) => story.originalTitle), ["Acme old model announcement"]);
 });
 
 test("StoryDesk counts only existing local files and requires both platforms for publication readiness", () => {
@@ -267,7 +268,13 @@ test("StoryDesk counts only existing local files and requires both platforms for
   assert.equal(cached.rightsReviewImageCount, 1);
   assert.equal(stale.localImageCount, 0);
   assert.equal(stale.publishReadyImageCount, 0);
-  assert.equal(buildTodayView(state, "2026-08-30T02:00:00.000Z").coverage.imageReadyCount, 1);
+  const today = buildTodayView(state, "2026-08-30T02:00:00.000Z");
+  assert.equal(today.coverage.imageReadyCount, 1);
+  assert.equal(today.coverage.sourceImageReadyCount, 1);
+  assert.equal(today.coverage.publishReadyStoryCount, 0);
+  assert.equal(today.funnel.materialLibraryTotal, 0);
+  assert.equal(today.funnel.autoUsableMaterialCount, 0);
+  assert.equal(today.funnel.rightsReviewMaterialCount, 0);
 });
 
 test("today recommendations show each available source before repeating one", () => {

@@ -471,7 +471,7 @@ export function AISettingsPage({
         <div className="ai-section-heading">
           <span className="section-icon"><Library size={20} /></span>
           <div><h2>Skill 库</h2><p>Skill 按任务隔离：取材规则负责核验，写作规则只在改稿时介入；每次实际使用都会形成快照。</p></div>
-          <span className="section-count">{aiSettings.skills.filter((skill) => skill.enabled).length}/{aiSettings.skills.length} 已启用</span>
+          <span className="section-count">{aiSettings.skills.filter((skill) => skill.enabled && skill.available !== false).length}/{aiSettings.skills.length} 可执行</span>
         </div>
         <div className="writing-review-mode" aria-label="写作审校模式">
           {([
@@ -494,11 +494,11 @@ export function AISettingsPage({
         </div>
         <div className="skill-list">
           {aiSettings.skills.map((skill) => (
-            <article className="skill-row" key={skill.id}>
+            <article className={skill.available === false ? "skill-row unavailable" : "skill-row"} key={skill.id}>
               <span className="skill-file"><FileCode2 size={18} /></span>
-              <div><strong>{skill.name}</strong><p>{skill.description}</p><small>{skill.builtIn ? "已预置" : "本地导入"} · {skill.compatibility === "codex-native" ? "Codex 原生工具" : "提示词规则"} · 用于 {skillScopesForLabel(skill).map((scope) => skillScopeLabels[scope]).join(" / ")}</small></div>
+              <div><strong>{skill.name}</strong><p>{skill.available === false ? "本地 SKILL.md 已不存在或内容为空；成稿时会自动跳过。" : skill.description}</p><small>{skill.available === false ? "路径不可用" : skill.builtIn ? "已预置" : "本地导入"} · {skill.compatibility === "codex-native" ? "Codex 原生工具" : "提示词规则"} · 用于 {skillScopesForLabel(skill).map((scope) => skillScopeLabels[scope]).join(" / ")}</small></div>
               <label className="switch" title={skill.enabled ? "停用 Skill" : "启用 Skill"}>
-                <input type="checkbox" checked={skill.enabled} disabled={Boolean(skillBusy)} onChange={() => void toggleSkill(skill)} />
+                <input type="checkbox" checked={skill.enabled && skill.available !== false} disabled={Boolean(skillBusy) || skill.available === false} onChange={() => void toggleSkill(skill)} />
                 <span />
               </label>
             </article>

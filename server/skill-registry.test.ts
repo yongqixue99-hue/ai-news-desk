@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { skillsForArticleTask, skillsForWritingReview } from "./skill-registry.js";
+import { loadArticleSkillsForTask, skillsForArticleTask, skillsForWritingReview } from "./skill-registry.js";
 import type { AiSettings, ArticleSkillConfig } from "./types.js";
 
 const skill = (value: Partial<ArticleSkillConfig> & Pick<ArticleSkillConfig, "id" | "name">): ArticleSkillConfig => ({
@@ -62,4 +65,24 @@ test("minimal and off modes never silently invoke a voice rewrite", () => {
 
   assert.deepEqual(skillsForWritingReview({ skills, writingReviewMode: "minimal" }, "brief").map((item) => item.id), ["lieflat-less-ai-tone"]);
   assert.deepEqual(skillsForWritingReview({ skills, writingReviewMode: "off" }, "commentary").map((item) => item.id), []);
+});
+
+test("task skill loading excludes missing and empty Skill files from the executable prompt", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-skills-"));
+  try {
+    const availablePath = path.join(root, "available-SKILL.md");
+    const emptyPath = path.join(root, "empty-SKILL.md");
+    await writeFile(availablePath, "# 可用规则\n只依据事实写作。\n", "utf8");
+    await writeFile(emptyPath, "   \n", "utf8");
+    const loaded = await loadArticleSkillsForTask([
+      skill({ id: "available", name: "可用规则", sourcePath: availablePath, scopes: ["generation"] }),
+      skill({ id: "missing", name: "已经删除", sourcePath: path.join(root, "missing-SKILL.md"), scopes: ["generation"] }),
+      skill({ id: "empty", name: "空规则", sourcePath: emptyPath, scopes: ["generation"] }),
+    ], "generation");
+
+    assert.deepEqual(loaded.map((entry) => entry.skill.id), ["available"]);
+    assert.match(loaded[0]?.instructions ?? "", /只依据事实写作/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

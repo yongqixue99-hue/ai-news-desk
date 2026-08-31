@@ -446,11 +446,26 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
       ?? "未知来源",
   );
   const watching = active.filter((story) => story.assignment.mode === "watch").slice(0, 6);
+  const backlog = interleaveBySource(
+    stories.filter((story) => story.ageHours > 48
+      && story.ageHours <= 7 * 24
+      && !story.ignored
+      && !story.published
+      && !story.drafted
+      && story.assignment.canDraft),
+    (story) => story.signals.find((signal) => !signal.isCommunity)?.sourceName
+      ?? story.signals[0]?.sourceName
+      ?? "未知来源",
+  ).slice(0, 6);
   const drafts = state.drafts;
+  const autoUsableMaterials = state.materials.filter((material) => isNeutralImagePublishReady(material, now));
+  const sourceImageReadyCount = active.filter((story) => (story.localImageCount ?? 0) >= 2).length;
+  const publishReadyStoryCount = active.filter((story) => (story.publishReadyImageCount ?? 0) >= 2).length;
   return {
     generatedAt: now,
     mustReads: ready.slice(0, 3),
     secondary: ready.slice(3, 8),
+    backlog,
     watching,
     diagnostics: diagnosticsFor(state.sources),
     funnel: {
@@ -463,12 +478,17 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
         ? hasCurrentPublication(draft)
         : draft.status === "published" && Boolean(draft.publicationConfirmedAt)).length,
       feedbackCount: state.candidateFeedback.length,
-      reusableMaterialCount: state.materials.length,
+      materialLibraryTotal: state.materials.length,
+      autoUsableMaterialCount: autoUsableMaterials.length,
+      rightsReviewMaterialCount: state.materials.length - autoUsableMaterials.length,
+      reusableMaterialCount: autoUsableMaterials.length,
     },
     coverage: {
       activeStoryCount: active.length,
       risingCount: active.filter((story) => story.trend.direction === "rising").length,
-      imageReadyCount: active.filter((story) => (story.localImageCount ?? 0) >= 2).length,
+      sourceImageReadyCount,
+      publishReadyStoryCount,
+      imageReadyCount: sourceImageReadyCount,
       strongEvidenceCount: active.filter((story) => story.evidenceStrength === "strong").length,
       topicIds: [...new Set(active.flatMap((story) => story.topicIds))] as CollectionTopicId[],
     },

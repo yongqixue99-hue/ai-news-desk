@@ -14,7 +14,7 @@ import {
 import { downloadSourceImage, extractPage } from "./extractor.js";
 import { copyLocalSourceImageToDraft } from "./materials.js";
 import { runGenerationProviderObserved } from "./provider-runtime.js";
-import { readSkillInstructions, skillsForArticleTask } from "./skill-registry.js";
+import { loadArticleSkillsForTask, skillsForArticleTask } from "./skill-registry.js";
 import { readState, updateState, workflowJobsRoot, workspacePath } from "./storage.js";
 import { normalizeTopicIds, topicLabels } from "./topics.js";
 import { appendWorkflowNotification } from "./notifications.js";
@@ -271,11 +271,14 @@ export const generateCandidateDraft = async (
     contentPackage?: ContentPackage;
     draftStrategy?: Exclude<ArticleDraftStrategy, "skip" | "commentary">;
     writingGuidelines?: string[];
+    onProgress?: (progress: number, stage: string) => void;
   },
 ): Promise<ArticleDraft> => {
   const state = await readState();
   const settings = state.settings;
-  const generationSkills = skillsForArticleTask(skills, "generation");
+  const loadedGenerationSkills = await loadArticleSkillsForTask(skills, "generation", 20_000);
+  const generationSkills = loadedGenerationSkills.map((entry) => entry.skill);
+  evidenceOverride?.onProgress?.(0.26, "整理正文与图片证据");
   let extractedText = evidenceOverride?.extractedText || candidate.excerpt;
   let images = evidenceOverride?.images ?? candidate.images;
   let canonicalUrl = evidenceOverride?.canonicalUrl ?? candidate.canonicalUrl ?? candidate.url;
@@ -316,11 +319,12 @@ export const generateCandidateDraft = async (
   const schemaPath = path.join(workflowJobsRoot, "article-output-schema.json");
   const outputPath = path.join(workflowJobsRoot, `${jobId}-article-output.json`);
   await writeFile(schemaPath, `${JSON.stringify(articleSchema, null, 2)}\n`, "utf8");
-  const selectedSkills = await Promise.all(generationSkills.map(async (skill) => ({
+  const selectedSkills = loadedGenerationSkills.map(({ skill, instructions }) => ({
     name: skill.name,
     compatibility: skill.compatibility,
-    instructions: await readSkillInstructions(skill, 20_000),
-  })));
+    instructions,
+  }));
+  evidenceOverride?.onProgress?.(0.32, "载入写作规则");
   const jobPayload = {
         runId,
         horizonRunId: state.runs.find((run) => run.id === runId)?.horizonRunId,
@@ -380,6 +384,7 @@ export const generateCandidateDraft = async (
       };
   const serializedJob = JSON.stringify(jobPayload, null, 2);
   await writeFile(jobPath, `${serializedJob}\n`, "utf8");
+  evidenceOverride?.onProgress?.(0.36, "提交成稿任务");
 
   let aiTrace = startAiRunTrace({
     taskKind: "article-generation",
@@ -396,6 +401,7 @@ export const generateCandidateDraft = async (
   });
   let rendered = "";
   try {
+    evidenceOverride?.onProgress?.(0.4, "模型生成中");
     const observed = await runGenerationProviderObserved({
       provider,
       codexPrompt: promptFor(jobPath, generationSkills, Boolean(evidenceOverride?.contentPackage)),
@@ -405,6 +411,7 @@ export const generateCandidateDraft = async (
       outputPath,
     });
     rendered = observed.output;
+    evidenceOverride?.onProgress?.(0.78, "校验模型结果");
     aiTrace = completeAiRunTrace(aiTrace, {
       status: "succeeded",
       completedAt: observed.meta.completedAt,
@@ -435,6 +442,7 @@ export const generateCandidateDraft = async (
     if (generation) generation.traceIds = [...new Set([...(generation.traceIds ?? []), aiTrace.id])];
   });
   const article = parseGeneratedArticle(rendered);
+  evidenceOverride?.onProgress?.(0.84, "核对来源与事实边界");
   if (article.strategy !== draftStrategy) {
     throw new Error(`模型没有遵守稿型路由：需要 ${draftStrategy}，却返回 ${article.strategy}`);
   }
@@ -483,6 +491,7 @@ export const generateCandidateDraft = async (
   }
   const imageById = new Map(allImages.map((image) => [image.id, image]));
   const placements: DraftImagePlacement[] = [];
+  evidenceOverride?.onProgress?.(0.88, "复制并编排文章图片");
   const plannedSelections = planEditorialImagePlacements({
     availableImages: allImages,
     modelSelections: [
@@ -623,6 +632,7 @@ export const generateCandidateDraft = async (
     },
   };
   draft.bodyHtml = legacyDraftBodyHtml(draft);
+  evidenceOverride?.onProgress?.(0.94, "组装可编辑草稿");
   return draft;
 };
 

@@ -3,7 +3,8 @@ import type { DurableJobRecord, LocalDatabase } from "./local-database.js";
 
 export interface JobContext {
   job: DurableJobRecord;
-  progress: (value: number) => void;
+  progress: (value: number, stage?: string) => void;
+  heartbeat: (stage?: string) => void;
 }
 
 export type DurableJobHandler = (payload: unknown, context: JobContext) => Promise<unknown>;
@@ -18,6 +19,7 @@ export interface JobDeskOptions {
    * opening a Story brief) from waiting behind a long article generation.
    */
   concurrency?: number;
+  onError?: (error: unknown) => void;
 }
 
 /**
@@ -31,6 +33,7 @@ export const createJobDesk = ({
   pollMs = 1_000,
   leaseMs = 10 * 60_000,
   concurrency = 1,
+  onError = (error) => console.error("JobDesk polling failed", error),
 }: JobDeskOptions) => {
   const workerId = `worker_${process.pid}_${randomUUID().slice(0, 8)}`;
   const maxConcurrency = Math.max(1, Math.min(4, Math.floor(concurrency)));
@@ -56,10 +59,24 @@ export const createJobDesk = ({
         payload: { jobType: job.type, attempt: job.attempts },
       });
       try {
-        const result = await handler(job.payload, {
-          job,
-          progress: (value) => database.updateJobProgress(job.id, workerId, value),
-        });
+        const heartbeatTimer = setInterval(() => {
+          try {
+            database.heartbeatJob(job.id, workerId, undefined, leaseMs);
+          } catch {
+            // Completion or lease recovery can race one final timer tick.
+          }
+        }, Math.max(5_000, Math.min(15_000, Math.floor(leaseMs / 3))));
+        heartbeatTimer.unref();
+        let result: unknown;
+        try {
+          result = await handler(job.payload, {
+            job,
+            progress: (value, stage) => database.updateJobProgress(job.id, workerId, value, stage, leaseMs),
+            heartbeat: (stage) => database.heartbeatJob(job.id, workerId, stage, leaseMs),
+          });
+        } finally {
+          clearInterval(heartbeatTimer);
+        }
         database.completeJob(job.id, workerId, result);
         database.recordWorkflowEvent({
           type: "job.complete",
@@ -87,8 +104,8 @@ export const createJobDesk = ({
     workerId,
     start() {
       if (timer || stopped) return;
-      void tick();
-      timer = setInterval(() => void tick(), Math.max(250, pollMs));
+      void tick().catch(onError);
+      timer = setInterval(() => void tick().catch(onError), Math.max(250, pollMs));
       timer.unref();
     },
     stop() {

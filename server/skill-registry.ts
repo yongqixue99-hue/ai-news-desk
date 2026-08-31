@@ -48,6 +48,21 @@ export const skillsForArticleTask = (
   Array.isArray(skill.scopes) && skill.scopes.length ? skill.scopes : inferredScopes(skill)
 ).includes(task));
 
+export const loadAvailableArticleSkills = async (
+  skills: ArticleSkillConfig[],
+  maximum = 32_000,
+) => (await Promise.all(skills.map(async (skill) => {
+  const instructions = await readSkillInstructions(skill, maximum);
+  return instructions.trim() ? { skill, instructions } : undefined;
+}))).filter((entry): entry is { skill: ArticleSkillConfig; instructions: string } => Boolean(entry));
+
+/** Only a readable, non-empty SKILL.md may enter a model prompt as executable guidance. */
+export const loadArticleSkillsForTask = (
+  skills: ArticleSkillConfig[],
+  task: ArticleSkillScope,
+  maximum = 32_000,
+) => loadAvailableArticleSkills(skillsForArticleTask(skills, task), maximum);
+
 const isLieflatSkill = (skill: ArticleSkillConfig) =>
   `${skill.id} ${skill.name}`.toLocaleLowerCase("zh-CN").includes("lieflat");
 

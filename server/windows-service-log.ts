@@ -112,6 +112,13 @@ export type WindowsServiceLogPreparation = {
   archiveReason?: "legacy-encoding" | "size-limit" | "utf8-bom-upgrade";
 };
 
+export const formatWindowsServiceFatal = (kind: string, reason: unknown) => {
+  const detail = reason instanceof Error
+    ? reason.stack || `${reason.name}: ${reason.message}`
+    : String(reason);
+  return `${kind}: ${detail.replace(/\s*\r?\n\s*/gu, " | ")}`;
+};
+
 export const prepareWindowsServiceLog = (input: {
   logPath: string;
   maximumLogBytes: number;
