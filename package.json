@@ -13,7 +13,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "test": "node --test --import tsx server/**/*.test.ts src/**/*.test.ts src/**/*.test.tsx",
-    "test:e2e": "node --test --import tsx tests/e2e/*.test.ts"
+    "test:e2e": "node --test --test-force-exit --import tsx tests/e2e/*.test.ts"
   },
   "dependencies": {
     "@tiptap/extension-image": "^3.29.2",

@@ -27,6 +27,50 @@ const waitForHealth = async (url: string, output: () => string) => {
   throw new Error(`isolated server did not become healthy\n${output()}`);
 };
 
+const waitForExit = (
+  child: ReturnType<typeof spawn>,
+  timeoutMs: number,
+) => {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    let timer: NodeJS.Timeout | undefined;
+    const finish = (exited: boolean) => {
+      if (timer) clearTimeout(timer);
+      child.off("exit", onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    child.once("exit", onExit);
+    timer = setTimeout(() => finish(false), timeoutMs);
+    timer.unref();
+  });
+};
+
+const stopProcessTree = async (child: ReturnType<typeof spawn>) => {
+  const pid = child.pid;
+  if (child.exitCode === null && child.signalCode === null) {
+    if (process.platform !== "win32" && pid) process.kill(-pid, "SIGTERM");
+    else child.kill("SIGTERM");
+  }
+
+  await waitForExit(child, 3_000);
+
+  // `tsx` starts an esbuild service. On Linux it can outlive the direct child,
+  // so kill the detached process group as a final cleanup step.
+  if (process.platform !== "win32" && pid) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  } else if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+  }
+  await waitForExit(child, 2_000);
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+};
+
 test("production build opens the primary Windows browser routes", { timeout: 60_000 }, async () => {
   const workflowRoot = await mkdtemp(path.join(os.tmpdir(), "ai-news-desk-e2e-"));
   const port = await freePort();
@@ -42,6 +86,7 @@ test("production build opens the primary Windows browser routes", { timeout: 60_
       NO_COLOR: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
     windowsHide: true,
   });
   server.stdout.on("data", (chunk) => (serverOutput += String(chunk)));
@@ -65,14 +110,7 @@ test("production build opens the primary Windows browser routes", { timeout: 60_
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();
-    server.kill();
-    await new Promise<void>((resolve) => {
-      if (server.exitCode !== null) resolve();
-      else {
-        server.once("exit", () => resolve());
-        setTimeout(resolve, 5_000).unref();
-      }
-    });
+    await stopProcessTree(server);
     await rm(workflowRoot, { recursive: true, force: true });
   }
 });
