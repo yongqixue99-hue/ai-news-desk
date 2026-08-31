@@ -6,10 +6,11 @@ export const windowsServicePath = (input: {
   appData?: string;
   codexExecutableDirectories?: string[];
 }) => {
+  const windowsPath = path.win32;
   const candidates = [
-    ...(input.currentPath ?? "").split(path.delimiter),
-    path.dirname(input.nodeExecutable),
-    ...(input.appData ? [path.join(input.appData, "npm")] : []),
+    ...(input.currentPath ?? "").split(windowsPath.delimiter),
+    windowsPath.dirname(input.nodeExecutable),
+    ...(input.appData ? [windowsPath.join(input.appData, "npm")] : []),
     ...(input.codexExecutableDirectories ?? []),
   ].map((entry) => entry.trim()).filter(Boolean);
   const seen = new Set<string>();
@@ -18,5 +19,5 @@ export const windowsServicePath = (input: {
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  }).join(path.delimiter);
+  }).join(windowsPath.delimiter);
 };

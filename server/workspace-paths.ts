@@ -2,9 +2,12 @@ import path from "node:path";
 
 export const resolveWorkflowRoot = (projectRoot: string, configuredRoot?: string) => {
   const configured = configuredRoot?.trim();
+  const pathApi = /^[a-z]:[\\/]/iu.test(projectRoot) || projectRoot.startsWith("\\\\")
+    ? path.win32
+    : path.posix;
   return configured
-    ? path.resolve(projectRoot, configured)
-    : path.resolve(projectRoot, ".workflow");
+    ? pathApi.resolve(projectRoot, configured)
+    : pathApi.resolve(projectRoot, ".workflow");
 };
 
 export const workspaceRoot = process.cwd();
