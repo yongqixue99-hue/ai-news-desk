@@ -249,13 +249,13 @@ ${skills.filter((skill) => skill.compatibility === "codex-native").length
 4. 开头直接说谁做了什么；只补对读者理解有用的上下文，不罗列所有功能，不写空泛的“标志着”“可以预见”。不要默认使用“不是……而是……”“真正值得关注的是……”制造洞察。
 5. 不强制收尾观点。只有材料真的支持一个具体、可证伪的判断时才写入 take；不能出现“我的判断”四个字，也不要重复正文。
 6. 文章不能逐段翻译或大段复述来源。数字、人名、模型名、日期必须能回指来源；无法核实的内容放入 uncertainties。原报道已经简洁准确时，应保留其信息密度，不做无意义扩写。
-7. 把图表、产品截图和架构图视为新闻证据，而不是装饰。只要 job.availableImages 中存在直接支撑正文的高信息图片，应优先选择并按 imageId 放入 imageSelections；三段以上正文通常选择 2–4 张，并分散插在相关段落后。如果候选媒体页没有合适图片，但你核验到的官方/一手页面有与事件直接相关的原图，可把可直接下载的精确图片 URL 放入 discoveredImages。不要返回页面 URL 代替图片 URL。
-8. 只有确实不存在合格图片时才让两个图片数组都为空；不要生成图片，不要选择 logo、头像、装饰图、旧模型图片或只与公司品牌有关的通用图。caption 要说明画面是什么并保留来源语义。imageSelections 是排序与段落匹配建议，系统仍会对合格来源图执行可见性保底。
+7. 把图表、产品截图和架构图视为新闻证据，而不是装饰。job.availableImages 的 editorialPriority 是硬优先级：1 原新闻可下载图片，2 原文截图，3 当事人物/公司身份资料图，4 与事件相关的其他图片，5 AI 生成兜底。必须先用完更高优先级中与正文相关的图片，低优先级不能挤掉高优先级；三段以上正文通常选择 2–4 张，并分散插在相关段落后。如果候选媒体页没有合适图片，但你核验到的官方/一手页面有与事件直接相关的原图，可把可直接下载的精确图片 URL 放入 discoveredImages。不要返回页面 URL 代替图片 URL。
+8. 只有 1–4 级都不存在合格图片时才可选择第 5 级 AI 生成兜底；不要自行生成图片，不要选择无关 logo、头像、装饰图、旧事件图片或仅凭“AI/科技”等泛词命中的通用图。caption 要说明画面是什么并保留来源语义。imageSelections 只是同级图片的段落匹配建议，系统会再次强制执行优先级。
 9. topics 必须返回空数组。平台话题只由用户从已成功发布的历史标签中选择，不能自动生成。
 10. 返回严格符合 JSON Schema 的 JSON，不要写 Markdown 或解释。
 `;
 
-const apiSystemPrompt = `你是新闻编辑工作台的中文成稿引擎。只能依据用户提供的候选新闻、正文摘录、ContentPackage 和来源信息写作，不能假装已经浏览网页。evidenceBoundary 为 content-package 时，素材包是唯一事实边界，不能补充模型记忆中的事实、来源或图片。先遵守任务中的 draftStrategy：brief 只把单一事件说清；synthesis 组织多源共识与差异；community 保留真实社区样本且不伪造共识；playbook 只整理可验证步骤；curate 只做导读与有限引用；commentary 只有存在明确 userAngle 时可采用。标题具体，开头直接交代谁做了什么；不强制字数、段落数或结尾判断。数字、人名、模型名和日期必须来自输入；无法核实的内容放入 uncertainties。图表、产品截图和架构图属于新闻证据：存在直接相关来源图时应选择并匹配到相应段落，只有确实没有合格图片时才保持图片数组为空；不能用通用 logo 或旧事件图片凑数。严格返回符合给定 JSON Schema 的 JSON，不要输出 Markdown。`;
+const apiSystemPrompt = `你是新闻编辑工作台的中文成稿引擎。只能依据用户提供的候选新闻、正文摘录、ContentPackage 和来源信息写作，不能假装已经浏览网页。evidenceBoundary 为 content-package 时，素材包是唯一事实边界，不能补充模型记忆中的事实、来源或图片。先遵守任务中的 draftStrategy：brief 只把单一事件说清；synthesis 组织多源共识与差异；community 保留真实社区样本且不伪造共识；playbook 只整理可验证步骤；curate 只做导读与有限引用；commentary 只有存在明确 userAngle 时可采用。标题具体，开头直接交代谁做了什么；不强制字数、段落数或结尾判断。数字、人名、模型名和日期必须来自输入；无法核实的内容放入 uncertainties。图片必须遵守 editorialPriority：1 原新闻图、2 原文截图、3 人物或公司身份图、4 事件相关图、5 AI 生成兜底；低优先级不能挤掉高优先级，只有 1–4 级都不可用时才能选择第 5 级。严格返回符合给定 JSON Schema 的 JSON，不要输出 Markdown。`;
 
 export const generateCandidateDraft = async (
   runId: string,
@@ -352,6 +352,8 @@ export const generateCandidateDraft = async (
           width: image.width,
           height: image.height,
           rights: image.rights,
+          editorialPriority: image.editorialPriority,
+          editorialOrigin: image.editorialOrigin,
         })),
         writingPreferences: {
           community: settings.community,

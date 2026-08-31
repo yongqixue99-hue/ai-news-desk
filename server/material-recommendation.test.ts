@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
-import { recommendMaterialFallbacks } from "./material-recommendation.js";
+import { recommendMaterialCandidates, recommendMaterialFallbacks } from "./material-recommendation.js";
 import type { StoryView } from "./product-types.js";
 import type { ImageMaterial } from "./types.js";
 
@@ -97,15 +97,46 @@ const story = (): StoryView => ({
   }],
 });
 
-test("specific governed materials rank before generic owned fallbacks", () => {
+test("an entity-specific material suppresses generated filler instead of merely ranking before it", () => {
   const results = recommendMaterialFallbacks([
-    material("generic"),
+    material("generated", {
+      attribution: "AI News Desk；使用 Codex 内置 image_gen 为本项目生成",
+      licenseId: "PROJECT-OWNED",
+    }),
     material("openai", { title: "OpenAI 资料图", tags: ["OpenAI"], entityTags: ["OpenAI"] }),
   ], story(), 2, "2026-08-31T01:00:00.000Z");
 
-  assert.deepEqual(results.map((image) => image.id), ["library:openai", "library:generic"]);
-  assert.match(results[1]?.caption || "", /非事件现场/u);
+  assert.deepEqual(results.map((image) => image.id), ["library:openai"]);
+  assert.equal(results[0]?.editorialPriority, 3);
+  assert.equal(results[0]?.editorialOrigin, "entity-library");
   assert.equal(results.every((image) => Boolean(image.localPath && image.publicPath)), true);
+});
+
+test("a Sony Music AI lawsuit does not receive a generated image matched only by generic AI tags", () => {
+  const lawsuit = story();
+  lawsuit.id = "story-sony-music-lawsuit";
+  lawsuit.title = "Sony Music 起诉 AI 公司未经许可使用录音训练模型";
+  lawsuit.originalTitle = "Sony Music sues AI company over unlicensed recordings";
+  lawsuit.summary = "Sony Music 指控一家 AI 公司未经授权复制音乐作品。";
+  lawsuit.whyImportant = "案件关系音乐版权与生成式 AI 训练边界。";
+  lawsuit.signals[0] = {
+    ...lawsuit.signals[0]!,
+    sourceName: "Original publisher",
+    title: lawsuit.originalTitle,
+    url: "https://example.com/sony-music-lawsuit",
+  };
+  const generated = material("generated-generic", {
+    attribution: "AI News Desk；使用 Codex 内置 image_gen 为本项目生成",
+    licenseId: "PROJECT-OWNED",
+    tags: ["通用", "示意图", "AI", "生成式AI"],
+  });
+
+  assert.deepEqual(recommendMaterialFallbacks(
+    [generated],
+    lawsuit,
+    2,
+    "2026-08-31T01:00:00.000Z",
+  ), []);
 });
 
 test("official, unverified and partially licensed files are never automatic fallbacks", () => {
@@ -122,6 +153,37 @@ test("official, unverified and partially licensed files are never automatic fall
   ], story(), 4, "2026-08-31T01:00:00.000Z");
 
   assert.deepEqual(results.map((image) => image.id), ["library:owned"]);
+});
+
+test("a matching company identity asset remains reviewable without becoming auto-publishable", () => {
+  const sonyStory = story();
+  sonyStory.title = "Sony Music 起诉 AI 公司侵犯音乐版权";
+  sonyStory.originalTitle = "Sony Music files AI copyright lawsuit";
+  const sonyIdentity = material("sony-music-identity", {
+    title: "Sony Music 公司识别图",
+    sourceUrl: "https://www.sonymusic.com/",
+    attribution: "Sony Music；商标权利待核对",
+    tags: ["公司", "公司图标", "Sony Music"],
+    rights: "check-required",
+    allowedPlatforms: [],
+    entityTags: ["Sony Music"],
+  });
+
+  assert.deepEqual(recommendMaterialFallbacks(
+    [sonyIdentity],
+    sonyStory,
+    1,
+    "2026-08-31T01:00:00.000Z",
+  ), []);
+  const candidates = recommendMaterialCandidates(
+    [sonyIdentity],
+    sonyStory,
+    1,
+    "2026-08-31T01:00:00.000Z",
+  );
+  assert.equal(candidates[0]?.id, "library:sony-music-identity");
+  assert.equal(candidates[0]?.editorialPriority, 3);
+  assert.equal(candidates[0]?.rights, "check-required");
 });
 
 test("licensed material can be automatic only with evidence and both platform permissions", () => {

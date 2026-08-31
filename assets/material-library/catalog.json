@@ -2,10 +2,11 @@
   "schemaVersion": "ai-news-material-catalog/v1",
   "createdAt": "2026-08-31T13:26:12.000Z",
   "usagePolicy": {
-    "defaultFallbackOrder": ["event-local", "licensed-entity", "owned-generic"],
+    "defaultFallbackOrder": ["article-image", "article-screenshot", "entity-library", "related-library", "generated-fallback"],
     "neverAutoPublishStatuses": ["review_required"],
     "notes": [
-      "事件原图与可核验截图优先，通用图只作为最后兜底。",
+      "严格按原新闻图片、原文截图、人物或公司身份图、事件相关图、AI 生成兜底的顺序选择。",
+      "只要前四级存在可用候选，第五级 AI 生成图就不得进入自动成稿；仅命中 AI、科技、通用等泛词不算相关。",
       "人物图仅用于与当事人直接相关的编辑性报道，不得暗示代言。",
       "品牌标识全部需要发布前人工复核商标指南。",
       "X 媒体不在本目录自动下载，原帖账号见 watchlists/x-official-accounts.json。"

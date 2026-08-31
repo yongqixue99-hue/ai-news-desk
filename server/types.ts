@@ -345,6 +345,9 @@ export interface SourceImage {
   expiresAt?: string;
   entityTags?: string[];
   fingerprint?: string;
+  /** Editorial relevance order: source, screenshot, entity, related, generated. */
+  editorialPriority?: 1 | 2 | 3 | 4 | 5;
+  editorialOrigin?: "article-image" | "article-screenshot" | "entity-library" | "related-library" | "generated-fallback";
 }
 
 export interface Candidate {

@@ -11,11 +11,10 @@ import type {
   StoryView,
 } from "./product-types.js";
 import { storyById } from "./story-desk.js";
-import { recommendMaterialFallbacks } from "./material-recommendation.js";
+import { recommendMaterialCandidates } from "./material-recommendation.js";
 import {
   inspectLocalImageFile,
   isLocalImageFileReady,
-  isNeutralImagePublishReady,
 } from "./image-readiness.js";
 import { workflowMediaRoot } from "./storage.js";
 import {
@@ -213,13 +212,40 @@ const sourceImageSnapshot = (image: SourceImage): SourceImage => {
   return snapshot;
 };
 
+const editorialPriorityFor = (image: SourceImage): 1 | 2 | 3 | 4 | 5 => {
+  if (image.editorialPriority) return image.editorialPriority;
+  if (image.rights === "editorial-screenshot" || image.rights === "commentary-screenshot") return 2;
+  return image.id.startsWith("library:") ? 4 : 1;
+};
+
+const editorialOriginFor = (
+  image: SourceImage,
+  priority: 1 | 2 | 3 | 4 | 5,
+): NonNullable<SourceImage["editorialOrigin"]> => image.editorialOrigin
+  ?? (priority === 1
+    ? "article-image"
+    : priority === 2
+      ? "article-screenshot"
+      : priority === 3
+        ? "entity-library"
+        : priority === 5
+          ? "generated-fallback"
+          : "related-library");
+
 const assetsFor = (
   story: StoryView,
   claims: EvidenceClaim[],
   fallbackImages: SourceImage[] = [],
   checkedAt = new Date().toISOString(),
-): AssetCandidate[] => [...story.images, ...fallbackImages].map((image, index) => {
-  const sourceImage = sourceImageSnapshot(image);
+): AssetCandidate[] => [...story.images, ...fallbackImages]
+  .map((image, index) => {
+    const editorialPriority = editorialPriorityFor(image);
+    const editorialOrigin = editorialOriginFor(image, editorialPriority);
+    return { image, index, editorialPriority, editorialOrigin };
+  })
+  .sort((left, right) => left.editorialPriority - right.editorialPriority || left.index - right.index)
+  .map(({ image, editorialPriority, editorialOrigin }, index) => {
+  const sourceImage = sourceImageSnapshot({ ...image, editorialPriority, editorialOrigin });
   return {
     id: `asset_${createHash("sha1").update(`${story.id}:${sourceImage.id}:${sourceImage.url}`).digest("hex").slice(0, 12)}`,
     sourceImageId: sourceImage.id,
@@ -235,6 +261,8 @@ const assetsFor = (
     height: sourceImage.height,
     recommendedAfterClaimId: claims[index % Math.max(1, claims.length)]?.id,
     origin: sourceImage.id.startsWith("library:") ? "library" : "source",
+    editorialPriority,
+    editorialOrigin,
     localReady: isLocalImageFileReady(sourceImage),
   };
 });
@@ -247,6 +275,8 @@ const normalizedAssetGovernanceSnapshot = (asset: AssetCandidate) => {
     role: asset.role,
     recommendedAfterClaimId: asset.recommendedAfterClaimId,
     origin: asset.origin,
+    editorialPriority: asset.editorialPriority,
+    editorialOrigin: asset.editorialOrigin,
     localReady: asset.localReady,
     rightsDecision: asset.rightsDecision,
     rightsReason: asset.rightsReason,
@@ -361,13 +391,13 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
   const discussionSamples = input.discussionSamples?.length
     ? input.discussionSamples
     : discussionSamplesFor(state, story);
-  const publishableLocalCount = story.images.filter((image) =>
-    isNeutralImagePublishReady(image, now)).length;
-  const fallbackImages = recommendMaterialFallbacks(
+  const localSourceImageCount = story.images.filter(isLocalImageFileReady).length;
+  const fallbackImages = recommendMaterialCandidates(
     state.materials,
     story,
-    Math.max(0, 2 - publishableLocalCount),
+    Math.max(0, 2 - localSourceImageCount),
     now,
+    { allowGenerated: localSourceImageCount === 0 },
   );
   const assets = assetsFor(story, facts, fallbackImages, now);
   const blockers = [...story.assignment.blockers];

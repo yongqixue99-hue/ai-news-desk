@@ -47,3 +47,28 @@ test("a chart-rich source cannot become a text-only draft when the model selects
     ],
   );
 });
+
+test("lower-priority model choices cannot displace original images, screenshots or entity assets", () => {
+  const placements = planEditorialImagePlacements({
+    availableImages: [
+      { id: "article", url: "https://publisher.example/hero.jpg", caption: "原新闻事件现场", editorialPriority: 1 },
+      { id: "screenshot", url: "/media/article-page.png", caption: "原文页面截图", editorialPriority: 2 },
+      { id: "entity", url: "/materials/sony-music.png", caption: "Sony Music 公司资料图", editorialPriority: 3 },
+      { id: "related", url: "/materials/music-rights.png", caption: "音乐版权资料图", editorialPriority: 4 },
+      { id: "generated", url: "/materials/generated-ai.png", caption: "AI 生成示意图", editorialPriority: 5 },
+    ],
+    modelSelections: [
+      { imageId: "generated", afterParagraph: 0, caption: "生成图" },
+      { imageId: "related", afterParagraph: 1, caption: "相关图" },
+      { imageId: "article", afterParagraph: 2, caption: "原图" },
+    ],
+    paragraphs: ["第一段", "第二段", "第三段", "第四段"],
+    imageLimit: 3,
+  });
+
+  assert.deepEqual(placements.map((placement) => placement.imageId), [
+    "article",
+    "screenshot",
+    "entity",
+  ]);
+});

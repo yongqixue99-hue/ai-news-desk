@@ -108,6 +108,48 @@ test("PackageDesk freezes claims, community quotations and governed images", () 
   assert.equal(contentPackage.sources.every((source) => /^https?:\/\//u.test(source.url)), true);
 });
 
+test("PackageDesk orders original article images before article screenshots regardless of discovery order", () => {
+  const state = createDefaultState();
+  state.runs = [run([candidate("official", {
+    images: [
+      {
+        id: "article-screenshot",
+        url: "/media/article-screenshot.png",
+        caption: "原文页面截图",
+        attribution: "Acme",
+        sourceUrl: "https://acme.example/model-x",
+        selected: true,
+        rights: "editorial-screenshot",
+      },
+      {
+        id: "article-hero",
+        url: "https://acme.example/model-x-hero.jpg",
+        caption: "Model X 发布现场",
+        attribution: "Acme",
+        sourceUrl: "https://acme.example/model-x",
+        selected: true,
+        rights: "official",
+      },
+    ],
+    imageCount: 2,
+  })])];
+  const story = buildStories(state, "2026-08-30T02:00:00.000Z")[0]!;
+
+  const contentPackage = buildContentPackage(state, {
+    storyId: story.id,
+    now: "2026-08-30T02:00:00.000Z",
+  });
+
+  assert.deepEqual(contentPackage.assets.map((asset) => ({
+    id: asset.sourceImageId,
+    priority: asset.editorialPriority,
+    origin: asset.editorialOrigin,
+  })), [
+    { id: "article-hero", priority: 1, origin: "article-image" },
+    { id: "article-screenshot", priority: 2, origin: "article-screenshot" },
+  ]);
+});
+
 test("PackageDesk refuses to turn a Watch story into a package", () => {
   const state = createDefaultState();
   state.runs = [run([candidate("community", {
@@ -263,7 +305,7 @@ test("a frozen package survives source deletion and rejects replaced package byt
   );
 });
 
-test("rights-review and stale-path images do not suppress a publication-safe fallback", () => {
+test("one local source image suppresses generated filler even while its rights need review", () => {
   const state = createDefaultState();
   const migratedPath = process.platform === "win32"
     ? "/Users/old-mac/ai-news-desk/media/x-two.jpg"
@@ -288,9 +330,10 @@ test("rights-review and stale-path images do not suppress a publication-safe fal
     fileName: "safe.png",
     localPath: safePath,
     publicPath: "/materials/safe.png",
-    attribution: "AI News Desk",
-    tags: ["通用", "示意图", "AI"],
+    attribution: "AI News Desk；使用 Codex 内置 image_gen 为本项目生成",
+    tags: ["通用", "示意图", "AI", "Acme", "Model X"],
     rights: "owned",
+    licenseId: "PROJECT-OWNED",
     allowedPlatforms: ["*"],
     entityTags: [],
     fingerprint: fileFingerprint(safePath),
@@ -306,8 +349,7 @@ test("rights-review and stale-path images do not suppress a publication-safe fal
   assert.equal(contentPackage.assets.filter((asset) => asset.origin === "source").length, 2);
   assert.equal(contentPackage.assets.filter((asset) => asset.rightsDecision === "blocked").length, 2);
   assert.equal(contentPackage.assets.filter((asset) => asset.origin === "source" && asset.localReady).length, 1);
-  assert.equal(contentPackage.assets.some((asset) =>
-    asset.origin === "library" && asset.rightsDecision === "allowed"), true);
+  assert.equal(contentPackage.assets.some((asset) => asset.origin === "library"), false);
 });
 
 test("a complete Creative Commons portrait remains allowed through PackageDesk", () => {

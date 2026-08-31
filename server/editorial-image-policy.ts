@@ -5,6 +5,8 @@ export interface EditorialImageCandidate {
   width?: number;
   height?: number;
   rights?: string;
+  /** 1 source image, 2 source screenshot, 3 entity, 4 related, 5 generated fallback. */
+  editorialPriority?: 1 | 2 | 3 | 4 | 5;
 }
 
 export interface EditorialImageSelection {
@@ -90,35 +92,48 @@ export const planEditorialImagePlacements = ({
   });
   if (!eligible.length) return [];
 
-  const eligibleById = new Map(eligible.map((image) => [image.id, image]));
-  const selectedIds = new Set<string>();
-  const placements: EditorialImageSelection[] = [];
-  for (const selection of modelSelections) {
-    const image = eligibleById.get(selection.imageId);
-    if (!image || selectedIds.has(image.id) || placements.length >= limit) continue;
-    selectedIds.add(image.id);
-    placements.push({
-      imageId: image.id,
-      afterParagraph: Math.max(0, Math.min(paragraphs.length - 1, selection.afterParagraph)),
-      caption: selection.caption.trim() || image.caption,
-    });
-  }
+  const nonGenerated = eligible.filter((image) => (image.editorialPriority ?? 1) < 5);
+  const eligiblePool = nonGenerated.length ? nonGenerated : eligible;
+  const modelRank = new Map(modelSelections.map((selection, index) => [selection.imageId, index]));
+  const originalRank = new Map(eligiblePool.map((image, index) => [image.id, index]));
+  const prioritized = [...eligiblePool].sort((left, right) =>
+    (left.editorialPriority ?? 1) - (right.editorialPriority ?? 1)
+    || (modelRank.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (modelRank.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+    || (originalRank.get(left.id) ?? 0) - (originalRank.get(right.id) ?? 0));
+  const modelSelectionById = new Map(modelSelections.map((selection) => [selection.imageId, selection]));
+  const modelRequestedCount = new Set(modelSelections
+    .map((selection) => selection.imageId)
+    .filter((imageId) => eligiblePool.some((image) => image.id === imageId))).size;
 
   // One visual per meaningful reading beat, capped by the user's image limit.
   // Four paragraphs therefore receive up to three source visuals; a one-line
   // brief stays at one.
   const automaticTarget = Math.min(
     limit,
-    eligible.length,
+    eligiblePool.length,
     Math.max(1, Math.ceil(paragraphs.length * 0.7)),
   );
-  const targetCount = Math.min(limit, eligible.length, Math.max(automaticTarget, placements.length));
-  const remaining = eligible.filter((image) => !selectedIds.has(image.id)).slice(0, targetCount - placements.length);
-  const occupied = new Set(placements.map((placement) => placement.afterParagraph));
+  const targetCount = Math.min(limit, eligiblePool.length, Math.max(automaticTarget, modelRequestedCount));
+  const selected = prioritized.slice(0, targetCount);
+  const occupied = new Set<number>();
+  for (const image of selected) {
+    const modelSelection = modelSelectionById.get(image.id);
+    if (!modelSelection) continue;
+    occupied.add(Math.max(0, Math.min(paragraphs.length - 1, modelSelection.afterParagraph)));
+  }
   const fallbackSlots = evenlySpacedSlots(paragraphs.length, targetCount)
     .filter((index) => !occupied.has(index));
-
-  remaining.forEach((image) => {
+  const placements: EditorialImageSelection[] = [];
+  selected.forEach((image) => {
+    const modelSelection = modelSelectionById.get(image.id);
+    if (modelSelection) {
+      placements.push({
+        imageId: image.id,
+        afterParagraph: Math.max(0, Math.min(paragraphs.length - 1, modelSelection.afterParagraph)),
+        caption: modelSelection.caption.trim() || image.caption,
+      });
+      return;
+    }
     const semantic = semanticParagraph(image, paragraphs, occupied);
     const fallback = fallbackSlots.shift();
     const afterParagraph = semantic ?? fallback ?? Math.min(paragraphs.length - 1, placements.length);

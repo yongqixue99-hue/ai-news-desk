@@ -218,6 +218,9 @@ export interface AssetCandidate {
   recommendedAfterClaimId?: string;
   /** Where the reviewable asset came from; legacy packages omit this field. */
   origin?: "source" | "library";
+  /** Relevance order enforced before model image choices. */
+  editorialPriority?: 1 | 2 | 3 | 4 | 5;
+  editorialOrigin?: SourceImage["editorialOrigin"];
   /** A local file exists and can survive a remote publisher image failure. */
   localReady?: boolean;
 }

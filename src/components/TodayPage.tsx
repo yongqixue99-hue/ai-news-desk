@@ -53,6 +53,14 @@ const explanationBasisLabels = {
   title: "目前仅有标题",
 } as const;
 
+const editorialAssetLabels = {
+  1: "原新闻图片",
+  2: "原文截图",
+  3: "人物／公司资料图",
+  4: "事件相关素材",
+  5: "AI 生成兜底",
+} as const;
+
 const relativeTime = (value: string) => {
   const deltaMinutes = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 60_000));
   if (deltaMinutes < 60) return `${deltaMinutes || 1} 分钟前`;
@@ -295,7 +303,8 @@ const StoryDrawer = ({
                       <figure key={image.id}>
                         <img src={image.publicPath || image.url} alt={image.caption || "来源图片"} loading="lazy" />
                         <figcaption>
-                          <strong>{image.caption || "来源图片"}</strong>
+                          <strong>{image.rights === "editorial-screenshot" || image.rights === "commentary-screenshot" ? "优先级 2 · 原文截图" : "优先级 1 · 原新闻图片"}</strong>
+                          <span>{image.caption || "来源图片"}</span>
                           <span>{image.attribution || "来源待核对"} · {image.localPath && image.publicPath ? "已缓存" : "仅远程"} · {image.rights}</span>
                         </figcaption>
                       </figure>
@@ -404,7 +413,7 @@ const StoryDrawer = ({
                     <figure key={asset.id} className={`rights-${asset.rightsDecision}`}>
                       <img src={asset.url} alt={asset.caption || asset.role} loading="lazy" />
                       <figcaption>
-                        <strong>{asset.origin === "library" ? "素材库回退" : asset.role}</strong>
+                        <strong>优先级 {asset.editorialPriority ?? (asset.origin === "library" ? 4 : 1)} · {editorialAssetLabels[asset.editorialPriority ?? (asset.origin === "library" ? 4 : 1)]}</strong>
                         <span>{asset.localReady ? "本地就绪" : "仅远程"} · {asset.rightsReason}</span>
                       </figcaption>
                     </figure>

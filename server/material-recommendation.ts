@@ -1,4 +1,4 @@
-import { isNeutralImagePublishReady } from "./image-readiness.js";
+import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
 import type { StoryView } from "./product-types.js";
 import type { ImageMaterial, SourceImage } from "./types.js";
 
@@ -85,7 +85,16 @@ interface RankedMaterial {
   material: ImageMaterial;
   score: number;
   generic: boolean;
+  generated: boolean;
+  editorialPriority: 3 | 4 | 5;
+  editorialOrigin: "entity-library" | "related-library" | "generated-fallback";
 }
+
+const isGeneratedMaterial = (material: ImageMaterial) =>
+  material.licenseId?.trim().toLocaleUpperCase() === "PROJECT-OWNED"
+  || /\bimage_gen\b|generated asset|生成(?:图|素材)/iu.test(
+    `${material.attribution} ${material.evidenceNote ?? ""}`,
+  );
 
 const rankMaterialForStory = (
   material: ImageMaterial,
@@ -103,17 +112,25 @@ const rankMaterialForStory = (
       material,
       score: matchedNames.length * 30,
       generic: false,
+      generated: isGeneratedMaterial(material),
+      editorialPriority: 3,
+      editorialOrigin: "entity-library",
     };
   }
   const entityMatches = material.entityTags.filter((tag) => containsTerm(storyText, tag));
   const specificTagMatches = material.tags.filter((tag) =>
     !genericTags.has(normalized(tag)) && containsTerm(storyText, tag));
   const isGeneric = material.tags.some((tag) => genericTags.has(normalized(tag)));
+  const generated = isGeneratedMaterial(material);
+  if (generated && !entityMatches.length && !specificTagMatches.length) return undefined;
   if (!entityMatches.length && !specificTagMatches.length && !isGeneric) return undefined;
   return {
     material,
     score: entityMatches.length * 20 + specificTagMatches.length * 6 + (isGeneric ? 1 : 0),
     generic: isGeneric && !entityMatches.length && !specificTagMatches.length,
+    generated,
+    editorialPriority: generated ? 5 : entityMatches.length ? 3 : 4,
+    editorialOrigin: generated ? "generated-fallback" : entityMatches.length ? "entity-library" : "related-library",
   };
 };
 
@@ -140,28 +157,77 @@ export const sourceImageFromRecommendedMaterial = (
   expiresAt: ranked.material.expiresAt,
   entityTags: [...ranked.material.entityTags],
   fingerprint: ranked.material.fingerprint,
+  editorialPriority: ranked.editorialPriority,
+  editorialOrigin: ranked.editorialOrigin,
 });
 
-export const recommendMaterialFallbacks = (
+const rankedMaterialsForStory = (
   materials: readonly ImageMaterial[],
   story: StoryView,
-  limit = 2,
-  now = new Date().toISOString(),
+  eligible: (material: ImageMaterial) => boolean,
 ) => {
   const storyText = storySearchText(story);
   const seenFingerprints = new Set<string>();
   return materials
-    .filter((material) => canAutomaticallyInsertMaterial(material, now))
+    .filter(eligible)
     .flatMap((material) => {
       const ranked = rankMaterialForStory(material, storyText);
       if (!ranked || seenFingerprints.has(material.fingerprint)) return [];
       seenFingerprints.add(material.fingerprint);
       return [ranked];
     })
-    .sort((left, right) => right.score - left.score
+    .sort((left, right) => left.editorialPriority - right.editorialPriority
+      || right.score - left.score
       || Number(left.generic) - Number(right.generic)
       || right.material.createdAt.localeCompare(left.material.createdAt)
-      || left.material.id.localeCompare(right.material.id))
+      || left.material.id.localeCompare(right.material.id));
+};
+
+const preferredMaterials = (
+  ranked: RankedMaterial[],
+  limit: number,
+  allowGenerated = true,
+) => {
+  const nonGenerated = ranked.filter((entry) => !entry.generated);
+  const preferred = nonGenerated.length || !allowGenerated ? nonGenerated : ranked;
+  return preferred
     .slice(0, Math.max(0, Math.min(6, Math.floor(limit))))
     .map(sourceImageFromRecommendedMaterial);
 };
+
+/**
+ * Returns locally reviewable identity/related assets even when their rights
+ * still block automatic publishing. PackageDesk can show these ahead of a
+ * generated fallback without silently granting reuse permission.
+ */
+export const recommendMaterialCandidates = (
+  materials: readonly ImageMaterial[],
+  story: StoryView,
+  limit = 2,
+  now = new Date().toISOString(),
+  options: { allowGenerated?: boolean } = {},
+) => preferredMaterials(
+  rankedMaterialsForStory(
+    materials,
+    story,
+    (material) => material.rights !== "expired" && isLocalImageFileReady(material),
+  ),
+  limit,
+  options.allowGenerated !== false,
+);
+
+export const recommendMaterialFallbacks = (
+  materials: readonly ImageMaterial[],
+  story: StoryView,
+  limit = 2,
+  now = new Date().toISOString(),
+  options: { allowGenerated?: boolean } = {},
+) => preferredMaterials(
+  rankedMaterialsForStory(
+    materials,
+    story,
+    (material) => canAutomaticallyInsertMaterial(material, now),
+  ),
+  limit,
+  options.allowGenerated !== false,
+);
