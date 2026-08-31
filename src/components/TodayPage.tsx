@@ -376,7 +376,13 @@ const StoryDrawer = ({
 
               {contentPackage ? (
                 <section className="story-detail-section package-section">
-              <div className="story-detail-heading"><h3>成稿素材包</h3><span>{modeLabels[contentPackage.mode]}</span></div>
+              <div className="story-detail-heading">
+                <h3>成稿素材包</h3>
+                <span>{modeLabels[contentPackage.mode]}</span>
+                <button type="button" className="text-button" disabled={busy} onClick={() => onBuildPackage(contentPackage.mode)}>
+                  {busy ? <><RefreshCw className="spin" size={13} />正在按 1→5 补图</> : <><RefreshCw size={13} />重新按 1→5 补图</>}
+                </button>
+              </div>
               <PackageStatus contentPackage={contentPackage} />
               {contentPackage.status === "ready" ? (
                 <div className="package-draft-action">
