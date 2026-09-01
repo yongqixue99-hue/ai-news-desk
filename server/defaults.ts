@@ -1587,6 +1587,7 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
     ? state.settings.recentCommunities.filter((community): community is string => typeof community === "string").slice(0, 8)
     : [];
   state.draftRevisions ??= [];
+  state.draftGenerationAttempts ??= [];
   state.articleAgentThreads ??= [];
   state.materials ??= [];
   state.materialSeedTombstones = Array.isArray(state.materialSeedTombstones)
@@ -1826,6 +1827,7 @@ export const createDefaultState = (): WorkflowState => ({
   candidateFeedback: [],
   runs: [],
   drafts: [],
+  draftGenerationAttempts: [],
   draftRevisions: [],
   articleAgentThreads: [],
   intakeReviews: [],

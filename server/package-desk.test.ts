@@ -157,6 +157,53 @@ test("PackageDesk keeps a community discovery path out of a news fact ledger", (
   ]);
 });
 
+test("PackageDesk keeps passive community redistribution wording out of a news fact ledger", () => {
+  const state = createDefaultState();
+  state.runs = [run([candidate("redistributed-community-source", {
+    sourceType: "hackernews",
+    sourceName: "Hacker News",
+    sourceRole: "community",
+    title: "Apple ships new Mac mini and Mac Studio",
+    url: "https://www.macrumors.com/2026/08/30/new-mac-mini-and-mac-studio/",
+    canonicalUrl: "https://www.macrumors.com/2026/08/30/new-mac-mini-and-mac-studio/",
+    engagement: {
+      points: 85,
+      comments: 31,
+      discussionUrl: "https://news.ycombinator.com/item?id=49460000",
+    },
+    briefing: {
+      titleZh: "Apple 发布新款 Mac mini 和 Mac Studio",
+      summaryZh: "MacRumors 报道了 Apple 的桌面 Mac 更新。",
+      basis: "full-source",
+      generatedAt: "2026-08-30T01:10:00.000Z",
+      providerId: "codex",
+      explanation: {
+        voiceVersion: 2,
+        whatHappenedZh: "Apple 更新了 Mac mini 和 Mac Studio。",
+        keyPointsZh: [
+          "MacRumors 报道 Apple 本周发布了新款 Mac mini 和 Mac Studio。",
+          "被转到 Hacker News 的报道称，企业对 AI 硬件的需求超出预期。",
+        ],
+        unknownsZh: [],
+      },
+    },
+  })])];
+  const story = buildStories(state, "2026-08-30T02:00:00.000Z")[0]!;
+
+  const contentPackage = buildContentPackage(state, {
+    storyId: story.id,
+    intent: "news",
+    mode: "brief",
+    now: "2026-08-30T02:00:00.000Z",
+  });
+
+  assert.equal(contentPackage.status, "ready");
+  assert.deepEqual(contentPackage.facts.map((claim) => claim.text), [
+    "MacRumors 报道了 Apple 的桌面 Mac 更新。",
+    "MacRumors 报道 Apple 本周发布了新款 Mac mini 和 Mac Studio。",
+  ]);
+});
+
 test("PackageDesk orders original article images before article screenshots regardless of discovery order", () => {
   const state = createDefaultState();
   state.runs = [run([candidate("official", {
@@ -197,6 +244,76 @@ test("PackageDesk orders original article images before article screenshots rega
     { id: "article-hero", priority: 1, origin: "article-image" },
     { id: "article-screenshot", priority: 2, origin: "article-screenshot" },
   ]);
+});
+
+test("PackageDesk excludes an entity image whose identity does not match the Story", () => {
+  const state = createDefaultState();
+  state.runs = [run([candidate("apple", {
+    title: "Apple ships new Mac mini and Mac Studio",
+    briefing: {
+      titleZh: "Apple 发布新款 Mac mini 和 Mac Studio",
+      summaryZh: "Apple 更新了桌面 Mac 产品线。",
+      basis: "full-source",
+      generatedAt: "2026-08-30T01:10:00.000Z",
+      providerId: "codex",
+    },
+    images: [{
+      id: "editorial_identity_faerabella",
+      url: "https://upload.wikimedia.org/faerabella.jpg",
+      caption: "Færeabella at a public event",
+      attribution: "Wikimedia Commons",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Faerabella.jpg",
+      selected: true,
+      rights: "licensed",
+      entityTags: ["Færeabella"],
+      editorialPriority: 3,
+      editorialOrigin: "entity-library",
+    }],
+    imageCount: 1,
+  })])];
+  const story = buildStories(state, "2026-08-30T02:00:00.000Z")[0]!;
+
+  const contentPackage = buildContentPackage(state, {
+    storyId: story.id,
+    now: "2026-08-30T02:00:00.000Z",
+  });
+
+  assert.equal(contentPackage.assets.some((asset) => asset.sourceImageId === "editorial_identity_faerabella"), false);
+});
+
+test("PackageDesk keeps a canonical company entity image when the Story uses its common name", () => {
+  const state = createDefaultState();
+  state.runs = [run([candidate("amazon", {
+    title: "Amazon announces a new AI shopping assistant",
+    briefing: {
+      titleZh: "Amazon 发布新的 AI 购物助手",
+      summaryZh: "Amazon 更新了面向消费者的 AI 产品。",
+      basis: "full-source",
+      generatedAt: "2026-08-30T01:10:00.000Z",
+      providerId: "codex",
+    },
+    images: [{
+      id: "editorial_identity_amazon",
+      url: "https://upload.wikimedia.org/amazon.jpg",
+      caption: "Amazon company identity",
+      attribution: "Wikimedia Commons",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Amazon.jpg",
+      selected: true,
+      rights: "licensed",
+      entityTags: ["Amazon.com"],
+      editorialPriority: 3,
+      editorialOrigin: "entity-library",
+    }],
+    imageCount: 1,
+  })])];
+  const story = buildStories(state, "2026-08-30T02:00:00.000Z")[0]!;
+
+  const contentPackage = buildContentPackage(state, {
+    storyId: story.id,
+    now: "2026-08-30T02:00:00.000Z",
+  });
+
+  assert.equal(contentPackage.assets.some((asset) => asset.sourceImageId === "editorial_identity_amazon"), true);
 });
 
 test("PackageDesk refuses to turn a Watch story into a package", () => {

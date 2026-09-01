@@ -26,6 +26,7 @@ export const readState = async (): Promise<WorkflowState> => {
   await ensureDirectories();
   if (stateCache) return structuredClone(stateCache);
   const state = upgradeState((await localDatabase()).readState<WorkflowState>());
+  state.draftGenerationAttempts ??= [];
   state.draftRevisions ??= [];
   state.articleAgentThreads ??= [];
   if (state.settings.xiaoheiheEditorUrl.includes("/app/bbs/link/new_post")) {

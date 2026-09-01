@@ -19,6 +19,8 @@ export type {
   CollectionTopicDefinition,
   CollectionTopicId,
   DraftRevision,
+  DraftQualityDimension,
+  DraftQualityWarning,
   DraftFactEvidenceStatus,
   Candidate,
   CandidateExplanation,

@@ -142,3 +142,21 @@ test("hybrid Chinese company names become a specific identity query", async () =
 
   assert.match(queries[0] || "", /^Sony Music\b/u);
 });
+
+test("product names do not become identity searches when a known company is present", async () => {
+  const queries: string[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    queries.push(new URL(String(input)).searchParams.get("gsrsearch") || "");
+    return Response.json({ query: { pages: [] } });
+  };
+
+  await searchLicensedEditorialImages({
+    id: "story-apple-mac",
+    title: "Apple 发布新款 Mac mini 和 Mac Studio",
+    originalTitle: "Apple ships new Mac mini and Mac Studio",
+    summary: "Apple updated its desktop Mac lineup.",
+  }, 2, { fetcher, priority: 3 });
+
+  assert.match(queries[0] || "", /^Apple Inc\. filetype:bitmap/u);
+  assert.equal(queries.some((query) => /Mac Studio/u.test(query)), false);
+});

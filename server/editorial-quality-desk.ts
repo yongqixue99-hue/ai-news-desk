@@ -1,6 +1,7 @@
 import type { ContentPackage } from "./product-types.js";
-import type { ArticleDraft } from "./types.js";
+import type { ArticleDraft, DraftQualityWarning } from "./types.js";
 import { uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
+import { isCommunityDiscoveryFraming } from "./editorial-source-policy.js";
 import { assessWritingQuality } from "./writing-quality.js";
 
 export interface EditorialQualityIssue {
@@ -20,7 +21,21 @@ export interface EditorialDraftQualityInput {
   draft: ArticleDraft;
 }
 
-const discoveryHeadlinePattern = /Hacker News|Reddit|V2EX|知乎|社区(?:讨论|热议)?|论坛|热议|因.{0,24}讨论.{0,16}(?:受到|引发)|(?:重新)?受到(?:关注|注意)/iu;
+export const draftQualityWarningsFor = (
+  report: EditorialDraftQualityReport,
+): DraftQualityWarning[] => report.warnings.map((warning) => ({
+  id: warning.id,
+  message: warning.message,
+  blockId: warning.blockId,
+  dimension: warning.blockId === "images"
+    ? "images-rights"
+    : warning.id === "brief-underdeveloped"
+      ? "content-completeness"
+      : warning.id.startsWith("writing-")
+        ? "writing-quality"
+        : "fact-safety",
+}));
+
 const consensusLanguagePattern = /(?:社区|评论区|讨论中|用户|开发者)?(?:普遍|多数|大多|一致)(?:认为|觉得|认同|支持)|形成(?:了)?共识|大家都|反复出现|多次出现/iu;
 const communityObservationPattern = /(?:社区|评论区|讨论中|评论者|用户|开发者).{0,20}(?:认为|觉得|提出|表示|指出|分享|反对|支持)/iu;
 const limitedSampleLabelPattern = /有限样本|少量样本|目前只看到|当前只看到|仅(?:有|看到).{0,8}(?:条|个|名|份)|只有.{0,8}(?:条|个|名|份)/iu;
@@ -42,7 +57,7 @@ export const evaluateDraftPackageQuality = ({
     .filter((source) => source.isCommunity)
     .map((source) => source.url));
 
-  if (contentPackage.intent === "news" && discoveredViaCommunity && discoveryHeadlinePattern.test(draft.title)) {
+  if (contentPackage.intent === "news" && discoveredViaCommunity && isCommunityDiscoveryFraming(draft.title)) {
     blockers.push({
       id: "news-discovery-headline",
       blockId: "title",
@@ -50,7 +65,7 @@ export const evaluateDraftPackageQuality = ({
     });
   }
   const firstSentence = draft.paragraphs[0]?.split(/(?<=[。！？!?])/u)[0]?.trim() ?? "";
-  if (contentPackage.intent === "news" && discoveredViaCommunity && discoveryHeadlinePattern.test(firstSentence)) {
+  if (contentPackage.intent === "news" && discoveredViaCommunity && isCommunityDiscoveryFraming(firstSentence)) {
     blockers.push({
       id: "news-discovery-lead",
       blockId: "paragraph:0",
@@ -65,9 +80,9 @@ export const evaluateDraftPackageQuality = ({
     });
   }
   const discoveryFactClaim = contentPackage.intent === "news" && discoveredViaCommunity
-    && !discoveryHeadlinePattern.test(firstSentence)
+    && !isCommunityDiscoveryFraming(firstSentence)
     ? (draft.factClaims ?? []).find((claim) => {
-      if (!discoveryHeadlinePattern.test(claim.claim)) return false;
+      if (!isCommunityDiscoveryFraming(claim.claim)) return false;
       const claimUrls = claim.sourceUrls?.length ? claim.sourceUrls : claim.sourceUrl ? [claim.sourceUrl] : [];
       return !claimUrls.length || claimUrls.some((url) => !communitySourceUrls.has(url));
     })
@@ -101,7 +116,7 @@ export const evaluateDraftPackageQuality = ({
     && supportedFactCount >= 5
     && bodyCharacterCount < 500
   ) {
-    blockers.push({
+    warnings.push({
       id: "brief-underdeveloped",
       blockId: "evidence",
       message: `素材包已有 ${supportedFactCount} 条正文级事实，但正文只有 ${bodyCharacterCount} 字；需要讲清事件、适用规则、影响与限制，不能只交付三段摘要。`,
@@ -148,7 +163,7 @@ export const evaluateDraftPackageQuality = ({
   const expectedInsertedImages = Math.min(2, relevantLocalAssetCount);
   const insertedImageCount = draft.images.filter((placement) => placement.afterParagraph >= 0).length;
   if (expectedInsertedImages > 0 && insertedImageCount < expectedInsertedImages) {
-    blockers.push({
+    warnings.push({
       id: "image-coverage-missing",
       blockId: "images",
       message: `素材包已有 ${relevantLocalAssetCount} 张相关原图，私人草稿至少应插入 ${expectedInsertedImages} 张。`,

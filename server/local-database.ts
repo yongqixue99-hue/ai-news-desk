@@ -613,13 +613,19 @@ export class LocalDatabase {
     return jobFromRow(this.db.prepare("SELECT * FROM workflow_jobs WHERE id = ?").get(jobId) as unknown as JobRow);
   }
 
-  failJob(jobId: string, workerId: string, error: string, retryDelayMs = 30_000): DurableJobRecord {
+  failJob(
+    jobId: string,
+    workerId: string,
+    error: string,
+    retryDelayMs = 30_000,
+    retryable = true,
+  ): DurableJobRecord {
     const current = this.db.prepare("SELECT * FROM workflow_jobs WHERE id = ?").get(jobId) as JobRow | undefined;
     if (!current || current.status !== "running" || current.lease_owner !== workerId) {
       throw new Error("任务租约已失效，不能记录失败");
     }
     const updatedAt = this.now();
-    const retrying = current.attempts < current.max_attempts;
+    const retrying = retryable && current.attempts < current.max_attempts;
     const nextAttemptAt = retrying
       ? new Date(Date.parse(updatedAt) + Math.max(1_000, retryDelayMs)).toISOString()
       : null;

@@ -9,6 +9,22 @@ export interface JobContext {
 
 export type DurableJobHandler = (payload: unknown, context: JobContext) => Promise<unknown>;
 
+export type JobFailureClass = "transient" | "repairable" | "deterministic";
+
+export class ClassifiedJobError extends Error {
+  constructor(
+    message: string,
+    readonly failureClass: JobFailureClass,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "ClassifiedJobError";
+  }
+}
+
+const failureClassFor = (error: unknown): JobFailureClass =>
+  error instanceof ClassifiedJobError ? error.failureClass : "transient";
+
 export interface JobDeskOptions {
   database: LocalDatabase;
   handlers: Record<string, DurableJobHandler>;
@@ -52,7 +68,7 @@ export const createJobDesk = ({
       if (!job) return;
       const handler = handlers[job.type];
       if (!handler) {
-        database.failJob(job.id, workerId, `没有注册任务处理器：${job.type}`, 60_000);
+        database.failJob(job.id, workerId, `没有注册任务处理器：${job.type}`, 60_000, false);
         return;
       }
       database.recordWorkflowEvent({
@@ -89,13 +105,14 @@ export const createJobDesk = ({
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const failureClass = failureClassFor(error);
         const delay = Math.min(15 * 60_000, 15_000 * 2 ** Math.max(0, job.attempts - 1));
-        const failed = database.failJob(job.id, workerId, message, delay);
+        const failed = database.failJob(job.id, workerId, message, delay, failureClass === "transient");
         database.recordWorkflowEvent({
           type: failed.status === "failed" ? "job.failed" : "job.retrying",
           subjectType: "job",
           subjectId: job.id,
-          payload: { jobType: job.type, attempt: failed.attempts, error: message.slice(0, 1_000) },
+          payload: { jobType: job.type, attempt: failed.attempts, failureClass, error: message.slice(0, 1_000) },
         });
       }
     } finally {

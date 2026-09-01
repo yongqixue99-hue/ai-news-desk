@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluateDraftPackageQuality } from "./editorial-quality-desk.js";
+import { draftQualityWarningsFor, evaluateDraftPackageQuality } from "./editorial-quality-desk.js";
 import type { ContentPackage } from "./product-types.js";
 import type { ArticleDraft } from "./types.js";
 
@@ -398,7 +398,7 @@ test("DraftDesk quality gate requires evidence links for the factual and discuss
   assert.deepEqual(report.blockers.map((item) => item.id), ["paragraph-evidence-missing"]);
 });
 
-test("DraftDesk quality gate preserves two relevant source images in a private draft", () => {
+test("DraftDesk quality gate keeps a repairable image shortfall as a visible warning", () => {
   const first = asset("one");
   const second = asset("two");
   const report = evaluateDraftPackageQuality({
@@ -408,8 +408,15 @@ test("DraftDesk quality gate preserves two relevant source images in a private d
     }),
   });
 
-  assert.equal(report.ready, false);
-  assert.deepEqual(report.blockers.map((item) => item.id), ["image-coverage-missing"]);
+  assert.equal(report.ready, true);
+  assert.deepEqual(report.blockers, []);
+  assert.deepEqual(report.warnings.map((item) => item.id), ["image-coverage-missing"]);
+  assert.deepEqual(draftQualityWarningsFor(report), [{
+    id: "image-coverage-missing",
+    message: "素材包已有 2 张相关原图，私人草稿至少应插入 2 张。",
+    blockId: "images",
+    dimension: "images-rights",
+  }]);
 });
 
 test("DraftDesk quality gate does not count responsive variants as two required visuals", () => {
@@ -432,7 +439,7 @@ test("DraftDesk quality gate does not count responsive variants as two required 
   assert.deepEqual(report.blockers, []);
 });
 
-test("DraftDesk quality gate blocks an underdeveloped brief when the package has enough supported facts", () => {
+test("DraftDesk quality gate keeps an underdeveloped but sourced brief as a visible warning", () => {
   const sourceUrl = "https://arstechnica.com/tech-policy/example-story/";
   const facts: ContentPackage["facts"] = [
     "欧盟委员会把三项服务列为超大型在线平台。",
@@ -466,8 +473,10 @@ test("DraftDesk quality gate blocks an underdeveloped brief when the package has
     }),
   });
 
-  assert.equal(report.ready, false);
-  assert.ok(report.blockers.some((item) => item.id === "brief-underdeveloped"));
+  assert.equal(report.ready, true, JSON.stringify(report));
+  assert.equal(report.blockers.some((item) => item.id === "brief-underdeveloped"), false);
+  assert.ok(report.warnings.some((item) => item.id === "brief-underdeveloped"));
+  assert.equal(draftQualityWarningsFor(report).find((item) => item.id === "brief-underdeveloped")?.dimension, "content-completeness");
 });
 
 test("DraftDesk quality gate keeps a genuinely small one-fact brief concise", () => {

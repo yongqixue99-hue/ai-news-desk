@@ -295,12 +295,35 @@ const editorialOriginFor = (
           ? "generated-fallback"
           : "related-library");
 
+const entityTagStopWords = new Set(["com", "inc", "incorporated", "corp", "corporation", "company", "ltd", "limited", "platforms"]);
+
+const identityTextForStory = (story: StoryView) => [
+  story.title,
+  story.originalTitle,
+  story.summary,
+  story.whyImportant,
+  ...story.signals.flatMap((signal) => [signal.title, signal.titleZh || "", signal.summaryZh || ""]),
+].join(" ").normalize("NFKC").toLocaleLowerCase();
+
+const entityImageMatchesStory = (image: SourceImage, story: StoryView) => {
+  const priority = editorialPriorityFor(image);
+  const origin = editorialOriginFor(image, priority);
+  if (priority !== 3 && origin !== "entity-library") return true;
+  const storyText = identityTextForStory(story);
+  return Boolean(image.entityTags?.some((tag) => {
+    const terms = tag.normalize("NFKC").toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu)
+      ?.filter((term) => term.length >= 2 && !entityTagStopWords.has(term)) ?? [];
+    return terms.length > 0 && terms.every((term) => storyText.includes(term));
+  }));
+};
+
 const assetsFor = (
   story: StoryView,
   claims: EvidenceClaim[],
   fallbackImages: SourceImage[] = [],
   checkedAt = new Date().toISOString(),
 ): AssetCandidate[] => uniqueEligibleEditorialImages([...story.images, ...fallbackImages])
+  .filter((image) => entityImageMatchesStory(image, story))
   .map((image, index) => {
     const editorialPriority = editorialPriorityFor(image);
     const editorialOrigin = editorialOriginFor(image, editorialPriority);

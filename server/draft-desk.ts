@@ -4,7 +4,9 @@ import { generateCandidateDraft } from "./generator.js";
 import { getLocalDatabase, readState, updateState } from "./storage.js";
 import { activeWritingGuidelines } from "./learning-desk.js";
 import { appendDraftRevision } from "./draft-revisions.js";
-import { evaluateDraftPackageQuality } from "./editorial-quality-desk.js";
+import { createDraftGenerationAttempt, recordDraftGenerationAttempt } from "./draft-generation-attempt.js";
+import { draftQualityWarningsFor, evaluateDraftPackageQuality } from "./editorial-quality-desk.js";
+import { ClassifiedJobError } from "./job-desk.js";
 import { normalizeDraftCatalog } from "./draft-catalog.js";
 import type { ContentPackage } from "./product-types.js";
 import type { ArticleDraft, Candidate, SourceImage } from "./types.js";
@@ -12,7 +14,7 @@ import type { ArticleDraft, Candidate, SourceImage } from "./types.js";
 const inFlight = new Map<string, Promise<{ draft: ArticleDraft; reused: boolean }>>();
 
 /** Bump only when routing/evidence/prompt behavior materially changes. */
-export const editorialGeneratorRevision = "source-first-v10";
+export const editorialGeneratorRevision = "source-first-v11";
 
 const sourceCandidateFor = (state: Awaited<ReturnType<typeof readState>>, contentPackage: ContentPackage) => {
   const source = contentPackage.sources.find((entry) => !entry.isCommunity) ?? contentPackage.sources[0];
@@ -126,9 +128,9 @@ const create = async (
   onProgress?.(0.08, "校验冻结素材包");
   const database = await getLocalDatabase();
   const contentPackage = database.getContentPackage<ContentPackage>(packageId);
-  if (!contentPackage) throw new Error("素材包不存在");
+  if (!contentPackage) throw new ClassifiedJobError("素材包不存在", "deterministic");
   if (contentPackage.status !== "ready" || contentPackage.blockers.length) {
-    throw new Error(contentPackage.blockers[0] || "素材包尚未通过成稿预检");
+    throw new ClassifiedJobError(contentPackage.blockers[0] || "素材包尚未通过成稿预检", "repairable");
   }
 
   const initialState = await readState();
@@ -142,11 +144,17 @@ const create = async (
   const { runId, candidate } = sourceCandidateFor(initialState, contentPackage);
   const provider = initialState.aiSettings.providers.find((entry) => entry.id === initialState.aiSettings.activeProviderId)
     ?? initialState.aiSettings.providers[0];
-  if (!provider) throw new Error("当前没有可用的成稿模型");
+  if (!provider) throw new ClassifiedJobError("当前没有可用的成稿模型", "repairable");
   if (provider.kind !== "codex-cli" && !provider.apiKeyConfigured) {
-    throw new Error(`请先在 AI 设置中配置 ${provider.name} 的 API Key`);
+    throw new ClassifiedJobError(`请先在 AI 设置中配置 ${provider.name} 的 API Key`, "repairable");
   }
-  const images = await sourceImagesFromContentPackage(contentPackage);
+  let images: SourceImage[];
+  try {
+    images = await sourceImagesFromContentPackage(contentPackage);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ClassifiedJobError(message, "repairable", { cause: error });
+  }
   onProgress?.(0.22, "准备成稿材料");
   database.recordWorkflowEvent({
     type: "draft.started",
@@ -198,11 +206,34 @@ const create = async (
     }
     const qualityReport = evaluateDraftPackageQuality({ contentPackage, draft });
     if (!qualityReport.ready) {
-      throw new Error(`草稿质量门未通过：${qualityReport.blockers.map((item) => item.message).join("；")}`);
+      const blockedAttempt = createDraftGenerationAttempt({
+        contentPackageId: packageId,
+        storyId: contentPackage.storyId,
+        generatorRevision: editorialGeneratorRevision,
+        draft,
+        qualityReport,
+      });
+      await updateState((state) => recordDraftGenerationAttempt(state, blockedAttempt));
+      throw new ClassifiedJobError(
+        `草稿质量门未通过：${qualityReport.blockers.map((item) => item.message).join("；")}`,
+        "deterministic",
+      );
+    }
+    draft.qualityWarnings = draftQualityWarningsFor(qualityReport);
+    if (draft.qualityWarnings.some((warning) => warning.dimension === "images-rights")) {
+      draft.status = "needs-images";
     }
     draft.provenance.generatorRevision = editorialGeneratorRevision;
+    const generationAttempt = createDraftGenerationAttempt({
+      contentPackageId: packageId,
+      storyId: contentPackage.storyId,
+      generatorRevision: editorialGeneratorRevision,
+      draft,
+      qualityReport,
+    });
     onProgress?.(0.96, "保存草稿与修订记录");
     const saved = await updateState((state) => {
+      recordDraftGenerationAttempt(state, generationAttempt);
       const duplicate = state.drafts.find((entry) => entry.provenance.contentPackageId === packageId
         && entry.provenance.generatorRevision === editorialGeneratorRevision);
       if (duplicate) return { draft: duplicate, reused: true };

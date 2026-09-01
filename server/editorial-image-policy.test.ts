@@ -63,6 +63,28 @@ test("responsive WordPress sizes of the same source image stay one editorial ima
   assert.deepEqual(images.map((image) => image.id), ["eu-flag-1536"]);
 });
 
+test("different screenshot URLs with the same SHA-256 stay one editorial image", () => {
+  const fingerprint = "5ae558cb237fe2d200d86834267a8e3de2ea6d8744d4165d442863b419d2d882";
+  const images = uniqueEligibleEditorialImages([
+    {
+      id: "chatgpt-ads-page",
+      url: "/media/chatgpt-ads-page.png",
+      sourceUrl: "https://openai.com/index/testing-ads-in-chatgpt/",
+      caption: "来源网页首屏截图",
+      fingerprint,
+    },
+    {
+      id: "chatgpt-ads-og",
+      url: "/media/chatgpt-ads-og.png",
+      sourceUrl: "https://openai.com/index/testing-ads-in-chatgpt/",
+      caption: "来源网页首屏截图",
+      fingerprint,
+    },
+  ]);
+
+  assert.deepEqual(images.map((image) => image.id), ["chatgpt-ads-page"]);
+});
+
 test("a chart-rich source cannot become a text-only draft when the model selects no images", () => {
   const placements = planEditorialImagePlacements({
     availableImages: [

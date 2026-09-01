@@ -6,6 +6,8 @@ export interface EditorialImageCandidate {
   height?: number;
   rights?: string;
   sourceUrl?: string;
+  /** Frozen byte identity; identical files must never count as two visuals. */
+  fingerprint?: string;
   /** 1 source image, 2 source screenshot, 3 entity, 4 related, 5 generated fallback. */
   editorialPriority?: 1 | 2 | 3 | 4 | 5;
 }
@@ -77,19 +79,30 @@ const semanticImageKey = (image: EditorialImageCandidate) => {
 export const uniqueEligibleEditorialImages = <T extends EditorialImageCandidate>(images: T[]) => {
   const selected: T[] = [];
   const urlIndex = new Map<string, number>();
+  const fingerprintIndex = new Map<string, number>();
   const seenSemantic = new Set<string>();
   for (const image of images) {
     if (!eligibleEditorialImage(image)) continue;
+    const fingerprintKey = /^[a-f0-9]{64}$/iu.test(image.fingerprint?.trim() ?? "")
+      ? image.fingerprint!.trim().toLocaleLowerCase()
+      : "";
+    if (fingerprintKey && fingerprintIndex.has(fingerprintKey)) continue;
     const urlKey = normalizedVisualUrl(image.url);
     const existingIndex = urlIndex.get(urlKey);
     if (existingIndex !== undefined) {
       const existing = selected[existingIndex]!;
-      if (imageResolutionScore(image) > imageResolutionScore(existing)) selected[existingIndex] = image;
+      if (imageResolutionScore(image) > imageResolutionScore(existing)) {
+        const existingFingerprint = existing.fingerprint?.trim().toLocaleLowerCase() ?? "";
+        if (fingerprintIndex.get(existingFingerprint) === existingIndex) fingerprintIndex.delete(existingFingerprint);
+        selected[existingIndex] = image;
+        if (fingerprintKey) fingerprintIndex.set(fingerprintKey, existingIndex);
+      }
       continue;
     }
     const semanticKey = semanticImageKey(image);
     if (semanticKey && seenSemantic.has(semanticKey)) continue;
     urlIndex.set(urlKey, selected.length);
+    if (fingerprintKey) fingerprintIndex.set(fingerprintKey, selected.length);
     if (semanticKey) seenSemantic.add(semanticKey);
     selected.push(image);
   }

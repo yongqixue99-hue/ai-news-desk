@@ -830,6 +830,15 @@ export interface DraftFactClaim {
 
 export type DraftLayoutTheme = "news-clean" | "mono-editorial" | "tech-blue";
 
+export type DraftQualityDimension = "fact-safety" | "content-completeness" | "images-rights" | "writing-quality";
+
+export interface DraftQualityWarning {
+  id: string;
+  message: string;
+  blockId: "title" | `paragraph:${number}` | "evidence" | "images" | "source-material";
+  dimension: DraftQualityDimension;
+}
+
 export interface ArticleDraft {
   id: string;
   runId: string;
@@ -855,6 +864,8 @@ export interface ArticleDraft {
   factClaims?: DraftFactClaim[];
   uncertainties: string[];
   images: DraftImagePlacement[];
+  /** Repairable generation findings. They never replace fact or rights blockers. */
+  qualityWarnings?: DraftQualityWarning[];
   community: string;
   topics: string[];
   provenance: {
@@ -903,6 +914,24 @@ export interface ArticleDraft {
   publicationConfirmedAt?: string;
   /** Receipt explicitly acknowledged by the user as the published revision. */
   publicationReceiptId?: string;
+}
+
+export interface DraftGenerationAttempt {
+  id: string;
+  contentPackageId: string;
+  storyId: string;
+  draftId: string;
+  createdAt: string;
+  completedAt: string;
+  generatorRevision: string;
+  aiTraceId?: string;
+  status: "accepted" | "warning" | "blocked";
+  draft: ArticleDraft;
+  qualityReport: {
+    ready: boolean;
+    blockers: Array<{ id: string; message: string; blockId: string }>;
+    warnings: Array<{ id: string; message: string; blockId: string }>;
+  };
 }
 
 export type DraftSaveMode = "auto" | "manual";
@@ -1053,6 +1082,7 @@ export interface WorkflowState {
   candidateFeedback: CandidateFeedback[];
   runs: WorkflowRun[];
   drafts: ArticleDraft[];
+  draftGenerationAttempts: DraftGenerationAttempt[];
   draftRevisions: DraftRevision[];
   articleAgentThreads: ArticleAgentThread[];
   intakeReviews: IntakeReviewRecord[];

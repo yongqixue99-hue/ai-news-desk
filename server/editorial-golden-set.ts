@@ -273,14 +273,15 @@ export const editorialGoldenCases: EditorialGoldenCase[] = [
   {
     id: "visual-one-of-two-dropped",
     category: "visual",
-    label: "两张相关原图不能只插入一张",
+    label: "少插一张相关原图进入待完善而不是丢弃草稿",
     intent: "news",
     title: "Open Executive 用八个智能体组成虚拟高管团队",
     paragraphs: ["Open Executive 把八个专职智能体放进同一套管理界面。"],
     localAssetCount: 2,
     insertedImageCount: 1,
-    expectedReady: false,
-    expectedBlockerIds: ["image-coverage-missing"],
+    expectedReady: true,
+    expectedBlockerIds: [],
+    expectedWarningIds: ["image-coverage-missing"],
   },
 ];
 

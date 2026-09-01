@@ -51,6 +51,7 @@ import { WeChatDraftPanel } from "./WeChatDraftPanel";
 import { DraftEvidencePanel } from "./DraftEvidencePanel";
 import { buildDraftEvidenceView } from "../../server/draft-evidence-view.js";
 import { draftStatusLabel, manualDraftStatuses } from "../draft-lifecycle-view";
+import { buildDraftQualityView } from "../draft-quality-view";
 import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
 import { getRovingTabTarget } from "../hooks/rovingTabs";
 import type {
@@ -1066,6 +1067,7 @@ export function DraftWorkspace({
         ? { title: "版本历史", subtitle: "自动保存与随时恢复" }
         : { title: "发布设置", subtitle: "确认后填入平台编辑器" };
   const publisherReady = Boolean(publisherStatus?.ok);
+  const draftQuality = buildDraftQualityView(editing.qualityWarnings);
   const extensionPublisher = publisherStatus?.mode !== "cdp";
   const publishGuidance = !publisherReady
     ? extensionPublisher
@@ -1093,6 +1095,13 @@ export function DraftWorkspace({
           detail: "这不是你的待办；正文仍可阅读，来源补齐后会自动更新状态。",
           action: "查看当前证据",
         }
+      : draftQuality.warnings.length
+        ? {
+            tab: draftQuality.nextTab,
+            label: draftQuality.headline,
+            detail: draftQuality.detail,
+            action: draftQuality.nextTab === "images" ? "补齐配图" : draftQuality.nextTab === "sources" ? "查看证据" : "定向补写",
+          }
       : {
           tab: "sources" as const,
           label: "草稿已生成，先看正文即可",
@@ -1218,10 +1227,15 @@ export function DraftWorkspace({
           <small>{nextAction.detail}</small>
         </div>
         <div className="draft-readiness-summary" aria-label={`发布准备 ${passedReadinessCount}/${readiness.length}`}>
-          <span>事实 {evidenceView.automaticFactCount}/{factClaims.length || 0}</span>
-          <span>图片 {insertedMediaIds.size} 张</span>
-          <span>微信 {wechatPublication ? "已发布" : editing.publicationConfirmations?.wechat?.staleAt ? "新版本待同步" : editing.wechatDraft ? "已同步" : "未同步"}</span>
-          <span>小黑盒 {xiaoheihePublication ? "已发布" : editing.publicationConfirmations?.xiaoheihe?.staleAt ? "新版本待填入" : editing.publisherReceipt ? "已填入" : "未填入"}</span>
+          {draftQuality.dimensions.map((dimension) => (
+            <span
+              key={dimension.id}
+              className={`quality-${dimension.state}`}
+              title={dimension.issues.map((issue) => issue.message).join("；") || `${dimension.label}检查已通过`}
+            >
+              {dimension.label} {dimension.summary}
+            </span>
+          ))}
         </div>
         <button type="button" className="secondary-button" onClick={() => setUtilityTab(nextAction.tab)}>{nextAction.action}<ChevronRight size={14} /></button>
       </section>

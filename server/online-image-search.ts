@@ -63,7 +63,7 @@ const canonicalEntityAliases: Array<[RegExp, string]> = [
   [/英伟达/u, "NVIDIA"],
   [/谷歌\s*deepmind|谷歌深度思维/iu, "Google DeepMind"],
   [/谷歌/u, "Google"],
-  [/苹果公司|苹果/u, "Apple"],
+  [/苹果公司|苹果/u, "Apple Inc."],
   [/亚马逊/u, "Amazon"],
   [/腾讯/u, "Tencent"],
   [/阿里巴巴/u, "Alibaba"],
@@ -74,9 +74,21 @@ const canonicalEntityAliases: Array<[RegExp, string]> = [
   [/深度求索/u, "DeepSeek"],
 ];
 
-const englishNames = (value: string) => [...value.matchAll(
-  /\b[A-Z][A-Za-z0-9.&'’+-]*(?:\s+[A-Z][A-Za-z0-9.&'’+-]*){0,4}\b/gu,
-)].map((match) => match[0]!.trim());
+const canonicalKnownEntity = (value: string) => ({
+  apple: "Apple Inc.",
+  meta: "Meta Platforms",
+  amazon: "Amazon.com",
+  facebook: "Meta Platforms",
+}[normalizedKey(value)] ?? value);
+
+const englishRoleNames = (value: string) => [
+  ...value.matchAll(
+    /(?:Nobel\s+laureate|CEO|chief\s+executive|founder|co-founder|scientist|researcher|诺贝尔奖得主|科学家|研究员|创始人|负责人|首席执行官)[：:\s]+([A-Z][A-Za-z'’.-]+(?:\s+[A-Z][A-Za-z'’.-]+){1,3})/giu,
+  ),
+  ...value.matchAll(
+    /\b([A-Z][A-Za-z'’.-]+(?:\s+[A-Z][A-Za-z'’.-]+){1,3})\s*,?\s+(?:CEO|chief\s+executive|founder|co-founder|scientist|researcher)\b/giu,
+  ),
+].map((match) => match[1]!.trim());
 
 const chineseRoleNames = (value: string) => [...value.matchAll(
   /(?:诺贝尔奖得主|科学家|研究员|创始人|负责人|首席执行官|CEO)[：:\s]*([\p{Script=Han}·]{2,8})/giu,
@@ -88,8 +100,8 @@ const identityQueriesForStory = (story: EditorialImageSearchStory) => {
     pattern.test(text) ? [canonical] : []);
   const entities = [
     ...canonicalAliases,
-    ...(text.match(knownEntityPattern) ?? []),
-    ...englishNames(text),
+    ...(text.match(knownEntityPattern) ?? []).map(canonicalKnownEntity),
+    ...englishRoleNames(text),
     ...chineseRoleNames(text),
   ];
   const seen = new Set<string>();
@@ -157,15 +169,13 @@ const sourceImageFor = (
   const remoteUrl = info?.thumburl?.trim() || info?.url?.trim() || "";
   if (!info || !sourceUrl || !remoteUrl || !/^image\//iu.test(info.mime || "")) return undefined;
   if (priority === 3) {
-    const specificTokens = normalizedKey(query).split(" ")
-      .filter((token) => token.length >= 3 && !genericIdentityTerms.has(token))
-      .sort((left, right) => right.length - left.length);
+    const identityKey = normalizedKey(query);
     const identityText = normalizedKey([
       page.title || "",
       plainText(metadata.ImageDescription?.value),
       plainText(metadata.Categories?.value),
     ].join(" "));
-    if (specificTokens.length && !identityText.includes(specificTokens[0]!)) return undefined;
+    if (identityKey && !identityText.includes(identityKey)) return undefined;
   }
   const license = normalizedLicense(
     plainText(metadata.LicenseShortName?.value),
@@ -205,7 +215,7 @@ const sourceImageFor = (
     licenseUrl: license.url,
     modificationNote: "在线检索并缓存，尚未进行内容性修改。",
     allowedPlatforms: trademarked ? [] : ["wechat", "xiaoheihe"],
-    entityTags: [],
+    entityTags: priority === 3 ? [query] : [],
     editorialPriority: priority,
     editorialOrigin: priority === 3 ? "entity-library" : "related-library",
   };

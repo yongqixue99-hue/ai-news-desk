@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createJobDesk } from "./job-desk.js";
+import { ClassifiedJobError, createJobDesk } from "./job-desk.js";
 import { LocalDatabase } from "./local-database.js";
 
 test("JobDesk executes a persisted job and records durable progress", async () => {
@@ -158,6 +158,46 @@ test("JobDesk does not claim queued work while workspace maintenance is active",
     maintenanceActive = false;
     await desk.tick();
     assert.equal(database.getJob(queued.id)?.status, "complete");
+  } finally {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("JobDesk stops after one deterministic failure instead of scheduling identical retries", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-job-desk-deterministic-"));
+  const database = await LocalDatabase.open({
+    workflowRoot: root,
+    initialState: () => ({ version: 11 }),
+  });
+  try {
+    const queued = database.enqueueJob({
+      type: "draft",
+      idempotencyKey: "package-1:draft",
+      payload: { packageId: "package-1" },
+      maxAttempts: 3,
+    }).job;
+    let calls = 0;
+    const desk = createJobDesk({
+      database,
+      handlers: {
+        draft: async () => {
+          calls += 1;
+          throw new ClassifiedJobError("草稿质量门未通过", "deterministic");
+        },
+      },
+    });
+
+    await desk.tick();
+    await desk.tick();
+
+    const failed = database.getJob(queued.id);
+    assert.equal(calls, 1);
+    assert.equal(failed?.status, "failed");
+    assert.equal(failed?.attempts, 1);
+    assert.equal(failed?.nextAttemptAt, undefined);
+    const latestPayload = database.listWorkflowEvents(10)[0]?.payload as { failureClass?: string } | undefined;
+    assert.equal(latestPayload?.failureClass, "deterministic");
   } finally {
     database.close();
     await rm(root, { recursive: true, force: true });
