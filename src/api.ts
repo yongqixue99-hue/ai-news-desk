@@ -100,6 +100,44 @@ export interface StorageUsage {
   totalBytes: number;
 }
 
+export interface PortableArchivePreview {
+  valid: true;
+  dryRun: true;
+  imported: false;
+  credentialsExcluded: true;
+  archiveSha256: string;
+  archiveBytes: number;
+  payloadFileCount: number;
+  payloadBytes: number;
+  manifest: {
+    createdAt: string;
+    databaseSchemaVersion: number;
+    stateVersion: number;
+    secretsIncluded: false;
+  };
+  contents: {
+    sources: number;
+    runs: number;
+    drafts: number;
+    materials: number;
+    mediaFiles: number;
+    materialFiles: number;
+  };
+  relocation: {
+    counts: { relocatable: number; missing: number; blocked: number; unchanged: number };
+    entries: Array<{
+      ownerType: string;
+      ownerId: string;
+      field: string;
+      sourcePath: string;
+      archivePath?: string;
+      targetPath?: string;
+      status: "relocatable" | "missing" | "blocked" | "unchanged";
+      reason: string;
+    }>;
+  };
+}
+
 export interface RestoreResult {
   ok: true;
   restoredAt: string;
@@ -265,6 +303,21 @@ export const api = {
     const response = await fetch("/api/data/archive");
     if (!response.ok) throw new Error(`完整归档导出失败：${response.status}`);
     return response.blob();
+  },
+  inspectPortableArchive: async (file: File) => {
+    const response = await fetch("/api/data/archive/inspect", {
+      method: "POST",
+      headers: {
+        "content-type": file.type || "application/gzip",
+        "x-archive-filename": encodeURIComponent(file.name || "portable-archive.tar.gz"),
+      },
+      body: file,
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error || `完整归档预检失败：${response.status}`);
+    }
+    return response.json() as Promise<PortableArchivePreview>;
   },
   restoreData: (backup: unknown) => request<RestoreResult>("/api/data/restore", {
     method: "POST",

@@ -1074,6 +1074,23 @@ function App() {
     }
   };
 
+  const inspectPortableArchive = async (file: File) => {
+    try {
+      const preview = await api.inspectPortableArchive(file);
+      const attention = preview.relocation.counts.missing + preview.relocation.counts.blocked;
+      setNotice({
+        kind: attention ? "info" : "success",
+        message: attention
+          ? `完整归档预检完成：发现 ${attention} 个缺失或需重新绑定的路径；尚未导入任何数据。`
+          : "完整归档预检通过：文件与路径方案可用；尚未导入任何数据。",
+      });
+      return preview;
+    } catch (error) {
+      reportError(error);
+      throw error;
+    }
+  };
+
   const restoreData = async (file: File) => {
     try {
       const backup = JSON.parse(await file.text()) as unknown;
@@ -1374,6 +1391,7 @@ function App() {
           onLoadStorageUsage={loadStorageUsage}
           onExportData={exportData}
           onExportPortableArchive={exportPortableArchive}
+          onInspectPortableArchive={inspectPortableArchive}
           onRestoreData={restoreData}
           onSaveWeChatSettings={saveWeChatSettings}
           onTestWeChatConnection={testWeChatConnection}

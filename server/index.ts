@@ -40,6 +40,8 @@ import {
   storageUsageFor,
   verifyWorkflowBackup,
 } from "./data-management.js";
+import { PortableArchiveInspectionError } from "./portable-archive-inspector.js";
+import { PortableArchiveUploadError, previewPortableArchiveUpload } from "./portable-archive-upload.js";
 import { evaluateDraftReadiness } from "./draft-readiness.js";
 import { assertDraftTransition } from "./draft-lifecycle.js";
 import {
@@ -182,7 +184,7 @@ app.use((request, response, next) => {
   // A complete state backup can grow beyond normal command payloads. Keep the
   // larger allowance isolated to the restore endpoint instead of raising the
   // body limit for every API call.
-  if (request.path === "/api/data/restore") next();
+  if (request.path === "/api/data/restore" || request.path === "/api/data/archive/inspect") next();
   else defaultJsonBody(request, response, next);
 });
 app.use("/media", express.static(workflowMediaRoot, { fallthrough: false }));
@@ -896,6 +898,27 @@ app.get(
     });
     response.setHeader("content-disposition", `attachment; filename=${archive.fileName}`);
     response.sendFile(archive.archivePath);
+  }),
+);
+
+app.post(
+  "/api/data/archive/inspect",
+  asyncRoute(async (request, response) => {
+    const contentType = request.get("content-type")?.split(";", 1)[0]?.trim().toLocaleLowerCase("en-US");
+    if (!contentType || !["application/gzip", "application/x-gzip", "application/octet-stream"].includes(contentType)) {
+      response.status(415).json({ error: "请选择 .tar.gz 格式的完整归档进行预检" });
+      return;
+    }
+    try {
+      response.json(await previewPortableArchiveUpload(request, { windowsWorkflowRoot: workflowRoot }));
+    } catch (error) {
+      if (error instanceof PortableArchiveUploadError || error instanceof PortableArchiveInspectionError) {
+        const tooLarge = error.code === "upload-too-large" || error.code === "archive-too-large";
+        response.status(tooLarge ? 413 : 400).json({ error: error.message, code: error.code });
+        return;
+      }
+      throw error;
+    }
   }),
 );
 

@@ -8,6 +8,8 @@ import type {
   PublisherReceipt,
 } from "./publisher-preflight.js";
 
+export const WORKFLOW_STATE_VERSION = 14 as const;
+
 export type RunStatus =
   | "queued"
   | "collecting"
@@ -1039,7 +1041,7 @@ export interface WorkflowNotification {
 }
 
 export interface WorkflowState {
-  version: 14;
+  version: typeof WORKFLOW_STATE_VERSION;
   settings: Settings;
   editorialSystem: EditorialSystemState;
   aiSettings: AiSettings;

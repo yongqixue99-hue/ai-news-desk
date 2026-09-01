@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { WORKFLOW_STATE_VERSION } from "./types.js";
 import type {
   AiProviderConfig,
   AiSettings,
@@ -1811,7 +1812,7 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
 };
 
 export const createDefaultState = (): WorkflowState => ({
-  version: 14,
+  version: WORKFLOW_STATE_VERSION,
   settings: { ...defaultSettings, wechat: { ...defaultSettings.wechat } },
   editorialSystem: { profile: defaultEditorialProfile(), suggestionDecisions: [] },
   aiSettings: defaultAiSettings(),

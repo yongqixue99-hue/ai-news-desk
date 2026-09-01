@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, Check, CheckCircle2, ChevronDown, CircleUserRound, Clock3, Copy, Cpu, Download, HardDrive, History, KeyRound, LoaderCircle, MessageSquareText, PanelsTopLeft, RadioTower, Save, ShieldCheck, Trash2, Upload } from "lucide-react";
-import type { StorageUsage } from "../api";
+import type { PortableArchivePreview, StorageUsage } from "../api";
 import type { HealthState, Settings, WeChatChannelSettings, WeChatConnectionResult, WorkflowRun } from "../types";
 
 interface SchedulePageProps {
@@ -14,6 +14,7 @@ interface SchedulePageProps {
   onLoadStorageUsage: () => Promise<StorageUsage>;
   onExportData: () => Promise<void>;
   onExportPortableArchive: () => Promise<void>;
+  onInspectPortableArchive: (file: File) => Promise<PortableArchivePreview>;
   onRestoreData: (file: File) => Promise<void>;
   onSaveWeChatSettings: (
     patch: Partial<WeChatChannelSettings> & { appSecret?: string; clearAppSecret?: boolean },
@@ -56,11 +57,12 @@ const formatBytes = (bytes = 0) => {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 };
 
-export function SchedulePage({ settings, runs, health, onSettings, onRefreshHealth, onLaunchPublisher, onOpenRuns, onLoadStorageUsage, onExportData, onExportPortableArchive, onRestoreData, onSaveWeChatSettings, onTestWeChatConnection }: SchedulePageProps) {
+export function SchedulePage({ settings, runs, health, onSettings, onRefreshHealth, onLaunchPublisher, onOpenRuns, onLoadStorageUsage, onExportData, onExportPortableArchive, onInspectPortableArchive, onRestoreData, onSaveWeChatSettings, onTestWeChatConnection }: SchedulePageProps) {
   const latestScheduledRun = runs.find((run) => run.scheduled);
   const [pathCopied, setPathCopied] = useState(false);
   const [storage, setStorage] = useState<StorageUsage>();
-  const [dataBusy, setDataBusy] = useState<"export" | "portable" | "restore">();
+  const [dataBusy, setDataBusy] = useState<"export" | "portable" | "inspect" | "restore">();
+  const [archivePreview, setArchivePreview] = useState<PortableArchivePreview>();
   const [wechatBusy, setWechatBusy] = useState<"save" | "test" | "clear">();
   const [wechatConnection, setWechatConnection] = useState<WeChatConnectionResult>();
   const [wechatForm, setWechatForm] = useState<WeChatChannelSettings & { appSecret: string }>({
@@ -72,6 +74,7 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
     appSecretHint: settings.wechat.appSecretHint,
   });
   const restoreInput = useRef<HTMLInputElement>(null);
+  const archiveInspectInput = useRef<HTMLInputElement>(null);
   const extensionMode = settings.publisherMode === "chrome-extension";
   const publisher = health?.publisher;
   useEffect(() => {
@@ -273,6 +276,7 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
         </div>
         <div className="data-management-actions">
           <button type="button" className="primary-button" disabled={Boolean(dataBusy)} onClick={() => { setDataBusy("portable"); void onExportPortableArchive().finally(() => setDataBusy(undefined)); }}>{dataBusy === "portable" ? <LoaderCircle className="spin" size={15} /> : <Archive size={15} />}导出完整归档</button>
+          <button type="button" className="secondary-button" disabled={Boolean(dataBusy)} onClick={() => archiveInspectInput.current?.click()}>{dataBusy === "inspect" ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}预检完整归档</button>
           <button type="button" className="secondary-button" disabled={Boolean(dataBusy)} onClick={() => { setDataBusy("export"); void onExportData().finally(() => setDataBusy(undefined)); }}>{dataBusy === "export" ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}导出轻量 JSON</button>
           <button type="button" className="secondary-button" disabled={Boolean(dataBusy)} onClick={() => restoreInput.current?.click()}>{dataBusy === "restore" ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />}恢复备份</button>
           <input ref={restoreInput} hidden type="file" accept="application/json,.json" onChange={(event) => {
@@ -282,7 +286,45 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
             setDataBusy("restore");
             void onRestoreData(file).then(() => onLoadStorageUsage().then(setStorage)).finally(() => setDataBusy(undefined));
           }} />
+          <input ref={archiveInspectInput} hidden type="file" accept="application/gzip,application/x-gzip,.tar.gz" onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.currentTarget.value = "";
+            if (!file) return;
+            setArchivePreview(undefined);
+            setDataBusy("inspect");
+            void onInspectPortableArchive(file).then(setArchivePreview).finally(() => setDataBusy(undefined));
+          }} />
         </div>
+        <p className="archive-preview-boundary"><ShieldCheck size={14} /><strong>只读预检 · 尚未导入</strong><span>只校验归档、统计内容并列出 Mac→Windows 路径处理方案，不覆盖当前数据。</span></p>
+        {archivePreview ? (
+          <div className="archive-preview-card" aria-live="polite">
+            <div className="archive-preview-heading">
+              <span><CheckCircle2 size={17} /><strong>归档校验通过</strong></span>
+              <small>{new Date(archivePreview.manifest.createdAt).toLocaleString("zh-CN")} · {formatBytes(archivePreview.archiveBytes)}</small>
+            </div>
+            <div className="archive-preview-counts">
+              <div><small>来源 / 运行</small><strong>{archivePreview.contents.sources} / {archivePreview.contents.runs}</strong></div>
+              <div><small>草稿 / 素材</small><strong>{archivePreview.contents.drafts} / {archivePreview.contents.materials}</strong></div>
+              <div><small>媒体 / 素材文件</small><strong>{archivePreview.contents.mediaFiles} / {archivePreview.contents.materialFiles}</strong></div>
+              <div><small>可自动改写路径</small><strong>{archivePreview.relocation.counts.relocatable}</strong></div>
+              <div className={archivePreview.relocation.counts.missing ? "warning" : ""}><small>归档缺失</small><strong>{archivePreview.relocation.counts.missing}</strong></div>
+              <div className={archivePreview.relocation.counts.blocked ? "warning" : ""}><small>需人工重新绑定</small><strong>{archivePreview.relocation.counts.blocked}</strong></div>
+            </div>
+            {archivePreview.relocation.entries.some((entry) => entry.status === "missing" || entry.status === "blocked") ? (
+              <div className="archive-preview-issues">
+                <strong>导入前需要处理</strong>
+                {archivePreview.relocation.entries.filter((entry) => entry.status === "missing" || entry.status === "blocked").slice(0, 8).map((entry) => (
+                  <div key={`${entry.ownerType}-${entry.ownerId}-${entry.field}`}>
+                    <span className={`archive-path-status ${entry.status}`}>{entry.status === "missing" ? "缺文件" : "需重绑"}</span>
+                    <code title={entry.sourcePath}>{entry.sourcePath}</code>
+                    <small>{entry.reason}</small>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="archive-preview-ready"><Check size={14} />没有发现缺失文件或无法迁移的本机路径。</p>}
+            <p className="archive-preview-footer">SHA-256：<code>{archivePreview.archiveSha256}</code> · 密钥未包含 · 本轮没有写入任何数据</p>
+          </div>
+        ) : null}
         <p className="data-safety-note"><ShieldCheck size={14} />恢复前会校验 SHA-256 并创建额外检查点；完整归档的 manifest 可逐文件核验，且始终排除钥匙串凭据。</p>
       </section>
     </div>
