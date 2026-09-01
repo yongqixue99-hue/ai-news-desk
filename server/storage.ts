@@ -78,6 +78,31 @@ export const replaceState = async (nextState: WorkflowState): Promise<WorkflowSt
   return operation;
 };
 
+/**
+ * Serialize an exclusive whole-workspace operation behind ordinary state
+ * mutations. The supplied replacement keeps the in-memory cache aligned with
+ * each database apply or rollback performed by the operation.
+ */
+export const runStorageExclusive = async <T>(
+  action: (context: {
+    database: LocalDatabase;
+    replaceDatabaseSnapshot: (snapshotPath: string) => void;
+  }) => Promise<T>,
+): Promise<T> => {
+  const operation = queue.then(async () => {
+    const database = await localDatabase();
+    return action({
+      database,
+      replaceDatabaseSnapshot: (snapshotPath) => {
+        database.replaceFromSnapshot(snapshotPath);
+        stateCache = upgradeState(database.readState<WorkflowState>());
+      },
+    });
+  });
+  queue = operation.catch(() => undefined);
+  return operation;
+};
+
 export const getLocalDatabase = localDatabase;
 
 export const workspacePath = (...parts: string[]) => path.join(workspaceRoot, ...parts);

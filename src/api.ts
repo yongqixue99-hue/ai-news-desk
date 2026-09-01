@@ -107,6 +107,8 @@ export interface PortableArchivePreview {
   credentialsExcluded: true;
   archiveSha256: string;
   archiveBytes: number;
+  confirmationToken: string;
+  confirmationExpiresAt: string;
   payloadFileCount: number;
   payloadBytes: number;
   manifest: {
@@ -136,6 +138,17 @@ export interface PortableArchivePreview {
       reason: string;
     }>;
   };
+}
+
+export interface PortableArchiveImportResult {
+  ok: true;
+  imported: boolean;
+  reused: boolean;
+  archiveSha256: string;
+  checkpointFileName?: string;
+  contents: PortableArchivePreview["contents"];
+  relocation: PortableArchivePreview["relocation"];
+  warnings: string[];
 }
 
 export interface RestoreResult {
@@ -318,6 +331,22 @@ export const api = {
       throw new Error(payload.error || `完整归档预检失败：${response.status}`);
     }
     return response.json() as Promise<PortableArchivePreview>;
+  },
+  importPortableArchive: async (file: File, confirmationToken: string) => {
+    const response = await fetch("/api/data/archive/import", {
+      method: "POST",
+      headers: {
+        "content-type": file.type || "application/gzip",
+        "x-archive-filename": encodeURIComponent(file.name || "portable-archive.tar.gz"),
+        "x-archive-confirmation": confirmationToken,
+      },
+      body: file,
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error || `完整归档导入失败：${response.status}`);
+    }
+    return response.json() as Promise<PortableArchiveImportResult>;
   },
   restoreData: (backup: unknown) => request<RestoreResult>("/api/data/restore", {
     method: "POST",

@@ -137,3 +137,29 @@ test("JobDesk reports polling failures instead of leaking an unhandled rejection
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("JobDesk does not claim queued work while workspace maintenance is active", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-job-desk-maintenance-"));
+  const database = await LocalDatabase.open({
+    workflowRoot: root,
+    initialState: () => ({ version: 11 }),
+  });
+  try {
+    const queued = database.enqueueJob({ type: "noop", idempotencyKey: "maintenance", payload: {} }).job;
+    let maintenanceActive = true;
+    const desk = createJobDesk({
+      database,
+      canClaim: () => !maintenanceActive,
+      handlers: { noop: async () => ({ ok: true }) },
+    });
+
+    await desk.tick();
+    assert.equal(database.getJob(queued.id)?.status, "queued");
+    maintenanceActive = false;
+    await desk.tick();
+    assert.equal(database.getJob(queued.id)?.status, "complete");
+  } finally {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

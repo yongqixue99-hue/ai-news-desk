@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, Check, CheckCircle2, ChevronDown, CircleUserRound, Clock3, Copy, Cpu, Download, HardDrive, History, KeyRound, LoaderCircle, MessageSquareText, PanelsTopLeft, RadioTower, Save, ShieldCheck, Trash2, Upload } from "lucide-react";
-import type { PortableArchivePreview, StorageUsage } from "../api";
+import type { PortableArchiveImportResult, PortableArchivePreview, StorageUsage } from "../api";
 import type { HealthState, Settings, WeChatChannelSettings, WeChatConnectionResult, WorkflowRun } from "../types";
 
 interface SchedulePageProps {
@@ -15,6 +15,7 @@ interface SchedulePageProps {
   onExportData: () => Promise<void>;
   onExportPortableArchive: () => Promise<void>;
   onInspectPortableArchive: (file: File) => Promise<PortableArchivePreview>;
+  onImportPortableArchive: (file: File, confirmationToken: string) => Promise<PortableArchiveImportResult>;
   onRestoreData: (file: File) => Promise<void>;
   onSaveWeChatSettings: (
     patch: Partial<WeChatChannelSettings> & { appSecret?: string; clearAppSecret?: boolean },
@@ -57,12 +58,13 @@ const formatBytes = (bytes = 0) => {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 };
 
-export function SchedulePage({ settings, runs, health, onSettings, onRefreshHealth, onLaunchPublisher, onOpenRuns, onLoadStorageUsage, onExportData, onExportPortableArchive, onInspectPortableArchive, onRestoreData, onSaveWeChatSettings, onTestWeChatConnection }: SchedulePageProps) {
+export function SchedulePage({ settings, runs, health, onSettings, onRefreshHealth, onLaunchPublisher, onOpenRuns, onLoadStorageUsage, onExportData, onExportPortableArchive, onInspectPortableArchive, onImportPortableArchive, onRestoreData, onSaveWeChatSettings, onTestWeChatConnection }: SchedulePageProps) {
   const latestScheduledRun = runs.find((run) => run.scheduled);
   const [pathCopied, setPathCopied] = useState(false);
   const [storage, setStorage] = useState<StorageUsage>();
-  const [dataBusy, setDataBusy] = useState<"export" | "portable" | "inspect" | "restore">();
+  const [dataBusy, setDataBusy] = useState<"export" | "portable" | "inspect" | "import" | "restore">();
   const [archivePreview, setArchivePreview] = useState<PortableArchivePreview>();
+  const [archiveFile, setArchiveFile] = useState<File>();
   const [wechatBusy, setWechatBusy] = useState<"save" | "test" | "clear">();
   const [wechatConnection, setWechatConnection] = useState<WeChatConnectionResult>();
   const [wechatForm, setWechatForm] = useState<WeChatChannelSettings & { appSecret: string }>({
@@ -291,8 +293,12 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
             event.currentTarget.value = "";
             if (!file) return;
             setArchivePreview(undefined);
+            setArchiveFile(undefined);
             setDataBusy("inspect");
-            void onInspectPortableArchive(file).then(setArchivePreview).finally(() => setDataBusy(undefined));
+            void onInspectPortableArchive(file)
+              .then((preview) => { setArchiveFile(file); setArchivePreview(preview); })
+              .catch(() => setArchiveFile(undefined))
+              .finally(() => setDataBusy(undefined));
           }} />
         </div>
         <p className="archive-preview-boundary"><ShieldCheck size={14} /><strong>只读预检 · 尚未导入</strong><span>只校验归档、统计内容并列出 Mac→Windows 路径处理方案，不覆盖当前数据。</span></p>
@@ -322,7 +328,35 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
                 ))}
               </div>
             ) : <p className="archive-preview-ready"><Check size={14} />没有发现缺失文件或无法迁移的本机路径。</p>}
-            <p className="archive-preview-footer">SHA-256：<code>{archivePreview.archiveSha256}</code> · 密钥未包含 · 本轮没有写入任何数据</p>
+            <div className="archive-import-confirmation">
+              <div>
+                <strong>确认后将整体替换当前工作台</strong>
+                <small>系统会先保留本机完整检查点；数据库、草稿图片和素材库全部验证成功后才提交，失败自动回滚。密钥不会被覆盖。</small>
+              </div>
+              <button
+                type="button"
+                className="secondary-button danger-button"
+                disabled={Boolean(dataBusy) || !archiveFile}
+                onClick={() => {
+                  if (!archiveFile) return;
+                  const attention = archivePreview.relocation.counts.missing + archivePreview.relocation.counts.blocked;
+                  const warning = attention ? `\n\n注意：仍有 ${attention} 个路径需要导入后人工重新绑定。` : "";
+                  if (!window.confirm(`这会用刚刚预检的归档覆盖当前工作台数据。系统会先创建可恢复检查点。${warning}\n\n确定执行吗？`)) return;
+                  setDataBusy("import");
+                  void onImportPortableArchive(archiveFile, archivePreview.confirmationToken)
+                    .then(() => {
+                      setArchivePreview(undefined);
+                      setArchiveFile(undefined);
+                      return onLoadStorageUsage().then(setStorage);
+                    })
+                    .finally(() => setDataBusy(undefined));
+                }}
+              >
+                {dataBusy === "import" ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />}
+                确认覆盖并导入
+              </button>
+            </div>
+            <p className="archive-preview-footer">SHA-256：<code>{archivePreview.archiveSha256}</code> · 确认有效至 {new Date(archivePreview.confirmationExpiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · 当前仍未写入数据</p>
           </div>
         ) : null}
         <p className="data-safety-note"><ShieldCheck size={14} />恢复前会校验 SHA-256 并创建额外检查点；完整归档的 manifest 可逐文件核验，且始终排除钥匙串凭据。</p>

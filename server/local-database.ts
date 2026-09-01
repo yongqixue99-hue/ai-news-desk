@@ -954,6 +954,12 @@ export class LocalDatabase {
     }));
   }
 
+  hasWorkflowEvent(type: string, subjectId: string): boolean {
+    return Boolean(this.db.prepare(`
+      SELECT 1 FROM workflow_events WHERE type = ? AND subject_id = ? LIMIT 1
+    `).get(type, subjectId));
+  }
+
   pruneOperationalHistory(input: {
     terminalJobsOlderThan: string;
     workflowEventsOlderThan: string;
@@ -999,6 +1005,45 @@ export class LocalDatabase {
   /** Create a transactionally consistent, WAL-independent SQLite snapshot. */
   createSnapshot(destinationPath: string) {
     this.db.prepare("VACUUM INTO ?").run(destinationPath);
+  }
+
+  /**
+   * Replace all application-owned tables from a separately verified snapshot.
+   * ATTACH keeps the live connection valid while SQLite provides the rollback
+   * boundary for readers, jobs, events and state fragments together.
+   */
+  replaceFromSnapshot(snapshotPath: string) {
+    const tables = [
+      ["metadata", "key, value"],
+      ["app_state", "id, state_json, checksum, updated_at"],
+      ["state_fragments", "key, value_json, checksum, updated_at"],
+      ["workflow_jobs", "id, type, idempotency_key, status, payload_json, result_json, progress, stage, heartbeat_at, attempts, max_attempts, created_at, updated_at, next_attempt_at, lease_owner, lease_expires_at, error"],
+      ["feedback_events", "id, type, subject_type, subject_id, reason, payload_json, created_at"],
+      ["workflow_events", "id, type, subject_type, subject_id, payload_json, created_at"],
+      ["content_packages", "id, story_id, mode, package_json, content_hash, created_at, updated_at"],
+      ["discussion_samples", "id, story_id, platform, author, permalink, branch_id, published_at, sample_json, content_hash, captured_at"],
+      ["source_snapshots", "url_key, requested_url, canonical_url, page_json, content_hash, captured_at"],
+      ["editorial_memories", "id, kind, label, evidence_count, enabled, first_seen_at, last_seen_at, evidence_json"],
+    ] as const;
+    this.db.prepare("ATTACH DATABASE ? AS portable_import").run(snapshotPath);
+    try {
+      const importedCheck = this.db.prepare("PRAGMA portable_import.quick_check").get() as { quick_check?: string } | undefined;
+      if (importedCheck?.quick_check !== "ok") throw new Error("待导入数据库完整性检查失败");
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const [table, columns] of tables) {
+          this.db.exec(`DELETE FROM main.${table}`);
+          this.db.exec(`INSERT INTO main.${table}(${columns}) SELECT ${columns} FROM portable_import.${table}`);
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    } finally {
+      this.db.exec("DETACH DATABASE portable_import");
+    }
+    this.assertIntegrity();
   }
 
   close() {

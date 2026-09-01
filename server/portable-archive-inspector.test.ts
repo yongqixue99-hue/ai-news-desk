@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createDefaultState } from "./defaults.js";
 import { checksumForState, createPortableWorkflowArchive, createWorkflowBackup } from "./data-management.js";
 import { LOCAL_DATABASE_SCHEMA_VERSION, LocalDatabase } from "./local-database.js";
-import { inspectPortableArchive, PortableArchiveInspectionError } from "./portable-archive-inspector.js";
+import {
+  inspectPortableArchive,
+  PortableArchiveInspectionError,
+  withVerifiedPortableArchive,
+} from "./portable-archive-inspector.js";
 import { WORKFLOW_STATE_VERSION } from "./types.js";
 
 const tarHeader = (name: string, bytes: number, type = "0", linkName = "") => {
@@ -110,6 +114,77 @@ test("a complete portable archive can be inspected without importing it", async 
     assert.equal(report.payloadFileCount, 4);
     assert.ok(report.payloadBytes > 0);
     assert.match(report.archiveSha256, /^[a-f0-9]{64}$/u);
+  } finally {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a verified archive can be safely staged for one callback and is removed afterwards", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-archive-staging-test-"));
+  const state = createDefaultState();
+  const legacyStatePath = path.join(root, "state.json");
+  await writeFile(legacyStatePath, JSON.stringify(state), "utf8");
+  await mkdir(path.join(root, "media"));
+  await mkdir(path.join(root, "materials"));
+  await writeFile(path.join(root, "media", "story.png"), "verified-image", "utf8");
+  const database = await LocalDatabase.open({ workflowRoot: root, legacyStatePath, initialState: createDefaultState });
+  let payloadRoot = "";
+  try {
+    const archive = await createPortableWorkflowArchive({ workflowRoot: root, database, state });
+    const callbackResult = await withVerifiedPortableArchive(archive.archivePath, {}, async (verified) => {
+      payloadRoot = verified.payloadRoot;
+      assert.equal(await readFile(path.join(verified.payloadRoot, "media", "story.png"), "utf8"), "verified-image");
+      assert.ok((await stat(path.join(verified.payloadRoot, "newsdesk.db"))).isFile());
+      return verified.report.archiveSha256;
+    });
+    assert.match(callbackResult, /^[a-f0-9]{64}$/u);
+    await assert.rejects(stat(payloadRoot), { code: "ENOENT" });
+  } finally {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("archive inspection rejects a state backup that no longer matches the SQLite state", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-archive-state-mismatch-"));
+  const legacyStatePath = path.join(root, "state.json");
+  const originalState = createDefaultState();
+  await writeFile(legacyStatePath, JSON.stringify(originalState), "utf8");
+  const database = await LocalDatabase.open({ workflowRoot: root, legacyStatePath, initialState: createDefaultState });
+  const staging = path.join(root, "altered");
+  const alteredArchivePath = path.join(root, "altered.tar.gz");
+  try {
+    const archive = await createPortableWorkflowArchive({
+      workflowRoot: root,
+      database,
+      state: originalState,
+      createdAt: "2026-08-30T12:00:00.000Z",
+    });
+    await mkdir(staging);
+    execFileSync("tar", ["-xzf", archive.archivePath, "-C", staging]);
+    const changedState = structuredClone(originalState);
+    changedState.settings.windowHours = originalState.settings.windowHours + 1;
+    const changedBackup = createWorkflowBackup(changedState, "2026-08-30T12:00:00.000Z");
+    const statePayload = `${JSON.stringify(changedBackup, null, 2)}\n`;
+    await writeFile(path.join(staging, "state-backup.json"), statePayload, "utf8");
+    const manifestPath = path.join(staging, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      stateChecksum: string;
+      files: Array<{ path: string; bytes: number; sha256: string }>;
+    };
+    manifest.stateChecksum = changedBackup.checksum;
+    const stateEntry = manifest.files.find((file) => file.path === "state-backup.json");
+    assert.ok(stateEntry);
+    stateEntry.bytes = Buffer.byteLength(statePayload);
+    stateEntry.sha256 = sha256(statePayload);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    execFileSync("tar", ["-czf", alteredArchivePath, "-C", staging, "."]);
+
+    await assert.rejects(
+      inspectPortableArchive(alteredArchivePath),
+      (error) => error instanceof PortableArchiveInspectionError && error.code === "archive-integrity-failed",
+    );
   } finally {
     database.close();
     await rm(root, { recursive: true, force: true });

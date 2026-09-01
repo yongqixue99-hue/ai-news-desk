@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdtemp, open, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, open, rm, stat, type FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { createGunzip } from "node:zlib";
 import { LOCAL_DATABASE_SCHEMA_VERSION } from "./local-database.js";
 import { verifyWorkflowBackup, type PortableBackupManifest } from "./data-management.js";
@@ -56,6 +57,11 @@ export interface PortableArchiveSnapshotInspection {
   report: PortableArchiveInspectionReport;
   /** Verified state for server-side dry-run planning. Never serialize this object directly. */
   state: WorkflowState;
+}
+
+export interface VerifiedPortableArchive extends PortableArchiveSnapshotInspection {
+  /** Ephemeral, verified extraction root. It only exists for the callback lifetime. */
+  payloadRoot: string;
 }
 
 interface TarFileRecord {
@@ -288,7 +294,7 @@ const parseManifest = (buffer: Buffer): PortableBackupManifest => {
 const readTarFiles = async (
   archivePath: string,
   options: PortableArchiveInspectionOptions,
-  databaseStagingPath: string,
+  payloadRoot: string,
 ) => {
   const gunzip = createGunzip();
   const source = createReadStream(archivePath);
@@ -349,16 +355,30 @@ const readTarFiles = async (
     if (shouldBuffer && size > bufferLimit) {
       throw new PortableArchiveInspectionError("archive-malformed", "完整归档的元数据文件异常过大");
     }
+    let extractedFile: FileHandle | undefined;
+    if (regularEntryPath) {
+      registerWindowsPath(windowsPaths, regularEntryPath, "file");
+      if (regularEntryPath !== "manifest.json" && !allowedPayloadPath(regularEntryPath)) {
+        throw new PortableArchiveInspectionError("forbidden-entry", `完整归档包含不允许导入的文件：${regularEntryPath}`);
+      }
+      if (files.has(regularEntryPath)) {
+        throw new PortableArchiveInspectionError("archive-malformed", `完整归档包含重复文件：${regularEntryPath}`);
+      }
+      if (regularEntryPath !== "manifest.json") {
+        const extractedPath = path.join(payloadRoot, ...regularEntryPath.split("/"));
+        await mkdir(path.dirname(extractedPath), { recursive: true });
+        extractedFile = await open(extractedPath, "wx");
+      }
+    }
     const hash = createHash("sha256");
-    const databaseFile = regularEntryPath === "newsdesk.db" ? await open(databaseStagingPath, "wx") : undefined;
     try {
       await reader.consume(size, async (chunk) => {
         hash.update(chunk);
         if (shouldBuffer) chunks.push(Buffer.from(chunk));
-        if (databaseFile) await databaseFile.write(chunk);
+        if (extractedFile) await extractedFile.write(chunk);
       });
     } finally {
-      await databaseFile?.close();
+      await extractedFile?.close();
     }
     const padding = (TAR_BLOCK_BYTES - (size % TAR_BLOCK_BYTES)) % TAR_BLOCK_BYTES;
     if (padding) await reader.consume(padding);
@@ -390,13 +410,6 @@ const readTarFiles = async (
       throw new PortableArchiveInspectionError("archive-malformed", `完整归档包含不支持的 tar 条目类型：${typeFlag || "unknown"}`);
     }
     const entryPath = regularEntryPath ?? safeTarPath(rawPath);
-    registerWindowsPath(windowsPaths, entryPath, "file");
-    if (entryPath !== "manifest.json" && !allowedPayloadPath(entryPath)) {
-      throw new PortableArchiveInspectionError("forbidden-entry", `完整归档包含不允许导入的文件：${entryPath}`);
-    }
-    if (files.has(entryPath)) {
-      throw new PortableArchiveInspectionError("archive-malformed", `完整归档包含重复文件：${entryPath}`);
-    }
     files.set(entryPath, { path: entryPath, bytes: size, sha256: hash.digest("hex") });
     if (entryPath === "manifest.json") manifestBuffer = buffered;
     if (entryPath === "state-backup.json") stateBackupBuffer = buffered;
@@ -404,7 +417,7 @@ const readTarFiles = async (
   return { files, manifestBuffer, stateBackupBuffer, archiveSha256: archiveHash.digest("hex"), archiveBytes };
 };
 
-const databaseSchemaVersionFor = (databasePath: string) => {
+const databaseSnapshotFor = (databasePath: string) => {
   let database: DatabaseSync | undefined;
   try {
     database = new DatabaseSync(databasePath, { readOnly: true });
@@ -413,7 +426,20 @@ const databaseSchemaVersionFor = (databasePath: string) => {
     if (!Number.isInteger(version) || version < 1) {
       throw new Error("missing schema version");
     }
-    return version;
+    const rows = database.prepare("SELECT key, value_json, checksum FROM state_fragments ORDER BY key").all() as unknown as Array<{
+      key: string;
+      value_json: string;
+      checksum: string;
+    }>;
+    if (rows.length === 0) throw new Error("missing state fragments");
+    const state: Record<string, unknown> = {};
+    for (const row of rows) {
+      if (createHash("sha256").update(row.value_json).digest("hex") !== row.checksum) {
+        throw new Error(`invalid state fragment: ${row.key}`);
+      }
+      state[row.key] = JSON.parse(row.value_json) as unknown;
+    }
+    return { version, state };
   } catch (error) {
     throw new PortableArchiveInspectionError("archive-integrity-failed", "完整归档内的 SQLite 数据库无法只读校验", { cause: error });
   } finally {
@@ -421,22 +447,20 @@ const databaseSchemaVersionFor = (databasePath: string) => {
   }
 };
 
-export const inspectPortableArchiveSnapshot = async (
+const verifyPortableArchiveIn = async (
   archivePath: string,
-  options: PortableArchiveInspectionOptions = {},
-): Promise<PortableArchiveSnapshotInspection> => {
+  options: PortableArchiveInspectionOptions,
+  stagingRoot: string,
+): Promise<VerifiedPortableArchive> => {
   try {
     if (!(await stat(archivePath)).isFile()) throw new Error("not a file");
   } catch (error) {
     throw new PortableArchiveInspectionError("archive-unreadable", "无法读取指定的完整归档文件", { cause: error });
   }
 
-  const stagingRoot = await mkdtemp(path.join(os.tmpdir(), "ai-news-archive-inspection-"));
-  const databaseStagingPath = path.join(stagingRoot, "newsdesk.db");
-  try {
     let parsed;
     try {
-      parsed = await readTarFiles(archivePath, options, databaseStagingPath);
+      parsed = await readTarFiles(archivePath, options, stagingRoot);
     } catch (error) {
       if (error instanceof PortableArchiveInspectionError) throw error;
       throw new PortableArchiveInspectionError("archive-malformed", "完整归档不是有效的 gzip/tar 文件", { cause: error });
@@ -493,12 +517,16 @@ export const inspectPortableArchiveSnapshot = async (
       || stateBackup.exportedAt !== manifest.createdAt) {
       throw new PortableArchiveInspectionError("archive-integrity-failed", "完整归档的状态快照与 manifest 不一致");
     }
-    const databaseSchemaVersion = databaseSchemaVersionFor(databaseStagingPath);
+    const databaseSnapshot = databaseSnapshotFor(path.join(stagingRoot, "newsdesk.db"));
+    const databaseSchemaVersion = databaseSnapshot.version;
     if (databaseSchemaVersion > LOCAL_DATABASE_SCHEMA_VERSION) {
       throw new PortableArchiveInspectionError("archive-incompatible", "完整归档内的真实 SQLite 版本高于当前工作台支持范围");
     }
     if (databaseSchemaVersion !== manifest.databaseSchemaVersion) {
       throw new PortableArchiveInspectionError("archive-integrity-failed", "完整归档内的 SQLite 版本与 manifest 不一致");
+    }
+    if (!isDeepStrictEqual(databaseSnapshot.state, stateBackup.state)) {
+      throw new PortableArchiveInspectionError("archive-integrity-failed", "完整归档内的 SQLite 状态与状态快照不一致");
     }
 
     return {
@@ -511,11 +539,31 @@ export const inspectPortableArchiveSnapshot = async (
         manifest,
       },
       state: stateBackup.state,
+      payloadRoot: stagingRoot,
     };
+};
+
+export const withVerifiedPortableArchive = async <T>(
+  archivePath: string,
+  options: PortableArchiveInspectionOptions,
+  action: (archive: VerifiedPortableArchive) => Promise<T> | T,
+): Promise<T> => {
+  const stagingRoot = await mkdtemp(path.join(os.tmpdir(), "ai-news-archive-inspection-"));
+  try {
+    return await action(await verifyPortableArchiveIn(archivePath, options, stagingRoot));
   } finally {
     await rm(stagingRoot, { recursive: true, force: true });
   }
 };
+
+export const inspectPortableArchiveSnapshot = async (
+  archivePath: string,
+  options: PortableArchiveInspectionOptions = {},
+): Promise<PortableArchiveSnapshotInspection> => withVerifiedPortableArchive(
+  archivePath,
+  options,
+  ({ report, state }) => ({ report, state }),
+);
 
 export const inspectPortableArchive = async (
   archivePath: string,

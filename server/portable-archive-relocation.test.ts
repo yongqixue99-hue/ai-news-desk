@@ -3,7 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import { createDefaultState } from "./defaults.js";
 import type { PortableBackupManifest } from "./data-management.js";
-import { createPortableArchiveRelocationPlan } from "./portable-archive-relocation.js";
+import { createPortableArchiveRelocationPlan, rebasePortableArchiveState } from "./portable-archive-relocation.js";
 import type { SourceImage, WorkflowState } from "./types.js";
 
 const manifestWith = (...paths: string[]): PortableBackupManifest => ({
@@ -157,4 +157,28 @@ test("portable archive preview inventories every persisted path-bearing workflow
   ]) assert.ok(keys.has(expected), `missing ${expected}`);
   assert.equal(plan.entries.find((entry) => entry.ownerType === "skill")?.status, "blocked");
   assert.equal(plan.entries.find((entry) => entry.ownerType === "publisher-receipt")?.status, "blocked");
+});
+
+test("portable archive rebasing returns a migrated copy and leaves the verified snapshot unchanged", () => {
+  const state = createDefaultState();
+  state.aiSettings.skills = [];
+  state.materials = [{
+    id: "material_openai", title: "OpenAI", fileName: "openai.png",
+    localPath: "/Users/editor/desk/.workflow/materials/openai.png",
+    publicPath: "/materials/openai.png", attribution: "OpenAI", tags: [], rights: "official",
+    allowedPlatforms: [], entityTags: ["OpenAI"], fingerprint: "openai", createdAt: "2026-09-01T00:00:00.000Z",
+    evidencePath: "/Users/editor/licenses/openai.pdf",
+  }];
+
+  const result = rebasePortableArchiveState(
+    state,
+    manifestWith("newsdesk.db", "state-backup.json", "materials/openai.png"),
+    "E:\\desk\\.workflow",
+  );
+
+  assert.notEqual(result.state, state);
+  assert.equal(state.materials[0]?.localPath, "/Users/editor/desk/.workflow/materials/openai.png");
+  assert.equal(result.state.materials[0]?.localPath, "E:\\desk\\.workflow\\materials\\openai.png");
+  assert.equal(result.state.materials[0]?.evidencePath, "/Users/editor/licenses/openai.pdf");
+  assert.deepEqual(result.plan.counts, { relocatable: 1, missing: 0, blocked: 1, unchanged: 0 });
 });

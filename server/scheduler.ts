@@ -1,8 +1,10 @@
 import { createCollectionRun } from "./horizon.js";
+import { isPortableArchiveImportActive } from "./portable-archive-importer.js";
 import { localScheduleClock, scheduleIsDue } from "./run-policy.js";
 import { readState } from "./storage.js";
 
 export const runSchedulerCheck = async () => {
+  if (isPortableArchiveImportActive()) return;
   const state = await readState();
   if (!scheduleIsDue(state.settings)) return;
   const clock = localScheduleClock();

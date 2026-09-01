@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createDefaultState } from "../../server/defaults.js";
 import { SchedulePage } from "./SchedulePage.js";
 
-test("data migration offers a clearly read-only full-archive preview without an import action", () => {
+test("data migration keeps full-archive import hidden until a read-only preview succeeds", () => {
   const state = createDefaultState();
   const markup = renderToStaticMarkup(createElement(SchedulePage, {
     settings: state.settings,
@@ -18,6 +18,7 @@ test("data migration offers a clearly read-only full-archive preview without an 
     onExportData: async () => undefined,
     onExportPortableArchive: async () => undefined,
     onInspectPortableArchive: async () => ({}) as never,
+    onImportPortableArchive: async () => ({}) as never,
     onRestoreData: async () => undefined,
     onSaveWeChatSettings: async () => state.settings.wechat,
     onTestWeChatConnection: async () => ({ ok: false, status: "error" as const, checkedAt: "2026-09-01T00:00:00.000Z", detail: "not configured" }),
@@ -26,5 +27,5 @@ test("data migration offers a clearly read-only full-archive preview without an 
   assert.match(markup, /预检完整归档/u);
   assert.match(markup, /只读预检/u);
   assert.match(markup, /尚未导入/u);
-  assert.doesNotMatch(markup, /立即导入|执行导入/u);
+  assert.doesNotMatch(markup, /确认覆盖并导入/u);
 });

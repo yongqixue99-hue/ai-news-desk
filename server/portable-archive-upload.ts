@@ -27,10 +27,11 @@ export interface PortableArchiveUploadOptions {
   temporaryParentDirectory?: string;
 }
 
-export const previewPortableArchiveUpload = async (
+export const withPortableArchiveUpload = async <T>(
   stream: Readable,
   options: PortableArchiveUploadOptions,
-): Promise<PortableArchivePreviewReport> => {
+  action: (archivePath: string) => Promise<T>,
+): Promise<T> => {
   const maximum = options.maxCompressedBytes ?? DEFAULT_MAX_COMPRESSED_BYTES;
   const temporaryRoot = await mkdtemp(path.join(options.temporaryParentDirectory ?? os.tmpdir(), "ai-news-archive-upload-"));
   const temporaryArchivePath = path.join(temporaryRoot, "archive.tar.gz");
@@ -54,8 +55,17 @@ export const previewPortableArchiveUpload = async (
       throw new PortableArchiveUploadError("upload-failed", "完整归档上传未完成", { cause: error });
     }
     if (bytes === 0) throw new PortableArchiveUploadError("upload-empty", "没有收到完整归档文件内容");
-    return await previewPortableArchive(temporaryArchivePath, options.windowsWorkflowRoot);
+    return await action(temporaryArchivePath);
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
 };
+
+export const previewPortableArchiveUpload = async (
+  stream: Readable,
+  options: PortableArchiveUploadOptions,
+): Promise<PortableArchivePreviewReport> => withPortableArchiveUpload(
+  stream,
+  options,
+  (archivePath) => previewPortableArchive(archivePath, options.windowsWorkflowRoot),
+);

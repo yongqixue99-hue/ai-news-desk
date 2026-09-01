@@ -1091,6 +1091,23 @@ function App() {
     }
   };
 
+  const importPortableArchive = async (file: File, confirmationToken: string) => {
+    try {
+      const result = await api.importPortableArchive(file, confirmationToken);
+      await refresh();
+      setNotice({
+        kind: "success",
+        message: result.reused
+          ? "这份完整归档此前已经成功导入，本次未重复覆盖。"
+          : `完整归档导入完成：${result.contents.drafts} 篇草稿、${result.contents.materials} 条素材、${result.contents.mediaFiles + result.contents.materialFiles} 个图片文件。已保留导入前检查点。`,
+      });
+      return result;
+    } catch (error) {
+      reportError(error);
+      throw error;
+    }
+  };
+
   const restoreData = async (file: File) => {
     try {
       const backup = JSON.parse(await file.text()) as unknown;
@@ -1392,6 +1409,7 @@ function App() {
           onExportData={exportData}
           onExportPortableArchive={exportPortableArchive}
           onInspectPortableArchive={inspectPortableArchive}
+          onImportPortableArchive={importPortableArchive}
           onRestoreData={restoreData}
           onSaveWeChatSettings={saveWeChatSettings}
           onTestWeChatConnection={testWeChatConnection}

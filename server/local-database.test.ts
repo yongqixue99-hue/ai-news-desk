@@ -168,3 +168,29 @@ test("operational retention keeps active work and only the newest terminal histo
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("a verified SQLite snapshot replaces every application table in one transaction", async () => {
+  await withDatabase(async (root, store) => {
+    store.recordWorkflowEvent({ type: "old.event", subjectType: "test", subjectId: "old" });
+    const importedRoot = await mkdtemp(path.join(os.tmpdir(), "ai-news-imported-db-"));
+    const imported = await LocalDatabase.open({
+      workflowRoot: importedRoot,
+      initialState: () => ({ version: 11, marker: "imported" }),
+      now: () => "2026-09-01T00:00:00.000Z",
+    });
+    const snapshotPath = path.join(root, "imported.db");
+    try {
+      imported.recordWorkflowEvent({ type: "backup.portable_imported", subjectType: "backup", subjectId: "archive-sha" });
+      imported.createSnapshot(snapshotPath);
+    } finally {
+      imported.close();
+      await rm(importedRoot, { recursive: true, force: true });
+    }
+
+    store.replaceFromSnapshot(snapshotPath);
+
+    assert.deepEqual(store.readState(), { version: 11, marker: "imported" });
+    assert.equal(store.hasWorkflowEvent("backup.portable_imported", "archive-sha"), true);
+    assert.equal(store.hasWorkflowEvent("old.event", "old"), false);
+  });
+});

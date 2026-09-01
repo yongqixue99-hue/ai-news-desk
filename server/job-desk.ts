@@ -19,6 +19,8 @@ export interface JobDeskOptions {
    * opening a Story brief) from waiting behind a long article generation.
    */
   concurrency?: number;
+  /** Prevent new leases while an exclusive workspace operation is active. */
+  canClaim?: () => boolean;
   onError?: (error: unknown) => void;
 }
 
@@ -33,6 +35,7 @@ export const createJobDesk = ({
   pollMs = 1_000,
   leaseMs = 10 * 60_000,
   concurrency = 1,
+  canClaim = () => true,
   onError = (error) => console.error("JobDesk polling failed", error),
 }: JobDeskOptions) => {
   const workerId = `worker_${process.pid}_${randomUUID().slice(0, 8)}`;
@@ -42,7 +45,7 @@ export const createJobDesk = ({
   let timer: NodeJS.Timeout | undefined;
 
   const tick = async () => {
-    if (activeJobs >= maxConcurrency || stopped) return;
+    if (activeJobs >= maxConcurrency || stopped || !canClaim()) return;
     activeJobs += 1;
     try {
       const job = database.claimNextJob({ workerId, types: Object.keys(handlers), leaseMs });

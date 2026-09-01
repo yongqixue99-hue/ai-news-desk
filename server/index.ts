@@ -35,13 +35,27 @@ import {
 } from "./horizon.js";
 import { appendDraftRevision, restoreDraftRevision, revisionsForDraft, snapshotDraft } from "./draft-revisions.js";
 import {
+  checksumForState,
   createPortableWorkflowArchive,
   createWorkflowBackup,
   storageUsageFor,
   verifyWorkflowBackup,
 } from "./data-management.js";
 import { PortableArchiveInspectionError } from "./portable-archive-inspector.js";
-import { PortableArchiveUploadError, previewPortableArchiveUpload } from "./portable-archive-upload.js";
+import {
+  PortableArchiveUploadError,
+  previewPortableArchiveUpload,
+  withPortableArchiveUpload,
+} from "./portable-archive-upload.js";
+import {
+  createPortableArchiveImportConfirmationDesk,
+  PortableArchiveImportConfirmationError,
+} from "./portable-archive-import-confirmation.js";
+import {
+  importPortableArchive,
+  isPortableArchiveImportActive,
+  PortableArchiveImportError,
+} from "./portable-archive-importer.js";
 import { evaluateDraftReadiness } from "./draft-readiness.js";
 import { assertDraftTransition } from "./draft-lifecycle.js";
 import {
@@ -144,6 +158,7 @@ import {
   getLocalDatabase,
   readState,
   replaceState,
+  runStorageExclusive,
   updateState,
   workflowMaterialsRoot,
   workflowJobsRoot,
@@ -177,14 +192,25 @@ const app = express();
 app.disable("x-powered-by");
 const port = Number(process.env.AI_NEWS_DESK_PORT || 4317);
 const deliveryDesk = createDeliveryDesk();
+const portableArchiveImportConfirmations = createPortableArchiveImportConfirmationDesk();
 
 app.use(createLocalSecurityMiddleware(port));
+app.use((request, response, next) => {
+  const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
+  if (mutating && request.path !== "/api/data/archive/import" && isPortableArchiveImportActive()) {
+    response.status(503).json({ error: "完整归档正在导入，工作台已暂时进入只读维护状态" });
+    return;
+  }
+  next();
+});
 const defaultJsonBody = express.json({ limit: "2mb" });
 app.use((request, response, next) => {
   // A complete state backup can grow beyond normal command payloads. Keep the
   // larger allowance isolated to the restore endpoint instead of raising the
   // body limit for every API call.
-  if (request.path === "/api/data/restore" || request.path === "/api/data/archive/inspect") next();
+  if (request.path === "/api/data/restore"
+    || request.path === "/api/data/archive/inspect"
+    || request.path === "/api/data/archive/import") next();
   else defaultJsonBody(request, response, next);
 });
 app.use("/media", express.static(workflowMediaRoot, { fallthrough: false }));
@@ -897,7 +923,10 @@ app.get(
       payload: { fileCount: archive.manifest.files.length, stateChecksum: archive.manifest.stateChecksum },
     });
     response.setHeader("content-disposition", `attachment; filename=${archive.fileName}`);
-    response.sendFile(archive.archivePath);
+    // Express defaults to hiding files below a dot-prefixed path component.
+    // The exact, server-created archive lives below `.workflow/backups`, so
+    // allow that trusted path explicitly instead of returning a misleading 404.
+    response.sendFile(archive.archivePath, { dotfiles: "allow" });
   }),
 );
 
@@ -910,11 +939,58 @@ app.post(
       return;
     }
     try {
-      response.json(await previewPortableArchiveUpload(request, { windowsWorkflowRoot: workflowRoot }));
+      const preview = await previewPortableArchiveUpload(request, { windowsWorkflowRoot: workflowRoot });
+      const confirmation = portableArchiveImportConfirmations.issue({
+        archiveSha256: preview.archiveSha256,
+        workspaceChecksum: checksumForState(await readState()),
+      });
+      response.json({ ...preview, confirmationToken: confirmation.token, confirmationExpiresAt: confirmation.expiresAt });
     } catch (error) {
       if (error instanceof PortableArchiveUploadError || error instanceof PortableArchiveInspectionError) {
         const tooLarge = error.code === "upload-too-large" || error.code === "archive-too-large";
         response.status(tooLarge ? 413 : 400).json({ error: error.message, code: error.code });
+        return;
+      }
+      throw error;
+    }
+  }),
+);
+
+app.post(
+  "/api/data/archive/import",
+  asyncRoute(async (request, response) => {
+    const contentType = request.get("content-type")?.split(";", 1)[0]?.trim().toLocaleLowerCase("en-US");
+    if (!contentType || !["application/gzip", "application/x-gzip", "application/octet-stream"].includes(contentType)) {
+      response.status(415).json({ error: "请选择刚刚通过预检的 .tar.gz 完整归档" });
+      return;
+    }
+    const confirmationToken = request.get("x-archive-confirmation")?.trim();
+    if (!confirmationToken) {
+      response.status(409).json({ error: "请先重新预检归档并明确确认覆盖导入" });
+      return;
+    }
+    try {
+      const result = await withPortableArchiveUpload(
+        request,
+        { windowsWorkflowRoot: workflowRoot },
+        (archivePath) => runStorageExclusive(({ database, replaceDatabaseSnapshot }) => importPortableArchive({
+          archivePath,
+          workflowRoot,
+          database,
+          replaceDatabaseSnapshot,
+          confirmArchive: async (archiveSha256) => portableArchiveImportConfirmations.claim(
+            confirmationToken,
+            { archiveSha256, workspaceChecksum: checksumForState(database.readState()) },
+          ),
+        })),
+      );
+      response.json({ ok: true, ...result });
+    } catch (error) {
+      if (error instanceof PortableArchiveUploadError || error instanceof PortableArchiveInspectionError
+        || error instanceof PortableArchiveImportConfirmationError || error instanceof PortableArchiveImportError) {
+        const tooLarge = error.code === "upload-too-large" || error.code === "archive-too-large";
+        const conflict = error instanceof PortableArchiveImportConfirmationError || error instanceof PortableArchiveImportError;
+        response.status(tooLarge ? 413 : conflict ? 409 : 400).json({ error: error.message, code: error.code });
         return;
       }
       throw error;
@@ -2776,6 +2852,7 @@ const durableJobDesk = createJobDesk({
   database: await getLocalDatabase(),
   leaseMs: 30 * 60_000,
   concurrency: 2,
+  canClaim: () => !isPortableArchiveImportActive(),
   handlers: {
     "collect-run": async (payload, context) => {
       const runId = payload && typeof payload === "object" && "runId" in payload
