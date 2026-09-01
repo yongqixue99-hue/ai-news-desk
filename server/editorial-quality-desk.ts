@@ -1,5 +1,6 @@
 import type { ContentPackage } from "./product-types.js";
 import type { ArticleDraft } from "./types.js";
+import { uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import { assessWritingQuality } from "./writing-quality.js";
 
 export interface EditorialQualityIssue {
@@ -90,6 +91,22 @@ export const evaluateDraftPackageQuality = ({
       });
     }
   }
+  const supportedFactCount = contentPackage.facts.filter((claim) =>
+    claim.status === "supported" || claim.status === "partially-supported").length;
+  const bodyCharacterCount = draft.paragraphs.join("").replace(/\s/gu, "").length;
+  if (
+    contentPackage.intent === "news"
+    && contentPackage.mode === "brief"
+    && draft.draftStrategy === "brief"
+    && supportedFactCount >= 5
+    && bodyCharacterCount < 500
+  ) {
+    blockers.push({
+      id: "brief-underdeveloped",
+      blockId: "evidence",
+      message: `素材包已有 ${supportedFactCount} 条正文级事实，但正文只有 ${bodyCharacterCount} 字；需要讲清事件、适用规则、影响与限制，不能只交付三段摘要。`,
+    });
+  }
   if (contentPackage.intent === "source" && (!contentPackage.sourceMaterials?.length || !draft.sourceMaterial)) {
     blockers.push({
       id: "source-material-missing",
@@ -125,7 +142,9 @@ export const evaluateDraftPackageQuality = ({
       });
     }
   }
-  const relevantLocalAssetCount = contentPackage.assets.filter((asset) => asset.localReady && asset.role !== "decorative").length;
+  const relevantLocalAssetCount = uniqueEligibleEditorialImages(contentPackage.assets
+    .filter((asset) => asset.localReady && asset.role !== "decorative")
+    .map((asset) => asset.sourceImage)).length;
   const expectedInsertedImages = Math.min(2, relevantLocalAssetCount);
   const insertedImageCount = draft.images.filter((placement) => placement.afterParagraph >= 0).length;
   if (expectedInsertedImages > 0 && insertedImageCount < expectedInsertedImages) {

@@ -412,6 +412,71 @@ test("DraftDesk quality gate preserves two relevant source images in a private d
   assert.deepEqual(report.blockers.map((item) => item.id), ["image-coverage-missing"]);
 });
 
+test("DraftDesk quality gate does not count responsive variants as two required visuals", () => {
+  const first = asset("eu-flag-1152x648");
+  first.sourceImage.url = "https://cdn.arstechnica.net/wp-content/uploads/2022/03/getty-eu-flag-1152x648.jpg";
+  first.url = first.sourceImage.url;
+  first.sourceImage.caption = "https://www.ft.com/content/example";
+  const second = asset("eu-flag-1536x864");
+  second.sourceImage.url = "https://cdn.arstechnica.net/wp-content/uploads/2022/03/getty-eu-flag-1536x864.jpg";
+  second.url = second.sourceImage.url;
+  second.sourceImage.caption = "A European Union flag blowing in the wind.";
+  const report = evaluateDraftPackageQuality({
+    contentPackage: contentPackage({ assets: [first, second], imageIds: [first.sourceImageId, second.sourceImageId] }),
+    draft: draft({
+      images: [{ id: "placement-one", image: first.sourceImage, afterParagraph: 0, caption: first.caption }],
+    }),
+  });
+
+  assert.equal(report.ready, true);
+  assert.deepEqual(report.blockers, []);
+});
+
+test("DraftDesk quality gate blocks an underdeveloped brief when the package has enough supported facts", () => {
+  const sourceUrl = "https://arstechnica.com/tech-policy/example-story/";
+  const facts: ContentPackage["facts"] = [
+    "欧盟委员会把三项服务列为超大型在线平台。",
+    "三项服务在欧盟的月活用户都超过四千五百万。",
+    "更严格的合规义务将在二〇二六年十二月底前生效。",
+    "新增义务包括删除非法内容并加强未成年人保护。",
+    "未履行义务的最高罚款可达全球营收的百分之六。",
+  ].map((text, index) => ({
+    id: `fact-${index}`,
+    text,
+    status: "supported" as const,
+    sourceSignalIds: ["signal-ars"],
+    sourceUrls: [sourceUrl],
+  }));
+  const paragraphs = [
+    "欧盟委员会把 ChatGPT、Reddit 和 Roblox 纳入更严格的线上安全监管。",
+    "三项服务的欧盟月活用户均超过四千五百万，新增义务将在二〇二六年十二月底前生效。",
+    "平台需要删除非法内容并加强未成年人保护，违规最高可罚全球营收的百分之六。",
+  ];
+  const report = evaluateDraftPackageQuality({
+    contentPackage: contentPackage({ facts }),
+    draft: draft({
+      paragraphs,
+      factClaims: paragraphs.map((claim, index) => ({
+        id: `claim-${index}`,
+        claim,
+        status: "full-source",
+        sourceUrls: [sourceUrl],
+        capturedAt: "2026-09-01T00:00:00.000Z",
+      })),
+    }),
+  });
+
+  assert.equal(report.ready, false);
+  assert.ok(report.blockers.some((item) => item.id === "brief-underdeveloped"));
+});
+
+test("DraftDesk quality gate keeps a genuinely small one-fact brief concise", () => {
+  const report = evaluateDraftPackageQuality({ contentPackage: contentPackage(), draft: draft() });
+
+  assert.equal(report.ready, true);
+  assert.equal(report.blockers.some((item) => item.id === "brief-underdeveloped"), false);
+});
+
 test("DraftDesk quality gate blocks unnamed authority claims from generated copy", () => {
   const report = evaluateDraftPackageQuality({
     contentPackage: contentPackage(),

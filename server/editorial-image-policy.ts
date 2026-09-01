@@ -27,6 +27,32 @@ interface EditorialImagePlanInput {
 const imageNoise = /logo|icon|avatar|emoji|tracking|pixel|spinner|loading|sprite|favicon|author|profile|badge|button|shields\.io/i;
 const badgeCaption = /^(?:license|python\s*\d+(?:\.\d+)*|node(?:\.js)?\s*\d+(?:\.\d+)*|next\.?js\s*\d+(?:\.\d+)*|build|coverage|version|npm|downloads?|stars?|forks?)\b/i;
 
+const normalizedVisualUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    parsed.hash = "";
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (/^(?:utm_.+|ref|source|spm|from)$/iu.test(key)) parsed.searchParams.delete(key);
+    }
+    if (/\/wp-content\/uploads\//iu.test(parsed.pathname)) {
+      parsed.pathname = parsed.pathname.replace(
+        /-\d{2,5}x\d{2,5}(?=\.(?:avif|gif|jpe?g|png|webp)$)/iu,
+        "",
+      );
+    }
+    return parsed.toString().toLocaleLowerCase();
+  } catch {
+    return value.trim().toLocaleLowerCase();
+  }
+};
+
+const imageResolutionScore = (image: EditorialImageCandidate) => {
+  const declared = (image.width ?? 0) * (image.height ?? 0);
+  const pathSize = image.url.match(/-(\d{2,5})x(\d{2,5})(?=\.(?:avif|gif|jpe?g|png|webp)(?:$|[?#]))/iu);
+  const responsive = pathSize ? Number(pathSize[1]) * Number(pathSize[2]) : 0;
+  return Math.max(declared, responsive);
+};
+
 export const eligibleEditorialImage = (image: EditorialImageCandidate) => {
   if (image.rights === "expired") return false;
   if (imageNoise.test(`${image.url} ${image.caption}`)) return false;
@@ -49,16 +75,25 @@ const semanticImageKey = (image: EditorialImageCandidate) => {
 };
 
 export const uniqueEligibleEditorialImages = <T extends EditorialImageCandidate>(images: T[]) => {
-  const seenUrls = new Set<string>();
+  const selected: T[] = [];
+  const urlIndex = new Map<string, number>();
   const seenSemantic = new Set<string>();
-  return images.filter((image) => {
-    if (!eligibleEditorialImage(image) || seenUrls.has(image.url)) return false;
+  for (const image of images) {
+    if (!eligibleEditorialImage(image)) continue;
+    const urlKey = normalizedVisualUrl(image.url);
+    const existingIndex = urlIndex.get(urlKey);
+    if (existingIndex !== undefined) {
+      const existing = selected[existingIndex]!;
+      if (imageResolutionScore(image) > imageResolutionScore(existing)) selected[existingIndex] = image;
+      continue;
+    }
     const semanticKey = semanticImageKey(image);
-    if (semanticKey && seenSemantic.has(semanticKey)) return false;
-    seenUrls.add(image.url);
+    if (semanticKey && seenSemantic.has(semanticKey)) continue;
+    urlIndex.set(urlKey, selected.length);
     if (semanticKey) seenSemantic.add(semanticKey);
-    return true;
-  });
+    selected.push(image);
+  }
+  return selected;
 };
 
 const comparisonTokens = (value: string) => {

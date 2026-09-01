@@ -44,6 +44,25 @@ test("different GitHub URLs with the same visual description stay one editorial 
   assert.deepEqual(images.map((image) => image.id), ["repo-image"]);
 });
 
+test("responsive WordPress sizes of the same source image stay one editorial image", () => {
+  const images = uniqueEligibleEditorialImages([
+    {
+      id: "eu-flag-1152",
+      url: "https://cdn.arstechnica.net/wp-content/uploads/2022/03/getty-eu-flag-1152x648.jpg",
+      sourceUrl: "https://arstechnica.com/tech-policy/example-story/",
+      caption: "https://www.ft.com/content/example",
+    },
+    {
+      id: "eu-flag-1536",
+      url: "https://cdn.arstechnica.net/wp-content/uploads/2022/03/getty-eu-flag-1536x864.jpg",
+      sourceUrl: "https://arstechnica.com/tech-policy/example-story/",
+      caption: "A European Union flag blowing in the wind.",
+    },
+  ]);
+
+  assert.deepEqual(images.map((image) => image.id), ["eu-flag-1536"]);
+});
+
 test("a chart-rich source cannot become a text-only draft when the model selects no images", () => {
   const placements = planEditorialImagePlacements({
     availableImages: [
