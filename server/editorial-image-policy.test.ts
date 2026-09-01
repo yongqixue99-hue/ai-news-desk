@@ -1,7 +1,48 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { planEditorialImagePlacements } from "./editorial-image-policy.js";
+import { eligibleEditorialImage, planEditorialImagePlacements, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
+
+test("repository badges can never become editorial images", () => {
+  assert.equal(eligibleEditorialImage({
+    id: "license",
+    url: "https://img.shields.io/badge/license-Apache_2.0-blue.svg",
+    caption: "License Apache 2.0",
+    width: 800,
+    height: 200,
+  }), false);
+  assert.equal(eligibleEditorialImage({
+    id: "demo",
+    url: "https://example.com/open-executive-demo.png",
+    caption: "Open Executive 产品演示",
+    width: 1200,
+    height: 700,
+  }), true);
+  assert.equal(eligibleEditorialImage({
+    id: "next",
+    url: "https://example.com/next.svg",
+    caption: "Next.js 15",
+  }), false);
+});
+
+test("different GitHub URLs with the same visual description stay one editorial image", () => {
+  const images = uniqueEligibleEditorialImages([
+    {
+      id: "repo-image",
+      url: "https://repository-images.githubusercontent.com/1/hero",
+      sourceUrl: "https://github.com/example/repo",
+      caption: "GitHub - example/repo: Open source AI executive team",
+    },
+    {
+      id: "open-graph",
+      url: "https://opengraph.githubassets.com/hash/example/repo",
+      sourceUrl: "https://github.com/example/repo",
+      caption: "GitHub - example/repo: Open source AI executive team",
+    },
+  ]);
+
+  assert.deepEqual(images.map((image) => image.id), ["repo-image"]);
+});
 
 test("a chart-rich source cannot become a text-only draft when the model selects no images", () => {
   const placements = planEditorialImagePlacements({

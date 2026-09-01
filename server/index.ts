@@ -128,7 +128,8 @@ import { contentPackageDesk } from "./content-package-desk.js";
 import { buildTodayView, storyById } from "./story-desk.js";
 import { enrichStoryExplanation } from "./story-explanation-service.js";
 import { storyEvidenceDesk } from "./story-evidence-desk.js";
-import { createDraftFromPackage } from "./draft-desk.js";
+import { createDraftFromPackage, editorialGeneratorRevision } from "./draft-desk.js";
+import { editorialIntakeDesk } from "./editorial-intake.js";
 import { createJobDesk } from "./job-desk.js";
 import { hydrateStoryAssets } from "./visual-desk.js";
 import {
@@ -168,7 +169,7 @@ import type {
   SourceConfig,
   SourcePreset,
 } from "./types.js";
-import type { AssignmentMode, ContentPackage } from "./product-types.js";
+import type { AssignmentMode, ContentPackage, EditorialIntent } from "./product-types.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -436,6 +437,63 @@ app.get(
       contentPackage: database.latestContentPackageForStory<ContentPackage>(storyId),
       feedback: database.listFeedback("story", storyId, 30),
     });
+  }),
+);
+
+app.get(
+  "/api/editorial-intakes/:runId/:candidateId",
+  asyncRoute(async (request, response) => {
+    const runId = routeParam(request.params.runId);
+    const candidateId = routeParam(request.params.candidateId);
+    try {
+      const result = await editorialIntakeDesk.open({ runId, candidateId });
+      const database = await getLocalDatabase();
+      response.json({
+        ...result,
+        contentPackage: database.latestContentPackageForStory<ContentPackage>(result.story.id),
+        feedback: database.listFeedback("story", result.story.id, 30),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      response.status(/不存在|找不到|尚未归入/u.test(message) ? 404 : 422).json({ error: message.slice(0, 360) });
+    }
+  }),
+);
+
+app.post(
+  "/api/editorial-intakes/:runId/:candidateId/draft",
+  asyncRoute(async (request, response) => {
+    const runId = routeParam(request.params.runId);
+    const candidateId = routeParam(request.params.candidateId);
+    const rawIntent = request.body?.intent;
+    const intent = typeof rawIntent === "string" && ["news", "source", "community"].includes(rawIntent)
+      ? rawIntent as EditorialIntent
+      : undefined;
+    const opened = await editorialIntakeDesk.open({ runId, candidateId });
+    const resolvedIntent = intent ?? opened.intake.recommendedIntent;
+    const candidate = (await readState()).runs.find((run) => run.id === runId)
+      ?.candidates.find((entry) => entry.id === candidateId);
+    if (!candidate) {
+      response.status(404).json({ error: "候选不存在" });
+      return;
+    }
+    const database = await getLocalDatabase();
+    const queued = database.enqueueJob({
+      type: "draft-from-editorial-intake",
+      idempotencyKey: `draft-from-editorial-intake:${editorialGeneratorRevision}:${runId}:${candidateId}:${resolvedIntent}:${candidate.fetchedAt}`,
+      payload: { runId, candidateId, intent: resolvedIntent },
+      maxAttempts: 2,
+    });
+    if (queued.job.status === "complete") {
+      const result = queued.job.result as { draftId?: string; packageId?: string; reused?: boolean } | undefined;
+      const draft = result?.draftId ? (await readState()).drafts.find((entry) => entry.id === result.draftId) : undefined;
+      const contentPackage = result?.packageId ? database.getContentPackage<ContentPackage>(result.packageId) : undefined;
+      if (draft && contentPackage) {
+        response.json({ job: queued.job, draft, contentPackage, intake: opened.intake, reused: Boolean(result?.reused) });
+        return;
+      }
+    }
+    response.status(202).json({ job: queued.job, intake: opened.intake, reused: queued.reused });
   }),
 );
 
@@ -1834,7 +1892,7 @@ app.post(
   "/api/runs/:runId/candidates/:candidateId/community-draft",
   asyncRoute(async (request, response) => {
     const mode = request.body?.mode as CommunityDraftMode;
-    if (!(["source", "translation", "curation"] as CommunityDraftMode[]).includes(mode)) {
+    if (!(["article", "source", "translation", "curation"] as CommunityDraftMode[]).includes(mode)) {
       response.status(400).json({ error: "社区入稿模式不正确" });
       return;
     }
@@ -1842,7 +1900,16 @@ app.post(
     const candidateId = Array.isArray(request.params.candidateId)
       ? request.params.candidateId[0]
       : request.params.candidateId;
-    response.status(201).json(await createCommunityDraft(runId, candidateId, mode));
+    try {
+      response.status(201).json(await createCommunityDraft(runId, candidateId, mode));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/^(?:关联来源|这条社区线索|社区讨论|社区入稿|生成正文|模型没有为)/u.test(message)) {
+        response.status(422).json({ error: message.slice(0, 360) });
+        return;
+      }
+      throw error;
+    }
   }),
 );
 
@@ -2789,6 +2856,28 @@ const durableJobDesk = createJobDesk({
       const result = await createDraftFromPackage(packageId, (progress, stage) => context.progress(progress, stage));
       context.progress(0.98, "完成草稿入库");
       return { draftId: result.draft.id, reused: result.reused, imageCount: result.draft.images.length };
+    },
+    "draft-from-editorial-intake": async (payload, context) => {
+      const input = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+      const runId = typeof input.runId === "string" ? input.runId : "";
+      const candidateId = typeof input.candidateId === "string" ? input.candidateId : "";
+      const intent = typeof input.intent === "string" && ["news", "source", "community"].includes(input.intent)
+        ? input.intent as EditorialIntent
+        : undefined;
+      if (!runId || !candidateId) throw new Error("任务缺少候选来源标识");
+      const result = await editorialIntakeDesk.createDraft(
+        { runId, candidateId, intent },
+        (progress, stage) => context.progress(progress, stage),
+      );
+      context.progress(0.99, "统一成稿链路已完成");
+      return {
+        draftId: result.draft.id,
+        packageId: result.contentPackage.id,
+        storyId: result.story.id,
+        intent: result.contentPackage.intent,
+        reused: result.reused,
+        imageCount: result.draft.images.length,
+      };
     },
   },
 });

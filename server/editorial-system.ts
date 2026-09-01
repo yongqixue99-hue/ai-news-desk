@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { titleSimilarity } from "./scoring.js";
 import { collectionTopics, normalizeOptionalTopicIds, normalizeTopicIds } from "./topics.js";
+import { runEditorialGoldenSet } from "./editorial-golden-set.js";
 import type {
   Candidate,
   AutomaticSourceReading,
@@ -339,4 +340,14 @@ export const buildEditorialSystemView = (
     applicationUnlocked: false,
     memories: [],
   },
+  qualityBaseline: (() => {
+    const report = runEditorialGoldenSet();
+    return {
+      version: report.version,
+      total: report.total,
+      passed: report.passed,
+      failed: report.failed,
+      categoryCounts: report.categoryCounts,
+    };
+  })(),
 });

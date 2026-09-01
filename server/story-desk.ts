@@ -12,6 +12,7 @@ import { isCommunityCandidate } from "./community-feed.js";
 import { interleaveBySource } from "./source-diversity.js";
 import { hasCurrentPublication } from "./publication-state.js";
 import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
+import { uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import type { Candidate, CollectionTopicId, SourceConfig, WorkflowState } from "./types.js";
 
 interface CandidateRecord {
@@ -51,6 +52,16 @@ const normalizedUrl = (value: string | undefined) => {
     return value.trim().toLocaleLowerCase();
   }
 };
+
+export const hasLinkedCommunitySource = (candidate: Candidate) => {
+  if (!isCommunityCandidate(candidate)) return false;
+  const sourceUrl = normalizedUrl(candidate.canonicalUrl || candidate.url);
+  const discussionUrl = normalizedUrl(candidate.engagement?.discussionUrl);
+  return Boolean(sourceUrl && discussionUrl && sourceUrl !== discussionUrl);
+};
+
+const isFactBearingCandidate = (candidate: Candidate) => !isCommunityCandidate(candidate)
+  || (hasLinkedCommunitySource(candidate) && candidate.briefing?.basis === "full-source");
 
 const titleTokens = (title: string) => {
   const cached = titleTokenCache.get(title);
@@ -257,7 +268,7 @@ const explanationFor = (
   const selected = explained ?? ordered[0] ?? primary;
   const detailed = selected.candidate.briefing?.explanation;
   const sourceRecords = uniqueBy(
-    records.filter((record) => !isCommunityCandidate(record.candidate)),
+    records.filter((record) => isFactBearingCandidate(record.candidate)),
     (record) => normalizedUrl(record.candidate.canonicalUrl || record.candidate.url) || record.candidate.sourceName,
   );
   const evidenceRecords = sourceRecords.length ? sourceRecords : uniqueBy(
@@ -309,7 +320,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   const records = [...cluster.records].sort((left, right) => timeFor(right) - timeFor(left));
   const uniqueSignals = uniqueBy(records, (record) => `${record.runId}:${record.candidate.id}`);
   const factRecords = uniqueBy(
-    records.filter((record) => !isCommunityCandidate(record.candidate)),
+    records.filter((record) => isFactBearingCandidate(record.candidate)),
     (record) => normalizedUrl(record.candidate.canonicalUrl || record.candidate.url) || record.candidate.sourceName,
   );
   const communityRecords = uniqueBy(
@@ -324,8 +335,9 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     briefingRank(right.candidate) - briefingRank(left.candidate)
       || roleRank(right.candidate) - roleRank(left.candidate))[0]!.candidate.briefing;
   const bestInsight = records.find((record) => record.candidate.communityInsight)?.candidate.communityInsight;
-  const images = uniqueBy(records.flatMap((record) => record.candidate.images), (image) => normalizedUrl(image.url) || image.id)
-    .slice(0, 24);
+  const images = uniqueEligibleEditorialImages(
+    uniqueBy(records.flatMap((record) => record.candidate.images), (image) => normalizedUrl(image.url) || image.id),
+  ).slice(0, 24);
   const localImages = images.filter(isLocalImageFileReady);
   const publishReadyImages = localImages.filter((image) => isNeutralImagePublishReady(image, now));
   const publishedTimes = records.map((record) => Date.parse(record.candidate.publishedAt)).filter(Number.isFinite);
@@ -372,6 +384,8 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     publishedAt: record.candidate.publishedAt,
     fetchedAt: record.candidate.fetchedAt,
     isCommunity: isCommunityCandidate(record.candidate),
+    factBearing: isFactBearingCandidate(record.candidate),
+    linkedSource: hasLinkedCommunitySource(record.candidate),
     engagement: record.candidate.engagement ? {
       points: record.candidate.engagement.points,
       comments: record.candidate.engagement.comments,

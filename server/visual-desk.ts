@@ -6,6 +6,7 @@ import {
 } from "./editorial-visual-generator.js";
 import { captureRenderedPageImages } from "./page-screenshot.js";
 import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
+import { eligibleEditorialImage, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import { searchLicensedEditorialImages } from "./online-image-search.js";
 import { readState, updateState, workflowMediaRoot } from "./storage.js";
 import { storyById } from "./story-desk.js";
@@ -162,7 +163,7 @@ export const countVisualAssets = (
   images: SourceImage[],
   checkedAt = new Date().toISOString(),
 ): VisualAssetCounts => {
-  const unique = mergeVisualImages([], images);
+  const unique = uniqueEligibleEditorialImages(mergeVisualImages([], images));
   const local = unique.filter(isLocalVisualAsset);
   const publishReady = local.filter((image) => isNeutralImagePublishReady(image, checkedAt));
   return {
@@ -211,7 +212,7 @@ export const runVisualHydration = async (
   if (counts.localReadyImageCount >= minimum) return resultFor(story, 0, 0, 0, 0);
 
   const signals = story.signals
-    .filter((signal) => !signal.isCommunity)
+    .filter((signal) => signal.factBearing ?? !signal.isCommunity)
     .sort((left, right) => roleRank(right.sourceRole) - roleRank(left.sourceRole))
     .slice(0, 3);
   const assetRoot = `story_assets_${storyId.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 70)}`;
@@ -221,7 +222,7 @@ export const runVisualHydration = async (
   // Prefer already-discovered article images before fetching the source page
   // again. Persisting replaces the matching remote record in its candidate.
   if (primarySignal) {
-    for (const image of story.images) {
+    for (const image of uniqueEligibleEditorialImages(story.images)) {
       if (counts.localReadyImageCount >= minimum) break;
       if (isLocalVisualAsset(image) || !canDownload(image)) continue;
       try {
@@ -243,7 +244,7 @@ export const runVisualHydration = async (
       const page = await dependencies.extract(signal.url, 12);
       extractedSources += 1;
       await dependencies.persistExtraction(signal, page);
-      for (const image of page.images) {
+      for (const image of uniqueEligibleEditorialImages(page.images)) {
         story = await dependencies.getStory();
         counts = countVisualAssets(story?.images ?? []);
         if (counts.localReadyImageCount >= minimum) break;
@@ -278,7 +279,7 @@ export const runVisualHydration = async (
       if (requested <= 0) break;
       try {
         const screenshots = (await dependencies.capture(signal.url, assetRoot, requested))
-          .filter(isLocalVisualAsset);
+          .filter((image) => eligibleEditorialImage(image) && isLocalVisualAsset(image));
         screenshotCount += screenshots.length;
         if (screenshots.length) await dependencies.persistImages(signal, screenshots);
       } catch {

@@ -4,7 +4,7 @@ import { copyFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-export const LOCAL_DATABASE_SCHEMA_VERSION = 5;
+export const LOCAL_DATABASE_SCHEMA_VERSION = 6;
 
 export type DurableJobStatus = "queued" | "running" | "retrying" | "complete" | "failed" | "cancelled";
 
@@ -66,6 +66,23 @@ interface ContentPackageRow {
 interface DiscussionSampleRow {
   sample_json: string;
   content_hash: string;
+}
+
+interface SourceSnapshotRow {
+  url_key: string;
+  requested_url: string;
+  canonical_url: string;
+  page_json: string;
+  content_hash: string;
+  captured_at: string;
+}
+
+export interface SourceSnapshotRecord<T> {
+  urlKey: string;
+  requestedUrl: string;
+  canonicalUrl: string;
+  page: T;
+  capturedAt: string;
 }
 
 interface JobRow {
@@ -267,6 +284,17 @@ export class LocalDatabase {
       ) STRICT;
       CREATE INDEX IF NOT EXISTS discussion_samples_story_idx
         ON discussion_samples(story_id, platform, published_at);
+
+      CREATE TABLE IF NOT EXISTS source_snapshots (
+        url_key TEXT PRIMARY KEY,
+        requested_url TEXT NOT NULL,
+        canonical_url TEXT NOT NULL,
+        page_json TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        captured_at TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS source_snapshots_captured_idx
+        ON source_snapshots(captured_at DESC);
 
       CREATE TABLE IF NOT EXISTS editorial_memories (
         id TEXT PRIMARY KEY,
@@ -650,6 +678,55 @@ export class LocalDatabase {
     if (!row) return undefined;
     if (checksum(row.package_json) !== row.content_hash) throw new Error("素材包校验失败");
     return JSON.parse(row.package_json) as T;
+  }
+
+  saveSourceSnapshot<T>(input: {
+    urlKey: string;
+    requestedUrl: string;
+    canonicalUrl: string;
+    page: T;
+    capturedAt?: string;
+  }): SourceSnapshotRecord<T> {
+    const pageJson = json(input.page);
+    const capturedAt = input.capturedAt ?? this.now();
+    this.db.prepare(`
+      INSERT INTO source_snapshots(
+        url_key, requested_url, canonical_url, page_json, content_hash, captured_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(url_key) DO UPDATE SET
+        requested_url = excluded.requested_url,
+        canonical_url = excluded.canonical_url,
+        page_json = excluded.page_json,
+        content_hash = excluded.content_hash,
+        captured_at = excluded.captured_at
+    `).run(
+      input.urlKey,
+      input.requestedUrl,
+      input.canonicalUrl,
+      pageJson,
+      checksum(pageJson),
+      capturedAt,
+    );
+    return {
+      urlKey: input.urlKey,
+      requestedUrl: input.requestedUrl,
+      canonicalUrl: input.canonicalUrl,
+      page: structuredClone(input.page),
+      capturedAt,
+    };
+  }
+
+  getSourceSnapshot<T>(urlKey: string): SourceSnapshotRecord<T> | undefined {
+    const row = this.db.prepare("SELECT * FROM source_snapshots WHERE url_key = ?").get(urlKey) as unknown as SourceSnapshotRow | undefined;
+    if (!row) return undefined;
+    if (checksum(row.page_json) !== row.content_hash) throw new Error("来源快照校验失败");
+    return {
+      urlKey: row.url_key,
+      requestedUrl: row.requested_url,
+      canonicalUrl: row.canonical_url,
+      page: JSON.parse(row.page_json) as T,
+      capturedAt: row.captured_at,
+    };
   }
 
   replaceDiscussionSamples<T extends {

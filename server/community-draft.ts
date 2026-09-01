@@ -9,7 +9,9 @@ import {
 import { findCommunitySupportingCandidates } from "./community-feed.js";
 import { downloadSourceImage, extractPage } from "./extractor.js";
 import { captureRenderedPageImages } from "./page-screenshot.js";
+import { generateCandidateDraft } from "./generator.js";
 import { runGenerationProvider } from "./provider-runtime.js";
+import { readSourceWithSnapshot, type SourceSnapshotReadResult } from "./source-snapshot.js";
 import { readState, updateState, workflowJobsRoot } from "./storage.js";
 import type {
   AiProviderConfig,
@@ -17,11 +19,12 @@ import type {
   Candidate,
   DraftFactEvidenceStatus,
   DraftImagePlacement,
+  DraftSource,
   ExtractedPage,
   SourceImage,
 } from "./types.js";
 
-export type CommunityDraftMode = "source" | "translation" | "curation";
+export type CommunityDraftMode = "article" | "source" | "translation" | "curation";
 
 interface CommunityBlock {
   kind: "heading" | "paragraph" | "quote" | "list-item";
@@ -43,6 +46,158 @@ const escapeHtml = (value: string) => value
 
 const cleanText = (value: unknown, maximum = 8_000) =>
   (typeof value === "string" ? value : "").replace(/\s+/g, " ").trim().slice(0, maximum);
+
+const normalizedUrl = (value: string | undefined) => {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    url.pathname = url.pathname.replace(/\/+$/u, "") || "/";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(?:utm_.+|ref|source|spm|from)$/iu.test(key)) url.searchParams.delete(key);
+    }
+    return url.toString().toLocaleLowerCase();
+  } catch {
+    return value.trim().toLocaleLowerCase();
+  }
+};
+
+export const hasLinkedCommunitySource = (candidate: Candidate) => Boolean(
+  candidate.engagement?.discussionUrl
+  && normalizedUrl(candidate.engagement.discussionUrl) !== normalizedUrl(candidate.canonicalUrl || candidate.url),
+);
+
+type CommunityPageExtractor = (url: string, imageLimit: number) => Promise<ExtractedPage>;
+
+export const extractLinkedCommunitySource = async (
+  candidate: Candidate,
+  imageLimit: number,
+  extractor: CommunityPageExtractor = extractPage,
+  retryDelayMs = 350,
+) => {
+  if (!hasLinkedCommunitySource(candidate)) {
+    throw new Error("这条社区线索没有独立的关联来源");
+  }
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await extractor(candidate.canonicalUrl || candidate.url, imageLimit);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0 && retryDelayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
+      }
+    }
+  }
+  throw new Error(`关联来源连续两次读取失败：${lastError instanceof Error ? lastError.message : String(lastError)}`);
+};
+
+export const mergeDraftSources = (sources: DraftSource[]) => {
+  const merged = new Map<string, DraftSource>();
+  const kindRank: Record<DraftSource["kind"], number> = {
+    supporting: 0,
+    "original-report": 1,
+    primary: 2,
+  };
+  for (const source of sources) {
+    const key = normalizedUrl(source.url);
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, { ...source });
+      continue;
+    }
+    merged.set(key, {
+      ...(kindRank[source.kind] > kindRank[current.kind] ? source : current),
+      verified: current.verified || source.verified,
+    });
+  }
+  return [...merged.values()];
+};
+
+const sourceNameFor = (sourceUrl: string) => {
+  try {
+    const hostname = new URL(sourceUrl).hostname.replace(/^www\./u, "");
+    if (hostname === "github.com") return "GitHub";
+    if (hostname === "youtube.com" || hostname === "youtu.be") return "YouTube";
+    return hostname;
+  } catch {
+    return "关联来源";
+  }
+};
+
+/**
+ * A community card may point at a real article, repository or product page.
+ * Article mode deliberately derives a non-community candidate from that page
+ * so one cached comment can never become the factual spine of the story.
+ */
+export const buildCommunityArticleInput = (
+  candidate: Candidate,
+  linkedSourcePage: ExtractedPage,
+) => {
+  if (!hasLinkedCommunitySource(candidate)) {
+    throw new Error("这条社区线索没有独立的关联来源，只能整理社区素材，不能直接写新闻稿");
+  }
+  const blocks = sourceBlocks(linkedSourcePage, candidate);
+  const extractedText = blocks.map((block) => block.text).join("\n").trim();
+  if (extractedText.length < 160) {
+    throw new Error("关联来源正文过短，无法建立新闻事实主干；请先补充来源再成稿");
+  }
+  const canonicalUrl = linkedSourcePage.canonicalUrl || linkedSourcePage.url || candidate.url;
+  const sourceName = sourceNameFor(canonicalUrl);
+  const sourceCandidate: Candidate = {
+    ...candidate,
+    sourceType: "web",
+    sourceName,
+    sourceRole: "discovery",
+    title: cleanText(linkedSourcePage.title, 500) || candidate.title,
+    url: canonicalUrl,
+    canonicalUrl,
+    excerpt: extractedText.slice(0, 2_400),
+    publishedAt: linkedSourcePage.publishedAt || "",
+    author: undefined,
+    engagement: undefined,
+    briefing: undefined,
+    communityInsight: undefined,
+    clusterSize: 1,
+    relatedSources: [sourceName],
+    evidence: "已读取关联来源正文",
+  };
+  return { candidate: sourceCandidate, canonicalUrl, extractedText };
+};
+
+const workflowCopyPattern = /(?:这份|本次|当前)?(?:输入资料|输入内容|输入里|证据文本|素材包)|讨论串标题|当前样本|Top Comment|供编辑|后续编辑|发布前(?:应|需|需要)|事实定稿|模型返回|任务数据/iu;
+
+/** Reader copy must never expose the editor's evidence-processing workflow. */
+export const validateReaderFacingCommunityArticle = (paragraphs: string[]) => {
+  const leaked = paragraphs.find((paragraph) => workflowCopyPattern.test(paragraph));
+  if (leaked) {
+    throw new Error(`生成正文包含后台处理语言，已停止保存：${leaked.slice(0, 80)}`);
+  }
+  const sentences = paragraphs.flatMap((paragraph) => paragraph
+    .split(/(?<=[。！？!?])/u)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean));
+  const communitySentences = sentences.filter((sentence) =>
+    /Hacker News|社区(?:用户|讨论|评论)|讨论串|评论区|高赞评论|Top Comment/iu.test(sentence));
+  const communityCharacters = communitySentences.reduce((total, sentence) => total + sentence.length, 0);
+  const articleCharacters = sentences.reduce((total, sentence) => total + sentence.length, 0);
+  if (
+    communitySentences.length >= 2
+    && communityCharacters / Math.max(1, articleCharacters) > 0.6
+  ) {
+    throw new Error("生成正文被社区讨论主导，已停止保存；请重新建立新闻事实主干");
+  }
+  const aiShell = paragraphs.find((paragraph) =>
+    /(?:不是|并非).{0,80}(?:而是|才是)|原因不是|不只是|不仅|真正|其实|本质上|更重要的是|核心在于|关键在于|写得很直白[：:]/u.test(paragraph));
+  if (aiShell) {
+    throw new Error(`生成正文仍有模板化翻案或讲义腔，已停止保存：${aiShell.slice(0, 80)}`);
+  }
+  const jargonHeavy = paragraphs.find((paragraph) =>
+    (paragraph.match(/\b[A-Za-z][A-Za-z0-9.+_-]*\b/gu) || []).length > 16);
+  if (jargonHeavy) {
+    throw new Error(`生成正文对普通读者堆入过多英文技术名词，已停止保存：${jargonHeavy.slice(0, 80)}`);
+  }
+};
 
 const parseObject = (rendered: string) => {
   const stripped = rendered.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "");
@@ -166,7 +321,7 @@ const parseModelDraft = (rendered: string) => {
 
 const runCommunityModel = async (
   provider: AiProviderConfig,
-  mode: Exclude<CommunityDraftMode, "source">,
+  mode: Exclude<CommunityDraftMode, "source" | "article">,
   candidate: Candidate,
   sourceUrl: string,
   sourceTitle: string,
@@ -192,7 +347,7 @@ const runCommunityModel = async (
     writeFile(schemaPath, `${JSON.stringify(communityBlocksSchema, null, 2)}\n`, "utf8"),
   ]);
   const translationContract = `逐块忠实翻译成自然中文。必须保持 blocks 数量、顺序和 kind 完全一致；一个输入块只对应一个输出块。不得摘要、扩写、重排、润色观点或增加结论。数字、日期、专名、链接、代码和限定条件必须保留；原文不确定就直译，不猜。标题忠实翻译。`;
-  const curationContract = `把来源整理成一份供编辑继续修改的中文社区观点素材包，而不是新闻稿。只能使用输入证据，可以压缩重复内容，但不得虚构事实、个人经历或把社区观点写成已验证事实。优先分成“社区在关注什么”“反复出现的观点或真实经验”“主要分歧与待核验说法”；没有足够证据的部分不要硬凑。保留关键数字、专名、限制条件和有信息量的原句，原句应明确是社区用户观点；需要翻译时忠实翻译。输出 2 至 10 个自然段或小标题，不强行加结论。`;
+  const curationContract = `把社区来源整理成供用户私下修改的观点素材，不要伪装成新闻稿。只能使用输入证据，可以压缩重复内容，但不得虚构事实、个人经历或把社区观点写成已验证事实。不要在正文里解释“输入资料、当前输入、任务、模型、字段”或给用户布置“后续编辑”；直接说讨论者提出了什么。少于 5 条独立评论时只能写“一条可用观点”，禁止使用“反复出现、普遍认为、社区共识、主要分歧”等概括；达到 5 条才能列出多个观点，达到 15 条且覆盖 5 个分支后才可提炼反复主题。保留关键数字、专名、限制条件和有信息量的原句，原句应明确是社区用户观点；需要翻译时忠实翻译。材料少就写短，不强行加小标题或结论。`;
   const contract = mode === "translation" ? translationContract : curationContract;
   const rendered = await runGenerationProvider({
     provider,
@@ -287,7 +442,7 @@ const imagePlacements = async (
 
 // A traceable forum post is still a community assertion or opinion. Reading
 // the whole thread must never silently turn it into a verified fact.
-const factStatusFor = (_mode: CommunityDraftMode): DraftFactEvidenceStatus => "unverified";
+const factStatusFor = (_mode: Exclude<CommunityDraftMode, "article">): DraftFactEvidenceStatus => "unverified";
 
 export const createCommunityDraft = async (
   runId: string,
@@ -300,6 +455,9 @@ export const createCommunityDraft = async (
   const candidate = run.candidates.find((entry) => entry.id === candidateId);
   if (!candidate) throw new Error("候选内容不存在");
   if (!supportsCommunityDraft(candidate)) throw new Error("这条候选不是社区来源，不能使用社区入稿模式");
+  if (mode === "article" && !hasLinkedCommunitySource(candidate)) {
+    throw new Error("这条社区线索没有独立的关联来源，只能整理社区原文或观点素材");
+  }
 
   const draftId = `draft_${candidate.id}_community_${mode}_${randomUUID().slice(0, 6)}`;
   const provider = mode === "source" ? undefined : providerForCommunityDraft(state);
@@ -325,10 +483,20 @@ export const createCommunityDraft = async (
     };
   }
   const linkedSourcePages: ExtractedPage[] = [];
+  let primaryLinkedSourcePage: ExtractedPage | undefined;
+  let primaryLinkedSourceRead: SourceSnapshotReadResult | undefined;
+  let primaryLinkedSourceError = "";
   if (discussionUrl && discussionUrl !== candidate.url) {
     try {
-      linkedSourcePages.push(await extractPage(candidate.url, state.settings.imageLimit));
-    } catch {
+      primaryLinkedSourceRead = await readSourceWithSnapshot({
+        url: candidate.canonicalUrl || candidate.url,
+        imageLimit: state.settings.imageLimit,
+        extractor: (_url, imageLimit) => extractLinkedCommunitySource(candidate, imageLimit),
+      });
+      primaryLinkedSourcePage = primaryLinkedSourceRead.page;
+      linkedSourcePages.push(primaryLinkedSourcePage);
+    } catch (error) {
+      primaryLinkedSourceError = error instanceof Error ? error.message : String(error);
       // Discussion text remains usable even when the linked article blocks extraction.
     }
   }
@@ -350,7 +518,7 @@ export const createCommunityDraft = async (
     }
   }
   const originalBlocks = sourceBlocks(page, candidate);
-  if (!originalBlocks.length || originalBlocks.map((block) => block.text).join("").length < 80) {
+  if (mode !== "article" && (!originalBlocks.length || originalBlocks.map((block) => block.text).join("").length < 80)) {
     throw new Error("社区讨论与缓存摘录都过短，暂时无法作为素材入稿");
   }
   const imagePool = [
@@ -361,8 +529,11 @@ export const createCommunityDraft = async (
   ]
     .filter((image, index, images) => images.findIndex((entry) => entry.url === image.url) === index);
   const originalLanguage = languageOf(originalBlocks);
-  let modelDraft: ModelCommunityDraft;
-  if (mode === "source") {
+  let modelDraft: ModelCommunityDraft | undefined;
+  if (mode === "article") {
+    // Article mode is generated after visual hydration so the normal article
+    // engine receives the complete linked-source image pool.
+  } else if (mode === "source") {
     modelDraft = { title: page.title || candidate.title, blocks: originalBlocks };
   } else if (mode === "translation" && originalLanguage === "zh") {
     modelDraft = { title: page.title || candidate.title, blocks: originalBlocks };
@@ -403,6 +574,90 @@ export const createCommunityDraft = async (
       }
     }
   }
+  if (mode === "article") {
+    const linkedSourcePage = primaryLinkedSourcePage;
+    if (!linkedSourcePage) {
+      throw new Error(`关联来源正文读取失败，已停止生成新闻稿；社区热度不能替代事实来源${primaryLinkedSourceError ? `（${primaryLinkedSourceError.slice(0, 180)}）` : ""}`);
+    }
+    const articleInput = buildCommunityArticleInput(candidate, linkedSourcePage);
+    const articleDraft = await generateCandidateDraft(
+      runId,
+      articleInput.candidate,
+      provider!,
+      state.aiSettings.skills,
+      draftId,
+      {
+        extractedText: articleInput.extractedText,
+        canonicalUrl: articleInput.canonicalUrl,
+        images: imagePool,
+        skipExtraction: true,
+        draftStrategy: "brief",
+        writingGuidelines: [
+          "这类选题由社区发现，但标题和开头先说产品、项目或公司实际发生了什么；除非传播本身就是事件，不要把“社区热议”写成新闻主角。",
+          "按普通读者最自然的顺序写：它是什么、具体能做什么、为什么今天值得看、哪些说法已经确认、哪些仍无来源。技术实现只保留会改变使用方式或判断的信息。",
+          "日期通常写到日即可；除非先后顺序会改变事实判断，不写小时、分钟或 UTC。少用冒号列配置，不用“需要指出的是、需要区分的是、值得注意的是”等报告腔。",
+          "如果项目早已发布而今天只是重新受到关注，就把当下传播当作由头，随后解释项目本身；不要把依赖升级、自动更新或 README 微调包装成产品新闻。普通读者稿最多用一段写技术实现，优先解释产品能做什么以及目前有什么限制。",
+          "这不是部署教程。除非版本、端口、依赖或框架会改变读者对产品的判断，否则不要写进正文；一段里不要罗列整套技术栈或接入平台。第一次出现 Hacker News 时写全称，不用 HN 缩写。",
+        ],
+        communityDiscovery: {
+          platform: candidate.sourceName,
+          discussionUrl,
+          discussionTitle: candidate.title,
+          discoveredAt: candidate.publishedAt,
+          points: candidate.engagement?.points,
+          comments: candidate.engagement?.comments,
+        },
+        codexReasoningEffort: "high",
+        autoReview: true,
+        autoReviewVoice: true,
+      },
+    );
+    validateReaderFacingCommunityArticle(articleDraft.paragraphs);
+    const sourceKey = normalizedUrl(articleInput.canonicalUrl);
+    articleDraft.sources = mergeDraftSources([
+      {
+        label: `${articleInput.candidate.sourceName} · 关联来源`,
+        url: articleInput.canonicalUrl,
+        kind: "primary",
+        verified: false,
+      },
+      ...articleDraft.sources.filter((source) => normalizedUrl(source.url) !== sourceKey),
+      ...(discussionUrl ? [{
+        label: `${candidate.sourceName} · 社区讨论`,
+        url: discussionUrl,
+        kind: "supporting" as const,
+        verified: false,
+      }] : []),
+    ]);
+    articleDraft.uncertainties = [...new Set([
+      ...articleDraft.uncertainties,
+      "社区热度只用于发现选题，没有作为新闻事实写入正文。",
+      ...(discussionReadFailed
+        ? ["社区讨论页本次未能完整读取；这不影响关联来源成稿，但社区观点没有进入正文。"]
+        : []),
+      ...(primaryLinkedSourceRead?.fromCache
+        ? [`关联来源本次网络读取失败，正文使用 ${primaryLinkedSourceRead.capturedAt} 保存的同 URL 本地快照；建议发布前刷新来源。`]
+        : []),
+    ])];
+    articleDraft.provenance.originalUrl = articleInput.canonicalUrl;
+    await updateState((latest) => {
+      latest.drafts.unshift(articleDraft);
+      const targetRun = latest.runs.find((entry) => entry.id === runId);
+      const targetCandidate = targetRun?.candidates.find((entry) => entry.id === candidate.id);
+      if (targetCandidate) targetCandidate.status = "drafted";
+      if (targetRun) {
+        targetRun.updatedAt = articleDraft.updatedAt;
+        targetRun.logs.push({
+          at: articleDraft.updatedAt,
+          stage: "来源成稿",
+          message: `已读取关联来源并生成新闻稿，社区讨论仅作为选题入口；带入 ${articleDraft.images.length} 张来源图片。`,
+          level: "success",
+        });
+      }
+    });
+    return articleDraft;
+  }
+  if (!modelDraft) throw new Error("社区入稿模式没有产生可用内容");
   const placements = await imagePlacements(
     imagePool,
     modelDraft.blocks,

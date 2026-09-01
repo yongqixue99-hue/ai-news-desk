@@ -4,10 +4,15 @@ import { generateCandidateDraft } from "./generator.js";
 import { getLocalDatabase, readState, updateState } from "./storage.js";
 import { activeWritingGuidelines } from "./learning-desk.js";
 import { appendDraftRevision } from "./draft-revisions.js";
+import { evaluateDraftPackageQuality } from "./editorial-quality-desk.js";
+import { normalizeDraftCatalog } from "./draft-catalog.js";
 import type { ContentPackage } from "./product-types.js";
 import type { ArticleDraft, Candidate, SourceImage } from "./types.js";
 
 const inFlight = new Map<string, Promise<{ draft: ArticleDraft; reused: boolean }>>();
+
+/** Bump only when routing/evidence/prompt behavior materially changes. */
+export const editorialGeneratorRevision = "source-first-v9";
 
 const sourceCandidateFor = (state: Awaited<ReturnType<typeof readState>>, contentPackage: ContentPackage) => {
   const source = contentPackage.sources.find((entry) => !entry.isCommunity) ?? contentPackage.sources[0];
@@ -17,7 +22,9 @@ const sourceCandidateFor = (state: Awaited<ReturnType<typeof readState>>, conten
   const identity = createHash("sha1").update(`${contentPackage.id}:${source.signalId}`).digest("hex").slice(0, 12);
   const runId = current?.run.id ?? `package_run_${identity}`;
   const candidateId = current?.candidate.id ?? `package_candidate_${identity}`;
-  const excerpt = contentPackage.facts.map((claim) => claim.text).join(" ").slice(0, 2_400)
+  const excerpt = (contentPackage.intent === "source"
+    ? contentPackage.sourceMaterials?.[0]?.originalText
+    : contentPackage.facts.map((claim) => claim.text).join(" "))?.slice(0, 2_400)
     || contentPackage.title;
   const candidate: Candidate = {
     id: candidateId,
@@ -64,7 +71,10 @@ export const sourceImagesFromContentPackage = async (
   contentPackage: ContentPackage,
 ): Promise<SourceImage[]> => {
   const images: SourceImage[] = [];
-  for (const asset of contentPackage.assets.filter((entry) => entry.rightsDecision !== "blocked")) {
+  // Rights review controls delivery, not private editing. A locally frozen
+  // source image stays visible in the editor even when WeChat preflight will
+  // block it until the user confirms permission or replaces it.
+  for (const asset of contentPackage.assets.filter((entry) => entry.localReady)) {
     const image = asset.sourceImage;
     if (!image) throw new Error(`素材包图片 ${asset.sourceImageId} 缺少冻结快照，请重新建立素材包`);
     if (image.id !== asset.sourceImageId) throw new Error(`素材包图片 ${asset.sourceImageId} 身份不一致`);
@@ -88,11 +98,21 @@ export const sourceImagesFromContentPackage = async (
   return images;
 };
 
-const packageEvidenceText = (contentPackage: ContentPackage) => [
+export const packageEvidenceText = (contentPackage: ContentPackage) => [
+  ...(contentPackage.intent === "source" ? [
+    "【原始材料工作副本】",
+    ...(contentPackage.sourceMaterials ?? []).flatMap((material) => [
+      `来源：${material.sourceLabel}｜${material.url}｜${material.rightsNotice}`,
+      material.originalText,
+    ]),
+    "【边界】以上内容是作者或来源页面的原始表达，不等于已独立核验的事实；不得加入材料之外的背景。",
+  ] : []),
   "【事实账本】",
   ...contentPackage.facts.map((claim) => `${claim.status}｜${claim.text}｜${claim.note ?? ""}`),
-  "【社区样本】",
-  ...contentPackage.discussionSamples.map((sample) => `${sample.author}@${sample.platform}｜${sample.kind}｜${sample.originalText}`),
+  ...(contentPackage.intent === "community" ? [
+    "【社区样本】",
+    ...contentPackage.discussionSamples.map((sample) => `${sample.author}@${sample.platform}｜${sample.kind}｜${sample.originalText}`),
+  ] : []),
   "【未知项】",
   ...contentPackage.uncertainties,
 ].join("\n");
@@ -112,7 +132,8 @@ const create = async (
   }
 
   const initialState = await readState();
-  const existing = initialState.drafts.find((draft) => draft.provenance.contentPackageId === packageId);
+  const existing = initialState.drafts.find((draft) => draft.provenance.contentPackageId === packageId
+    && draft.provenance.generatorRevision === editorialGeneratorRevision);
   if (existing) {
     onProgress?.(0.95, "复用已有草稿");
     return { draft: existing, reused: true };
@@ -135,6 +156,7 @@ const create = async (
   });
 
   try {
+    const communitySource = contentPackage.sources.find((source) => source.isCommunity);
     const draft = await generateCandidateDraft(
       runId,
       candidate as Candidate,
@@ -149,14 +171,43 @@ const create = async (
         contentPackage,
         draftStrategy: contentPackage.mode,
         writingGuidelines: activeWritingGuidelines(database),
+        communityDiscovery: communitySource ? {
+          platform: communitySource.label,
+          discussionUrl: communitySource.url,
+          discussionTitle: contentPackage.title,
+          discoveredAt: communitySource.publishedAt,
+        } : undefined,
+        autoReview: contentPackage.intent !== "source",
+        autoReviewVoice: contentPackage.intent === "community",
+        codexReasoningEffort: "high",
         onProgress,
       },
     );
+    const frozenSource = contentPackage.sourceMaterials?.[0];
+    if (contentPackage.intent === "source" && frozenSource) {
+      draft.sourceMaterial = {
+        kind: frozenSource.sourceKind === "community-post" ? "community" : "article",
+        mode: "source",
+        sourceUrl: frozenSource.url,
+        sourceLabel: frozenSource.sourceLabel,
+        author: frozenSource.author,
+        originalLanguage: frozenSource.originalLanguage,
+        rights: "check-required",
+        requiresEditorialReview: true,
+      };
+    }
+    const qualityReport = evaluateDraftPackageQuality({ contentPackage, draft });
+    if (!qualityReport.ready) {
+      throw new Error(`草稿质量门未通过：${qualityReport.blockers.map((item) => item.message).join("；")}`);
+    }
+    draft.provenance.generatorRevision = editorialGeneratorRevision;
     onProgress?.(0.96, "保存草稿与修订记录");
     const saved = await updateState((state) => {
-      const duplicate = state.drafts.find((entry) => entry.provenance.contentPackageId === packageId);
+      const duplicate = state.drafts.find((entry) => entry.provenance.contentPackageId === packageId
+        && entry.provenance.generatorRevision === editorialGeneratorRevision);
       if (duplicate) return { draft: duplicate, reused: true };
       state.drafts.unshift(draft);
+      state.drafts = normalizeDraftCatalog(state.drafts);
       appendDraftRevision(state, draft, "manual");
       const target = state.runs.find((run) => run.id === runId)
         ?.candidates.find((entry) => entry.id === candidate.id);
@@ -174,7 +225,13 @@ const create = async (
         type: "draft.completed",
         subjectType: "draft",
         subjectId: saved.draft.id,
-        payload: { packageId, storyId: contentPackage.storyId, imageCount: saved.draft.images.length },
+        payload: {
+          packageId,
+          storyId: contentPackage.storyId,
+          imageCount: saved.draft.images.length,
+          qualityWarningCount: qualityReport.warnings.length,
+          qualityWarningIds: qualityReport.warnings.map((item) => item.id),
+        },
       });
     }
     return saved;

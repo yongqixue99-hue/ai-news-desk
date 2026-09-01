@@ -6,8 +6,11 @@ import type {
   AssetCandidate,
   AssignmentMode,
   ContentPackage,
+  ContentPackageSource,
   DiscussionSample,
+  EditorialIntent,
   EvidenceClaim,
+  SourceMaterialSnapshot,
   StoryView,
 } from "./product-types.js";
 import { storyById } from "./story-desk.js";
@@ -21,6 +24,8 @@ import {
   evaluateMaterialPublishEligibility,
   normalizeGovernedMaterial,
 } from "./material-governance.js";
+import { uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
+import { isCommunityDiscoveryFraming } from "./editorial-source-policy.js";
 import type { Candidate, SourceImage, WorkflowState } from "./types.js";
 
 const signalIdFor = (runId: string, candidateId: string) => `${runId}:${candidateId}`;
@@ -47,7 +52,7 @@ const candidateForSignal = (state: WorkflowState, runId: string, candidateId: st
 
 const evidenceClaimsFor = (state: WorkflowState, story: StoryView): EvidenceClaim[] => {
   const candidates = story.signals
-    .filter((signal) => !signal.isCommunity)
+    .filter((signal) => signal.factBearing ?? !signal.isCommunity)
     .map((signal) => ({
       signal,
       candidate: candidateForSignal(state, signal.runId, signal.candidateId),
@@ -56,9 +61,16 @@ const evidenceClaimsFor = (state: WorkflowState, story: StoryView): EvidenceClai
   const groups = new Map<string, Array<{ text: string; signalId: string; candidate: Candidate }>>();
 
   for (const { signal, candidate } of candidates) {
-    const sourceText = candidate.briefing?.summaryZh || candidate.excerpt || candidate.title;
-    const claims = splitClaims(sourceText);
-    for (const text of claims.length ? claims : [compactWhitespace(candidate.title)]) {
+    const explanation = candidate.briefing?.explanation;
+    const sourceTexts = [
+      candidate.briefing?.summaryZh,
+      ...(signal.linkedSource ? [] : [explanation?.whatHappenedZh]),
+      ...(explanation?.keyPointsZh ?? []),
+    ].filter((value): value is string => Boolean(value?.trim()));
+    const claims = sourceTexts.flatMap(splitClaims).filter((text) => !isCommunityDiscoveryFraming(text));
+    const fallbackText = candidate.briefing?.summaryZh || candidate.excerpt || candidate.title;
+    const fallbackClaims = [compactWhitespace(fallbackText)].filter((text) => !isCommunityDiscoveryFraming(text));
+    for (const text of claims.length ? claims : fallbackClaims) {
       const key = normalizedClaim(text);
       if (!key) continue;
       const items = groups.get(key) ?? [];
@@ -94,6 +106,57 @@ const evidenceClaimsFor = (state: WorkflowState, story: StoryView): EvidenceClai
               ? "由官方来源直接支持。"
               : "已读取来源正文。",
     };
+  });
+};
+
+const sourceLabelFor = (url: string, fallback: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./u, "") || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+/**
+ * One link-post record represents two editorial resources: the linked page is
+ * factual source material and the discussion URL is community context. Split
+ * them here so downstream writing never has to infer which URL proves what.
+ */
+const packageSourcesFor = (story: StoryView): ContentPackageSource[] => {
+  const sources = story.signals.flatMap((signal) => {
+    const signalId = signalIdFor(signal.runId, signal.candidateId);
+    const basis = signal.briefingBasis ?? "title";
+    const entries: ContentPackageSource[] = [];
+    if (signal.factBearing ?? !signal.isCommunity) {
+      entries.push({
+        signalId,
+        label: signal.linkedSource ? sourceLabelFor(signal.url, signal.sourceName) : signal.sourceName,
+        url: signal.url,
+        role: signal.sourceRole === "community" ? "discovery" : signal.sourceRole || "discovery",
+        basis,
+        publishedAt: signal.publishedAt,
+        isCommunity: false,
+      });
+    }
+    if (signal.isCommunity) {
+      entries.push({
+        signalId,
+        label: signal.sourceName,
+        url: signal.discussionUrl || signal.url,
+        role: "community",
+        basis: signal.discussionUrl ? "excerpt" : basis,
+        publishedAt: signal.publishedAt,
+        isCommunity: true,
+      });
+    }
+    return entries;
+  });
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    const key = `${source.isCommunity ? "community" : "fact"}:${source.url}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 };
 
@@ -237,7 +300,7 @@ const assetsFor = (
   claims: EvidenceClaim[],
   fallbackImages: SourceImage[] = [],
   checkedAt = new Date().toISOString(),
-): AssetCandidate[] => [...story.images, ...fallbackImages]
+): AssetCandidate[] => uniqueEligibleEditorialImages([...story.images, ...fallbackImages])
   .map((image, index) => {
     const editorialPriority = editorialPriorityFor(image);
     const editorialOrigin = editorialOriginFor(image, editorialPriority);
@@ -369,8 +432,11 @@ const anglesFor = (mode: ContentPackage["mode"], story: StoryView) => ({
 export interface BuildContentPackageInput {
   storyId: string;
   mode?: Exclude<AssignmentMode, "watch" | "skip">;
+  intent?: EditorialIntent;
+  intakeReason?: string;
   now?: string;
   discussionSamples?: DiscussionSample[];
+  sourceMaterials?: SourceMaterialSnapshot[];
 }
 
 /**
@@ -382,15 +448,18 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
   const now = input.now ?? new Date().toISOString();
   const story = storyById(state, input.storyId, now);
   if (!story) throw new Error("Story 不存在或已经从当前数据中移除");
-  if (!story.assignment.canDraft) {
+  const requestedIntent = input.intent
+    ?? (input.mode === "community" ? "community" : input.mode === "curate" ? "source" : "news");
+  if (!story.assignment.canDraft && requestedIntent !== "source") {
     throw new Error(story.assignment.blockers[0] || "当前 Story 不能进入成稿流程");
   }
-  const mode = input.mode ?? story.assignment.mode;
+  const mode = requestedIntent === "source" ? "curate" : input.mode ?? story.assignment.mode;
   if (mode === "watch" || mode === "skip") throw new Error("Watch 和 Skip 不会生成素材包");
   const facts = evidenceClaimsFor(state, story);
-  const discussionSamples = input.discussionSamples?.length
+  const availableDiscussionSamples = input.discussionSamples?.length
     ? input.discussionSamples
     : discussionSamplesFor(state, story);
+  const discussionSamples = requestedIntent === "community" ? availableDiscussionSamples : [];
   const localSourceImageCount = story.images.filter(isLocalImageFileReady).length;
   const fallbackImages = recommendMaterialCandidates(
     state.materials,
@@ -400,26 +469,62 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
     { allowGenerated: localSourceImageCount === 0 },
   );
   const assets = assetsFor(story, facts, fallbackImages, now);
-  const blockers = [...story.assignment.blockers];
-  if (!facts.some((claim) => claim.status === "supported" || claim.status === "partially-supported")) {
+  const sourceMaterials = input.sourceMaterials ?? [];
+  const blockers = requestedIntent === "source" ? [] : [...story.assignment.blockers];
+  if (requestedIntent === "source" && !sourceMaterials.some((material) => material.originalText.trim().length >= 80)) {
+    blockers.push("没有冻结足够完整的原始材料，不能生成原文工作副本");
+  }
+  if (requestedIntent !== "source" && !facts.some((claim) => claim.status === "supported" || claim.status === "partially-supported")) {
     blockers.push("没有可用于写作的正文级事实");
   }
   const uncertainties = [
-    ...story.assignment.warnings,
-    ...facts.filter((claim) => claim.status === "unverified").map((claim) => `待核验：${claim.text}`),
+    ...(requestedIntent === "source"
+      ? ["这是来源派生的私有编辑工作副本；正文事实、引用范围、转载或翻译权限均需发布前复核。"]
+      : [
+        ...story.assignment.warnings.filter((warning) => requestedIntent === "community" || !/社区样本/u.test(warning)),
+        ...story.explanation.unknowns.map((item) => `仍未知：${item}`),
+        ...facts.filter((claim) => claim.status === "unverified").map((claim) => `待核验：${claim.text}`),
+      ]),
+    ...sourceMaterials.filter((material) => material.truncated).map(() => "原始材料过长，素材包仅冻结了前 48000 个字符。"),
+    ...sourceMaterials.filter((material) => material.fromCache).map((material) => `原文使用 ${material.capturedAt} 的本地快照；发布前建议刷新来源。`),
   ];
   if (assets.some((asset) => asset.rightsDecision === "warning")) uncertainties.push("部分图片需要人工确认权利状态");
-  if (assets.some((asset) => asset.rightsDecision === "blocked")) uncertainties.push("存在不能同步微信公众号的图片，预检时会自动排除");
+  if (assets.some((asset) => asset.rightsDecision === "blocked")) uncertainties.push("部分原图可进入私人编辑草稿，但公众号同步前会被预检拦截，需确认权利或替换");
   const sourceFingerprint = story.signals.map((signal) => `${signal.runId}:${signal.candidateId}:${signal.fetchedAt}`).sort().join("|");
   const assetFingerprint = createHash("sha256")
     .update(JSON.stringify(assets.map(normalizedAssetGovernanceSnapshot)
       .sort((left, right) => left.id.localeCompare(right.id))))
     .digest("hex");
-  const id = `package_${createHash("sha256").update(`${story.id}:${mode}:${sourceFingerprint}:${assetFingerprint}`).digest("hex").slice(0, 18)}`;
+  const evidenceFingerprint = createHash("sha256")
+    .update(JSON.stringify({
+      facts: facts.map((claim) => ({ text: claim.text, status: claim.status, sources: claim.sourceUrls })),
+      explanationGeneratedAt: story.explanation.generatedAt,
+      explanationUnknowns: story.explanation.unknowns,
+      discussionSamples: discussionSamples.map((sample) => ({
+        id: sample.id,
+        author: sample.author,
+        originalText: sample.originalText,
+        permalink: sample.permalink,
+      })),
+    }))
+    .digest("hex");
+  const sourceMaterialFingerprint = createHash("sha256")
+    .update(JSON.stringify(sourceMaterials.map((material) => ({
+      signalId: material.signalId,
+      url: material.url,
+      capturedAt: material.capturedAt,
+      originalText: material.originalText,
+      rightsNotice: material.rightsNotice,
+    }))))
+    .digest("hex");
+  const intent = requestedIntent;
+  const id = `package_${createHash("sha256").update(`${story.id}:${mode}:${intent}:${sourceFingerprint}:${evidenceFingerprint}:${assetFingerprint}:${sourceMaterialFingerprint}`).digest("hex").slice(0, 18)}`;
   return {
     id,
     storyId: story.id,
     mode,
+    intent,
+    intakeReason: input.intakeReason,
     title: story.title,
     createdAt: now,
     facts,
@@ -427,15 +532,8 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
     communityFocus: story.communityFocus,
     discussionSamples,
     sourceSignalIds: story.signals.map((signal) => signalIdFor(signal.runId, signal.candidateId)),
-    sources: story.signals.map((signal) => ({
-      signalId: signalIdFor(signal.runId, signal.candidateId),
-      label: signal.sourceName,
-      url: signal.discussionUrl || signal.url,
-      role: signal.sourceRole || (signal.isCommunity ? "community" : "discovery"),
-      basis: candidateForSignal(state, signal.runId, signal.candidateId)?.briefing?.basis ?? "title",
-      publishedAt: signal.publishedAt,
-      isCommunity: signal.isCommunity,
-    })),
+    sources: packageSourcesFor(story),
+    sourceMaterials: sourceMaterials.length ? structuredClone(sourceMaterials) : undefined,
     imageIds: assets.map((asset) => asset.id),
     assets,
     uncertainties: [...new Set(uncertainties)],

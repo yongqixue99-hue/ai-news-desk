@@ -13,6 +13,8 @@ import type {
   DraftRevision,
   DraftSaveMode,
   EditorialProfile,
+  EditorialIntakeView,
+  EditorialIntent,
   EditorialSystemView,
   HealthState,
   ImageMaterial,
@@ -121,6 +123,18 @@ export interface StoryDetailResult {
   feedback: ProductFeedbackEvent[];
 }
 
+export interface EditorialIntakeResult extends StoryDetailResult {
+  intake: EditorialIntakeView;
+}
+
+export interface EditorialDraftRequestResult {
+  job: ProductJob;
+  intake: EditorialIntakeView;
+  contentPackage?: ContentPackage;
+  draft?: ArticleDraft;
+  reused: boolean;
+}
+
 export interface StoryExplanationRequestResult {
   job?: ProductJob;
   story: StoryView;
@@ -170,6 +184,14 @@ export const api = {
   shell: () => request<ShellView>("/api/shell"),
   today: () => request<TodayView>("/api/today"),
   story: (storyId: string) => request<StoryDetailResult>(`/api/stories/${storyId}`),
+  editorialIntake: (runId: string, candidateId: string) => request<EditorialIntakeResult>(
+    `/api/editorial-intakes/${encodeURIComponent(runId)}/${encodeURIComponent(candidateId)}`,
+  ),
+  createEditorialDraft: (runId: string, candidateId: string, intent?: EditorialIntent) =>
+    request<EditorialDraftRequestResult>(
+      `/api/editorial-intakes/${encodeURIComponent(runId)}/${encodeURIComponent(candidateId)}/draft`,
+      { method: "POST", body: JSON.stringify({ intent }) },
+    ),
   explainStory: (storyId: string, force = false) => request<StoryExplanationRequestResult>(`/api/stories/${storyId}/explanation`, {
     method: "POST",
     body: JSON.stringify({ force }),
@@ -371,7 +393,7 @@ export const api = {
   createCommunityDraft: (
     runId: string,
     candidateId: string,
-    mode: "source" | "translation" | "curation",
+    mode: "article" | "source" | "translation" | "curation",
   ) => request<ArticleDraft>(`/api/runs/${runId}/candidates/${candidateId}/community-draft`, {
     method: "POST",
     body: JSON.stringify({ mode }),

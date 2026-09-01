@@ -232,6 +232,20 @@ export interface AutomaticSourceReading {
   lastError?: string;
 }
 
+export interface EditorialQualityBaseline {
+  version: "editorial-golden/v1";
+  total: number;
+  passed: number;
+  failed: number;
+  categoryCounts: {
+    news: number;
+    community: number;
+    source: number;
+    visual: number;
+    writing: number;
+  };
+}
+
 export interface EditorialSystemView {
   profile: EditorialProfile;
   brief: EditorialBrief;
@@ -239,6 +253,7 @@ export interface EditorialSystemView {
   suggestions: EditorialSuggestion[];
   automaticReading: AutomaticSourceReading;
   writingMemories: WritingMemoryView;
+  qualityBaseline: EditorialQualityBaseline;
 }
 
 export interface WeChatChannelSettings {
@@ -803,6 +818,8 @@ export interface DraftFactClaim {
   claim: string;
   status: DraftFactEvidenceStatus;
   sourceUrl?: string;
+  /** Every source the generator explicitly mapped to this paragraph. */
+  sourceUrls?: string[];
   sourceLabel?: string;
   sourceExcerpt?: string;
   capturedAt: string;
@@ -843,15 +860,20 @@ export interface ArticleDraft {
     originalUrl: string;
     generatedBy: string;
     aiTraceId?: string;
+    reviewTraceId?: string;
     storyId?: string;
     contentPackageId?: string;
+    /** Writing-policy revision; permits a safe regeneration after pipeline fixes. */
+    generatorRevision?: string;
+    /** Newer safe draft that replaced this historical attempt without deleting it. */
+    supersededByDraftId?: string;
   };
   /**
    * Marks a private source-derived working copy. It is never silently treated
    * as publication-ready, even when the source text was imported verbatim.
    */
   sourceMaterial?: {
-    kind: "community";
+    kind: "community" | "article";
     mode: "source" | "translation" | "curation";
     sourceUrl: string;
     sourceLabel: string;

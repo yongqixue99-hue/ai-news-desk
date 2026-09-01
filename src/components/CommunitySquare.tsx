@@ -148,7 +148,7 @@ function CommunityCardActions({
         </a>
       ) : null}
       <button type="button" className="community-draft-cta" onClick={onDraft}>
-        <BookOpenText size={14} />放入草稿箱
+        <BookOpenText size={14} />{hasLinkedSource ? "核验来源并写稿" : "整理社区素材"}
       </button>
       <span className="community-feedback-buttons" aria-label="调整社区推荐">
         <button

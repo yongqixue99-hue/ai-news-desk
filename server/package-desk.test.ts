@@ -108,6 +108,55 @@ test("PackageDesk freezes claims, community quotations and governed images", () 
   assert.equal(contentPackage.sources.every((source) => /^https?:\/\//u.test(source.url)), true);
 });
 
+test("PackageDesk keeps a community discovery path out of a news fact ledger", () => {
+  const state = createDefaultState();
+  state.runs = [run([candidate("linked-community-source", {
+    sourceType: "hackernews",
+    sourceName: "Hacker News",
+    sourceRole: "community",
+    title: "CEO fired developers to make room for AI; developers create open-source AI CEO",
+    url: "https://github.com/SenteLabsAI/OpenExecutive",
+    canonicalUrl: "https://github.com/SenteLabsAI/OpenExecutive",
+    engagement: {
+      points: 120,
+      comments: 42,
+      discussionUrl: "https://news.ycombinator.com/item?id=49458418",
+    },
+    briefing: {
+      titleZh: "开发者把 AI CEO 做成开源项目 Open Executive",
+      summaryZh: "一则 Hacker News 线索指向名为 Open Executive 的开源项目。",
+      basis: "full-source",
+      generatedAt: "2026-08-30T01:10:00.000Z",
+      providerId: "codex",
+      explanation: {
+        voiceVersion: 2,
+        whatHappenedZh: "Open Executive 是一个开源多代理项目。",
+        keyPointsZh: [
+          "Open Executive 的 GitHub 页面显示仓库采用 Apache 2.0 许可。",
+          "项目由一个 Orchestrator 和八个专门 Agent 组成。",
+        ],
+        unknownsZh: ["标题中的裁员说法尚无独立来源支持。"],
+      },
+    },
+  })])];
+  const story = buildStories(state, "2026-08-30T02:00:00.000Z")[0]!;
+
+  const contentPackage = buildContentPackage(state, {
+    storyId: story.id,
+    intent: "news",
+    mode: "brief",
+    now: "2026-08-30T02:00:00.000Z",
+  });
+
+  assert.equal(contentPackage.status, "ready");
+  assert.equal(contentPackage.discussionSamples.length, 0);
+  assert.equal(contentPackage.facts.some((claim) => /Hacker News|线索/u.test(claim.text)), false);
+  assert.deepEqual(contentPackage.facts.map((claim) => claim.text), [
+    "Open Executive 的 GitHub 页面显示仓库采用 Apache 2.0 许可。",
+    "项目由一个 Orchestrator 和八个专门 Agent 组成。",
+  ]);
+});
+
 test("PackageDesk orders original article images before article screenshots regardless of discovery order", () => {
   const state = createDefaultState();
   state.runs = [run([candidate("official", {
@@ -305,7 +354,7 @@ test("a frozen package survives source deletion and rejects replaced package byt
   );
 });
 
-test("one local source image suppresses generated filler even while its rights need review", () => {
+test("one local source image suppresses generated filler and stays visible in the private draft while rights need review", async () => {
   const state = createDefaultState();
   const migratedPath = process.platform === "win32"
     ? "/Users/old-mac/ai-news-desk/media/x-two.jpg"
@@ -350,6 +399,12 @@ test("one local source image suppresses generated filler even while its rights n
   assert.equal(contentPackage.assets.filter((asset) => asset.rightsDecision === "blocked").length, 2);
   assert.equal(contentPackage.assets.filter((asset) => asset.origin === "source" && asset.localReady).length, 1);
   assert.equal(contentPackage.assets.some((asset) => asset.origin === "library"), false);
+  const frozen = await freezeContentPackageAssets(contentPackage, {
+    assetRoot: path.join(packageFixtureRoot, "rights-review-packages"),
+  });
+  const privateDraftImages = await sourceImagesFromContentPackage(frozen);
+  assert.deepEqual(privateDraftImages.map((image) => image.id), ["x-one"]);
+  assert.equal(frozen.assets.find((asset) => asset.sourceImageId === "x-one")?.rightsDecision, "blocked");
 });
 
 test("a complete Creative Commons portrait remains allowed through PackageDesk", () => {

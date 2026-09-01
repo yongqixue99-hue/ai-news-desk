@@ -36,6 +36,38 @@ test("uncertain facts and unlicensed inserted images block readiness", () => {
   assert.match(result.blockers.join("\n"), /版权状态待确认/);
 });
 
+test("known editorial limits and image notes are not mislabeled as unresolved facts", () => {
+  const input = draft();
+  input.uncertainties = [
+    "仍未知：公开资料没有说明项目的生产环境用户数量",
+    "部分原图可进入私人编辑草稿，但公众号同步前会被预检拦截，需确认权利或替换",
+  ];
+
+  const result = evaluateDraftReadiness(input, "wechat", "2026-08-13T01:00:00.000Z");
+
+  assert.equal(result.ready, true);
+  assert.deepEqual(result.factBlockers, []);
+});
+
+test("a source working copy remains blocked by its explicit rights state", () => {
+  const input = draft();
+  input.sourceMaterial = {
+    kind: "article",
+    mode: "source",
+    sourceUrl: "https://example.com/article",
+    sourceLabel: "Example",
+    rights: "check-required",
+    requiresEditorialReview: true,
+  };
+  input.uncertainties = ["这是来源派生的私有编辑草稿，转载、翻译与图片使用权均需在发布前确认。"];
+
+  const result = evaluateDraftReadiness(input, "wechat", "2026-08-13T01:00:00.000Z");
+
+  assert.equal(result.ready, false);
+  assert.match(result.blockers.join("\n"), /原文工作副本.*权利/u);
+  assert.doesNotMatch(result.blockers.join("\n"), /待确认事实/u);
+});
+
 test("a local licensed file is not accepted as its own permission evidence", () => {
   const input = draft();
   input.images = [{

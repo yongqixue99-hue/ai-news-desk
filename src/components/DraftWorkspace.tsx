@@ -48,6 +48,8 @@ import {
 } from "../draft-stability";
 import { RichArticleEditor, type RichArticleEditorHandle } from "./RichArticleEditor";
 import { WeChatDraftPanel } from "./WeChatDraftPanel";
+import { DraftEvidencePanel } from "./DraftEvidencePanel";
+import { buildDraftEvidenceView } from "../../server/draft-evidence-view.js";
 import { draftStatusLabel, manualDraftStatuses } from "../draft-lifecycle-view";
 import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
 import { getRovingTabTarget } from "../hooks/rovingTabs";
@@ -223,7 +225,11 @@ export function DraftWorkspace({
   onSyncWeChatDraft,
   onConfirmPublished,
 }: DraftWorkspaceProps) {
-  const selected = drafts.find((draft) => draft.id === activeDraftId) ?? drafts[0];
+  const [showShelvedDrafts, setShowShelvedDrafts] = useState(false);
+  const currentDrafts = drafts.filter((draft) => draft.status !== "shelved");
+  const shelvedDraftCount = drafts.length - currentDrafts.length;
+  const visibleDrafts = showShelvedDrafts ? drafts : currentDrafts;
+  const selected = visibleDrafts.find((draft) => draft.id === activeDraftId) ?? currentDrafts[0] ?? drafts[0];
   const [editing, setEditing] = useState<ArticleDraft | undefined>(() => editableDraft(selected));
   const [viewMode, setViewMode] = useState<ViewMode>(() => isCompactViewport() ? "edit" : "split");
   const [compactLayout, setCompactLayout] = useState(isCompactViewport);
@@ -315,6 +321,10 @@ export function DraftWorkspace({
   }, [selected?.id]);
 
   useEffect(() => {
+    if (!showShelvedDrafts && selected && activeDraftId !== selected.id) onSelectDraft(selected.id);
+  }, [activeDraftId, onSelectDraft, selected?.id, showShelvedDrafts]);
+
+  useEffect(() => {
     editingRef.current = editing;
   }, [editing]);
 
@@ -355,11 +365,11 @@ export function DraftWorkspace({
 
   const filteredDrafts = useMemo(() => {
     const query = draftSearch.trim().toLowerCase();
-    if (!query) return drafts;
-    return drafts.filter((draft) =>
+    if (!query) return visibleDrafts;
+    return visibleDrafts.filter((draft) =>
       `${draft.title} ${draft.sources[0]?.label ?? ""}`.toLowerCase().includes(query),
     );
-  }, [draftSearch, drafts]);
+  }, [draftSearch, visibleDrafts]);
 
   const save = useCallback(async (mode: DraftSaveMode = "manual") => {
     if (activeSaveRef.current) {
@@ -1005,9 +1015,9 @@ export function DraftWorkspace({
     });
   };
 
-  const verifiedSourceCount = editing.sources.filter((source) => source.verified).length;
-  const factClaims = editing.factClaims ?? [];
-  const weakFactClaims = factClaims.filter((claim) => ["excerpt-only", "inference", "unverified"].includes(claim.status));
+  const evidenceView = buildDraftEvidenceView(editing);
+  const factClaims = [...evidenceView.automaticClaims, ...evidenceView.attentionClaims];
+  const verifiedSourceCount = evidenceView.eventSources.filter((source) => source.verified).length;
   const insertedImages = editing.images.filter((placement) => insertedMediaIds.has(placement.id));
   const uncheckedImageCount = insertedImages.filter((placement) => placement.image.rights === "check-required").length;
   const recentCommunityOptions = recentCommunities.filter((community, index, values) =>
@@ -1030,9 +1040,9 @@ export function DraftWorkspace({
   const readiness = [
     { label: `标题 ${editing.title.trim().length}/60 字`, ok: editing.title.trim().length > 0 && editing.title.trim().length <= 60 },
     { label: `正文已插入 ${insertedMediaIds.size} 张图`, ok: insertedMediaIds.size > 0 },
-    { label: `来源核验 ${verifiedSourceCount}/${editing.sources.length}`, ok: editing.sources.length > 0 && verifiedSourceCount === editing.sources.length },
-    { label: factClaims.length ? `事实证据 ${factClaims.length - weakFactClaims.length}/${factClaims.length}` : "尚未建立事实级证据", ok: factClaims.length > 0 && weakFactClaims.length === 0 },
-    { label: editing.uncertainties.length ? `${editing.uncertainties.length} 项事实待确认` : "没有未解决的事实项", ok: editing.uncertainties.length === 0 },
+    { label: `事件来源 ${verifiedSourceCount}/${evidenceView.eventSources.length}`, ok: evidenceView.eventSources.length > 0 && evidenceView.sourceDecisionCount === 0 },
+    { label: factClaims.length ? `事实证据 ${evidenceView.automaticFactCount}/${factClaims.length}` : "尚未建立事实证据", ok: factClaims.length > 0 && evidenceView.attentionClaims.length === 0 },
+    { label: evidenceView.factUncertainties.length ? `${evidenceView.factUncertainties.length} 项事实待确认` : "没有需要你确认的事实", ok: evidenceView.factUncertainties.length === 0 },
     { label: uncheckedImageCount ? `${uncheckedImageCount} 张图片版权待确认` : "图片来源标注已检查", ok: uncheckedImageCount === 0 },
   ];
   const saveStateText = switchingDraftId
@@ -1063,31 +1073,31 @@ export function DraftWorkspace({
       : "暂不能填入：请先启动 CDP 备用浏览器。"
     : loginRequired
       ? "小黑盒已打开登录页；完成登录后，再点击下方按钮重新填入。"
-    : editing.uncertainties.length
-      ? `可以填入，但发布前还有 ${editing.uncertainties.length} 项事实需要确认。`
+    : evidenceView.factUncertainties.length
+      ? `可以填入，但发布前还有 ${evidenceView.factUncertainties.length} 项事实需要确认。`
       : uncheckedImageCount
         ? `可以填入，但发布前还有 ${uncheckedImageCount} 张图片需要确认转载权限。`
         : "检查已通过；只填入编辑器，不会自动发布。";
   const passedReadinessCount = readiness.filter((item) => item.ok).length;
-  const nextAction = weakFactClaims.length || editing.uncertainties.length || verifiedSourceCount < editing.sources.length
+  const nextAction = evidenceView.factDecisionCount
     ? {
         tab: "sources" as const,
-        label: `核验 ${weakFactClaims.length + editing.uncertainties.length + Math.max(0, editing.sources.length - verifiedSourceCount)} 项事实与来源`,
-        detail: "先处理证据不足和待确认事实，再进入发布检查。",
-        action: "打开资料核验",
+        label: `确实有 ${evidenceView.factDecisionCount} 项需要你确认`,
+        detail: "这里只保留会影响正文准确性的事实问题。",
+        action: "查看待确认项",
       }
-    : uncheckedImageCount || insertedMediaIds.size === 0
+    : evidenceView.sourceDecisionCount
       ? {
-          tab: "images" as const,
-          label: uncheckedImageCount ? `确认 ${uncheckedImageCount} 张图片权限` : "为正文加入一张合格来源图",
-          detail: "发布前需要至少一张正文图，并确认图片转载边界。",
-          action: "打开图片面板",
+          tab: "sources" as const,
+          label: "系统还在补充事件来源",
+          detail: "这不是你的待办；正文仍可阅读，来源补齐后会自动更新状态。",
+          action: "查看当前证据",
         }
       : {
-          tab: "publish" as const,
-          label: publisherReady ? "完成平台检查并填入编辑器" : "连接发布渠道",
-          detail: publisherReady ? "事实与图片已经通过本地检查，下一步核对平台兼容性。" : publishGuidance,
-          action: publisherReady ? "打开发布检查" : "查看连接状态",
+          tab: "sources" as const,
+          label: "草稿已生成，先看正文即可",
+          detail: "事实和来源已经自动整理；图片权限与平台设置只在你准备发布时提示。",
+          action: "查看自动核验",
         };
   const handleUtilityTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!utilityTab) return;
@@ -1150,7 +1160,7 @@ export function DraftWorkspace({
         >
           <FolderOpen size={17} />
           <span>草稿库</span>
-          <small>{drafts.length}</small>
+          <small>{currentDrafts.length}</small>
         </button>
 
         <div className="draft-document-heading">
@@ -1208,7 +1218,7 @@ export function DraftWorkspace({
           <small>{nextAction.detail}</small>
         </div>
         <div className="draft-readiness-summary" aria-label={`发布准备 ${passedReadinessCount}/${readiness.length}`}>
-          <span>事实 {factClaims.length - weakFactClaims.length}/{factClaims.length || 0}</span>
+          <span>事实 {evidenceView.automaticFactCount}/{factClaims.length || 0}</span>
           <span>图片 {insertedMediaIds.size} 张</span>
           <span>微信 {wechatPublication ? "已发布" : editing.publicationConfirmations?.wechat?.staleAt ? "新版本待同步" : editing.wechatDraft ? "已同步" : "未同步"}</span>
           <span>小黑盒 {xiaoheihePublication ? "已发布" : editing.publicationConfirmations?.xiaoheihe?.staleAt ? "新版本待填入" : editing.publisherReceipt ? "已填入" : "未填入"}</span>
@@ -1220,7 +1230,9 @@ export function DraftWorkspace({
         <div className="source-material-banner" role="note">
           <ShieldAlert size={17} />
           <span>
-            <strong>{editing.sourceMaterial.mode === "source" ? "社区原文工作副本" : editing.sourceMaterial.mode === "translation" ? "社区忠实翻译工作副本" : "社区整理工作副本"}</strong>
+            <strong>{editing.sourceMaterial.mode === "source"
+              ? editing.sourceMaterial.kind === "article" ? "来源原文工作副本" : "社区原文工作副本"
+              : editing.sourceMaterial.mode === "translation" ? "社区忠实翻译工作副本" : "社区整理工作副本"}</strong>
             <small>文字和图片已保留来源，但转载、翻译和图片权利仍是“发布前需确认”；这里只用于你的私有编辑。</small>
           </span>
           <a href={editing.sourceMaterial.sourceUrl} target="_blank" rel="noreferrer">核对来源 <ExternalLink size={12} /></a>
@@ -1231,7 +1243,7 @@ export function DraftWorkspace({
         {draftLibraryOpen ? (
           <aside className="draft-library-drawer" aria-label="草稿库">
             <div className="drawer-title-row">
-              <div><strong>草稿库</strong><span>{drafts.length} 篇文章</span></div>
+              <div><strong>草稿库</strong><span>{currentDrafts.length} 篇当前草稿</span></div>
               <button aria-label="关闭草稿库" onClick={() => setDraftLibraryOpen(false)}><X size={16} /></button>
             </div>
             <label className="draft-search-field">
@@ -1255,6 +1267,11 @@ export function DraftWorkspace({
               ))}
               {!filteredDrafts.length ? <p className="drawer-empty">没有匹配的草稿</p> : null}
             </div>
+            {shelvedDraftCount ? (
+              <button className="draft-history-toggle" onClick={() => setShowShelvedDrafts((value) => !value)}>
+                <Archive size={14} />{showShelvedDrafts ? "隐藏历史旧稿" : `查看历史旧稿 ${shelvedDraftCount}`}
+              </button>
+            ) : null}
           </aside>
         ) : null}
 
@@ -1440,45 +1457,13 @@ export function DraftWorkspace({
               ) : null}
 
               {utilityTab === "sources" ? (
-                <>
-                  <section className="utility-section">
-                    <div className="inspector-heading"><h3>新闻来源</h3><span>{verifiedSourceCount}/{editing.sources.length} 已核验</span></div>
-                    <div className="source-proof-list">
-                      {editing.sources.map((source, index) => (
-                        <a href={source.url} target="_blank" rel="noreferrer" key={`${source.url}-${index}`}>
-                          <span className={source.verified ? "proof-check verified" : "proof-check"}>{source.verified ? <CheckCircle2 size={16} /> : null}</span>
-                          <span><strong>{source.label}</strong><small>{source.url}</small></span>
-                          <ExternalLink size={15} />
-                        </a>
-                      ))}
-                    </div>
-                  </section>
-                  <section className="utility-section">
-                    <div className="inspector-heading"><h3>事实检查</h3><span className={editing.uncertainties.length ? "has-risk" : ""}>{editing.uncertainties.length ? `${editing.uncertainties.length} 项待确认` : "已通过"}</span></div>
-                    <div className="uncertainty-block">
-                      {editing.uncertainties.length ? <ul>{editing.uncertainties.map((item) => <li key={item}><span>{item}</span><button onClick={() => updateEditing({ uncertainties: editing.uncertainties.filter((entry) => entry !== item) })}>已人工核验</button></li>)}</ul> : <span className="low-risk"><Check size={14} />没有未解决的事实项</span>}
-                    </div>
-                  </section>
-                  <section className="utility-section fact-evidence-section">
-                    <div className="inspector-heading"><h3>事实级证据</h3><span className={weakFactClaims.length ? "has-risk" : ""}>{factClaims.length ? `${factClaims.length - weakFactClaims.length}/${factClaims.length} 强证据` : "未建立"}</span></div>
-                    {factClaims.length ? (
-                      <div className="fact-claim-list">
-                        {factClaims.map((claim) => (
-                          <article key={claim.id} className={`fact-claim ${claim.status}`}>
-                            <div><strong>{claim.claim}</strong><select aria-label={`证据状态：${claim.claim}`} value={claim.status} onChange={(event) => updateFactClaim(claim.id, event.target.value as NonNullable<ArticleDraft["factClaims"]>[number]["status"])}><option value="full-source">已核对完整原文</option><option value="cross-confirmed">已由多源确认</option><option value="excerpt-only">仅摘要支持</option><option value="inference">编辑推断</option><option value="unverified">尚未核验</option></select></div>
-                            {claim.sourceExcerpt ? <blockquote>{claim.sourceExcerpt.slice(0, 220)}</blockquote> : null}
-                            {claim.sourceUrl ? <a href={claim.sourceUrl} target="_blank" rel="noreferrer">查看证据 <ExternalLink size={12} /></a> : null}
-                          </article>
-                        ))}
-                      </div>
-                    ) : <p className="empty-inspector">旧草稿还没有事实级证据。重新运行文章分析 Agent 后再发布，或逐条人工核验来源。</p>}
-                  </section>
-                  <section className="utility-section provenance-card">
-                    <strong>运行溯源</strong>
-                    <span>Run ID：{editing.runId}</span>
-                    <a href={editing.provenance.originalUrl} target="_blank" rel="noreferrer">打开原始链接 <ExternalLink size={14} /></a>
-                  </section>
-                </>
+                <DraftEvidencePanel
+                  draft={editing}
+                  onUpdateFactClaim={updateFactClaim}
+                  onResolveFactUncertainty={(item) => updateEditing({
+                    uncertainties: editing.uncertainties.filter((entry) => entry !== item),
+                  })}
+                />
               ) : null}
 
               {utilityTab === "images" ? (
@@ -1805,8 +1790,10 @@ export function DraftWorkspace({
                       dirty={dirty}
                       saving={saving}
                       busy={busy}
+                      copiedFormatted={copiedRich}
                       onSaveDraft={() => save("manual")}
                       onSync={syncWeChat}
+                      onCopyFormatted={copyFormatted}
                       onConfirmPublished={() => confirmPublication("wechat")}
                       onOpenSettings={onOpenPublisherSettings}
                     />
@@ -1844,7 +1831,7 @@ export function DraftWorkspace({
                   {loginRequired ? "登录后重新填入" : "填入小黑盒编辑器"}
                 </button>
                 <p
-                  className={!publisherReady || loginRequired ? "publish-guidance blocked" : editing.uncertainties.length || uncheckedImageCount ? "publish-guidance warning" : "publish-guidance"}
+                  className={!publisherReady || loginRequired ? "publish-guidance blocked" : evidenceView.factUncertainties.length || uncheckedImageCount ? "publish-guidance warning" : "publish-guidance"}
                   id={`${editing.id}-publish-guidance`}
                 >
                   {publishGuidance}

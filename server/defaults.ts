@@ -23,6 +23,7 @@ import {
 import { sortCandidates } from "./scoring.js";
 import { normalizeWorkflowNotifications } from "./notifications.js";
 import { normalizeDraftPublicationState } from "./publication-state.js";
+import { normalizeDraftCatalog } from "./draft-catalog.js";
 
 const configuredDefaultSources: SourceConfig[] = [
   {
@@ -1613,11 +1614,11 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   const validDraftStatuses = new Set([
     "editing", "reviewing", "needs-images", "ready", "filled", "published", "shelved",
   ]);
-  state.drafts = (state.drafts ?? []).map((draft) => normalizeDraftPublicationState({
+  state.drafts = normalizeDraftCatalog((state.drafts ?? []).map((draft) => normalizeDraftPublicationState({
     ...draft,
     status: validDraftStatuses.has(draft.status) ? draft.status : "editing",
     contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
-  }));
+  })));
 
   const storedSources = state.sources ?? [];
   const defaultSourceIds = new Set(defaultSources.map((source) => source.id));

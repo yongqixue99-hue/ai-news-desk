@@ -16,6 +16,34 @@ export type AssignmentMode =
   | "watch"
   | "skip";
 
+/**
+ * What the editor wants to make is independent from where the signal was
+ * discovered. A community link may still be a news story, while a first-hand
+ * post may be preserved as source material.
+ */
+export type EditorialIntent = "news" | "source" | "community";
+
+export type EditorialSourceKind = "news-source" | "linked-community" | "self-contained-community";
+
+export interface EditorialIntentOption {
+  intent: EditorialIntent;
+  label: string;
+  description: string;
+  mode: Exclude<AssignmentMode, "watch" | "skip">;
+  available: boolean;
+  reason: string;
+  workingCopy: boolean;
+}
+
+export interface EditorialIntakeView {
+  storyId: string;
+  signalId: string;
+  sourceKind: EditorialSourceKind;
+  recommendedIntent: EditorialIntent;
+  recommendationReason: string;
+  options: EditorialIntentOption[];
+}
+
 export type EvidenceStrength = "strong" | "moderate" | "weak";
 
 export interface AssignmentDecision {
@@ -46,6 +74,10 @@ export interface StorySignalView {
   publishedAt: string;
   fetchedAt: string;
   isCommunity: boolean;
+  /** A community link whose external page has been read as factual evidence. */
+  factBearing?: boolean;
+  /** The record contains both an external source URL and a discussion URL. */
+  linkedSource?: boolean;
   engagement?: { points?: number; comments?: number };
   feedback?: CandidateFeedbackKind;
   drafted: boolean;
@@ -243,10 +275,35 @@ export interface ContentPackageSource {
   isCommunity: boolean;
 }
 
+/**
+ * Immutable source text captured before a source-preserving working copy is
+ * generated. It is deliberately separate from EvidenceClaim: an author's
+ * original wording is useful editing material, but it is not automatically a
+ * verified fact.
+ */
+export interface SourceMaterialSnapshot {
+  signalId: string;
+  sourceKind: "community-post" | "linked-page" | "article";
+  sourceLabel: string;
+  url: string;
+  author?: string;
+  originalTitle: string;
+  originalText: string;
+  originalLanguage: "zh" | "en" | "mixed";
+  basis: "full-source" | "community-post";
+  capturedAt: string;
+  fromCache?: boolean;
+  truncated: boolean;
+  rightsNotice: string;
+}
+
 export interface ContentPackage {
   id: string;
   storyId: string;
   mode: Exclude<AssignmentMode, "watch" | "skip">;
+  /** New packages record the editor's intent; legacy packages infer it from mode. */
+  intent?: EditorialIntent;
+  intakeReason?: string;
   title: string;
   createdAt: string;
   facts: EvidenceClaim[];
@@ -255,6 +312,8 @@ export interface ContentPackage {
   discussionSamples: DiscussionSample[];
   sourceSignalIds: string[];
   sources: ContentPackageSource[];
+  /** Present only when the editor explicitly asks for a source working copy. */
+  sourceMaterials?: SourceMaterialSnapshot[];
   imageIds: string[];
   assets: AssetCandidate[];
   uncertainties: string[];

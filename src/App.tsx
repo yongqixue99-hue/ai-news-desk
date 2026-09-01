@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { AppShell } from "./components/AppShell";
 import { AISettingsPage } from "./components/AISettingsPage";
 import { BootstrapStatusPage } from "./components/BootstrapStatusPage";
-import { CommunitySquare } from "./components/CommunitySquare";
+import { CommunityWorkspace } from "./components/CommunityWorkspace";
 import { EditorialSystemPage } from "./components/EditorialSystemPage";
 import { Notice, type NoticeState } from "./components/Notice";
 import { ProductJobCenter } from "./components/ProductJobCenter";
@@ -33,6 +33,7 @@ import type {
   ImageMaterial,
   EvidenceReviewSelection,
   EditorialProfile,
+  EditorialIntent,
   EditorialSuggestionStatus,
   EditorialSystemView,
   IntakeReviewRecord,
@@ -594,7 +595,7 @@ function App() {
   const createCommunityDraftForRun = async (
     runId: string,
     candidateId: string,
-    mode: "source" | "translation" | "curation",
+    mode: "article" | "source" | "translation" | "curation",
   ) => {
     setActionBusy(true);
     try {
@@ -604,7 +605,51 @@ function App() {
       navigate("drafts");
       setNotice({
         kind: "success",
-        message: `社区内容已进入草稿箱，并带入 ${draft.images.filter((image) => image.afterParagraph >= 0).length} 张来源图片。发布前仍需确认转载、翻译和图片权利。`,
+        message: mode === "article"
+          ? `已读取关联来源并生成新闻稿，社区讨论没有替代事实主干；正文带入 ${draft.images.filter((image) => image.afterParagraph >= 0).length} 张来源图片。`
+          : `社区内容已进入草稿箱，并带入 ${draft.images.filter((image) => image.afterParagraph >= 0).length} 张来源图片。发布前仍需确认转载、翻译和图片权利。`,
+      });
+    } catch (error) {
+      reportError(error);
+      throw error;
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const createEditorialDraftForSignal = async (
+    runId: string,
+    candidateId: string,
+    intent: EditorialIntent,
+  ) => {
+    setActionBusy(true);
+    try {
+      const queued = await api.createEditorialDraft(runId, candidateId, intent);
+      let draftId = queued.draft?.id;
+      let imageCount = queued.draft?.images.filter((image) => image.afterParagraph >= 0).length ?? 0;
+      let job = queued.job;
+      for (let attempt = 0; !draftId && attempt < 150 && ["queued", "running", "retrying"].includes(job.status); attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+        job = await api.productJob(job.id);
+        if (job.result && typeof job.result === "object") {
+          const result = job.result as { draftId?: unknown; imageCount?: unknown };
+          if (typeof result.draftId === "string") draftId = result.draftId;
+          if (typeof result.imageCount === "number") imageCount = result.imageCount;
+        }
+      }
+      if (!draftId || job.status !== "complete") {
+        throw new Error(job.error || "成稿任务没有完成，请在任务进度中查看原因。");
+      }
+      await refresh();
+      setActiveDraftId(draftId);
+      navigate("drafts");
+      setNotice({
+        kind: "success",
+        message: intent === "news"
+          ? `新闻稿已生成：事实来自原始页面，社区评论没有替代新闻主干；带入 ${imageCount} 张来源图片。`
+          : intent === "source"
+            ? `原文整理稿已生成：尽量保留原材料结构，并带入 ${imageCount} 张来源图片。`
+            : `社区观察稿已生成：只使用达到采样门槛的讨论，并带入 ${imageCount} 张来源图片。`,
       });
     } catch (error) {
       reportError(error);
@@ -616,7 +661,7 @@ function App() {
 
   const createCommunityCandidateDraft = async (
     candidateId: string,
-    mode: "source" | "translation" | "curation",
+    mode: "article" | "source" | "translation" | "curation",
   ) => {
     if (!activeRun) return;
     return createCommunityDraftForRun(activeRun.id, candidateId, mode);
@@ -1158,15 +1203,14 @@ function App() {
           }}
         />
       ) : null}
-      {page === "community" && activeProvider ? (
-        <CommunitySquare
+      {page === "community" ? (
+        <CommunityWorkspace
           runs={state.runs}
           sources={state.sources}
           settings={state.settings}
-          activeProvider={activeProvider}
           onFeedback={setCommunityCandidateFeedback}
           onRestoreFeedback={restoreCommunityCandidateFeedback}
-          onCreateDraft={createCommunityDraftForRun}
+          onCreateDraft={createEditorialDraftForSignal}
           onAutoBrief={autoBriefCommunityCandidates}
         />
       ) : null}

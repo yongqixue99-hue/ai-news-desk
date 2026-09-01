@@ -5,6 +5,7 @@ export interface EditorialImageCandidate {
   width?: number;
   height?: number;
   rights?: string;
+  sourceUrl?: string;
   /** 1 source image, 2 source screenshot, 3 entity, 4 related, 5 generated fallback. */
   editorialPriority?: 1 | 2 | 3 | 4 | 5;
 }
@@ -23,8 +24,8 @@ interface EditorialImagePlanInput {
   imagePolicy?: "source" | "screenshot" | "none";
 }
 
-const imageNoise = /logo|icon|avatar|emoji|tracking|pixel|spinner|loading|sprite|favicon|author|profile|badge|button/i;
-const badgeCaption = /^(?:license|python\s*\d|node(?:\.js)?\s*\d|next\.?js\s*\d|build|coverage|version|npm|downloads?|stars?|forks?)\b/i;
+const imageNoise = /logo|icon|avatar|emoji|tracking|pixel|spinner|loading|sprite|favicon|author|profile|badge|button|shields\.io/i;
+const badgeCaption = /^(?:license|python\s*\d+(?:\.\d+)*|node(?:\.js)?\s*\d+(?:\.\d+)*|next\.?js\s*\d+(?:\.\d+)*|build|coverage|version|npm|downloads?|stars?|forks?)\b/i;
 
 export const eligibleEditorialImage = (image: EditorialImageCandidate) => {
   if (image.rights === "expired") return false;
@@ -33,6 +34,31 @@ export const eligibleEditorialImage = (image: EditorialImageCandidate) => {
   if (image.width && image.width < 320) return false;
   if (image.height && image.height < 180) return false;
   return true;
+};
+
+const semanticImageKey = (image: EditorialImageCandidate) => {
+  const caption = image.caption.normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+  if (caption.length < 16 || /^原文(?:配图|图表)\s*\d*$/u.test(caption)) return "";
+  let source = image.sourceUrl || "";
+  try {
+    source = new URL(source).hostname.replace(/^www\./u, "");
+  } catch {
+    // Keep the supplied source identity when it is not an HTTP URL.
+  }
+  return `${source}|${caption}`;
+};
+
+export const uniqueEligibleEditorialImages = <T extends EditorialImageCandidate>(images: T[]) => {
+  const seenUrls = new Set<string>();
+  const seenSemantic = new Set<string>();
+  return images.filter((image) => {
+    if (!eligibleEditorialImage(image) || seenUrls.has(image.url)) return false;
+    const semanticKey = semanticImageKey(image);
+    if (semanticKey && seenSemantic.has(semanticKey)) return false;
+    seenUrls.add(image.url);
+    if (semanticKey) seenSemantic.add(semanticKey);
+    return true;
+  });
 };
 
 const comparisonTokens = (value: string) => {
@@ -84,12 +110,7 @@ export const planEditorialImagePlacements = ({
   const limit = Math.max(0, Math.floor(imageLimit));
   if (imagePolicy === "none" || limit === 0 || paragraphs.length === 0) return [];
 
-  const seenUrls = new Set<string>();
-  const eligible = availableImages.filter((image) => {
-    if (!eligibleEditorialImage(image) || seenUrls.has(image.url)) return false;
-    seenUrls.add(image.url);
-    return true;
-  });
+  const eligible = uniqueEligibleEditorialImages(availableImages);
   if (!eligible.length) return [];
 
   const nonGenerated = eligible.filter((image) => (image.editorialPriority ?? 1) < 5);

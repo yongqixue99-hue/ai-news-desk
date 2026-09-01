@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
 
 const executableCandidates = process.platform === "win32"
   ? [
@@ -7,12 +9,18 @@ const executableCandidates = process.platform === "win32"
     process.env["PROGRAMFILES(X86)"] ? `${process.env["PROGRAMFILES(X86)"]}\\Google\\Chrome\\Application\\chrome.exe` : "",
     process.env.LOCALAPPDATA ? `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe` : "",
   ]
-  : [
-    "/usr/bin/google-chrome",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-  ];
+  : process.platform === "darwin"
+    ? [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      path.join(homedir(), "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+      "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+    ]
+    : [
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+    ];
 
 export const findChromeExecutable = async () => {
   for (const candidate of executableCandidates.filter(Boolean)) {

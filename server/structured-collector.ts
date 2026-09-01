@@ -26,7 +26,10 @@ const normalizedText = (value: string) => value.replace(/\s+/g, " ").trim();
 
 const plainText = (value: string) => {
   if (!value.trim()) return "";
-  return normalizedText(cheerio.load(`<body>${value}</body>`).text());
+  const spacedBlocks = value
+    .replace(/<br\s*\/?\s*>/giu, " ")
+    .replace(/<\/(?:p|div|li|blockquote|h[1-6]|pre)>/giu, "$& ");
+  return normalizedText(cheerio.load(`<body>${spacedBlocks}</body>`).text());
 };
 
 const validDate = (value: string) => {
@@ -170,6 +173,7 @@ interface HackerNewsItem {
   score?: number;
   time?: number;
   title?: string;
+  text?: string;
   type?: string;
   url?: string;
   deleted?: boolean;
@@ -210,6 +214,7 @@ const collectHackerNews = async (
           source_type: "hackernews",
           title: item.title,
           url: absoluteHttpUrl(item.url || discussionUrl, discussionUrl) || discussionUrl,
+          content: plainText(item.text || "").slice(0, 12_000) || undefined,
           author: item.by,
           published_at: item.time ? new Date(item.time * 1_000).toISOString() : undefined,
           fetched_at: fetchedAt,

@@ -1,5 +1,6 @@
 import { evaluateMaterialPublishEligibility, normalizeGovernedMaterial } from "./material-governance.js";
 import { inspectLocalImageFile } from "./image-readiness.js";
+import { buildDraftEvidenceView } from "./draft-evidence-view.js";
 import type { ArticleDraft, DraftReadinessResult } from "./types.js";
 
 export const evaluateDraftReadiness = (
@@ -7,12 +8,14 @@ export const evaluateDraftReadiness = (
   platform = "xiaoheihe",
   checkedAt = new Date().toISOString(),
 ): DraftReadinessResult => {
-  const factClaims = draft.factClaims ?? [];
-  const weakClaims = factClaims.filter((claim) => ["excerpt-only", "inference", "unverified"].includes(claim.status));
+  const evidence = buildDraftEvidenceView(draft);
   const factBlockers = [
-    ...draft.uncertainties.map((item) => `待确认事实：${item}`),
-    ...weakClaims.map((claim) => `证据不足：${claim.claim}`),
+    ...evidence.factUncertainties.map((item) => `待确认事实：${item}`),
+    ...evidence.attentionClaims.map((claim) => `证据不足：${claim.claim}`),
   ];
+  const sourceMaterialBlockers = draft.sourceMaterial?.rights === "check-required"
+    ? ["原文工作副本的转载或翻译权利尚未确认。"]
+    : [];
   const imageReviews = draft.images.map((placement) => {
     const material = normalizeGovernedMaterial({
       id: placement.id,
@@ -55,6 +58,7 @@ export const evaluateDraftReadiness = (
   });
   const blockers = [
     ...factBlockers,
+    ...sourceMaterialBlockers,
     ...imageReviews.flatMap((review) => review.blockers.map((item) => `图片：${item}`)),
   ];
   const warnings = imageReviews.flatMap((review) => review.warnings);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   BookOpenCheck,
+  BadgeCheck,
   BrainCircuit,
   Check,
   Clock3,
@@ -239,6 +240,26 @@ export function EditorialSystemPage({
             )}
           </div>
           {view.automaticReading.lastError ? <p className="editorial-inline-error">{view.automaticReading.lastError}</p> : null}
+        </div>
+      </section>
+
+      <section className={`editorial-quality-baseline ${view.qualityBaseline.failed ? "failed" : "ready"}`} aria-labelledby="editorial-quality-title">
+        <div className="editorial-quality-icon"><BadgeCheck size={22} /></div>
+        <div className="editorial-quality-copy">
+          <span className="editorial-card-kicker">生成前硬门槛</span>
+          <h2 id="editorial-quality-title">编辑质量基线</h2>
+          <p>提示词、社区路由、证据或图片规则一旦破坏人工样本，草稿会停止保存。</p>
+          <div className="editorial-quality-categories">
+            <span>新闻 {view.qualityBaseline.categoryCounts.news}</span>
+            <span>社区 {view.qualityBaseline.categoryCounts.community}</span>
+            <span>原文 {view.qualityBaseline.categoryCounts.source}</span>
+            <span>写作 {view.qualityBaseline.categoryCounts.writing}</span>
+            <span>图片 {view.qualityBaseline.categoryCounts.visual}</span>
+          </div>
+        </div>
+        <div className="editorial-quality-score">
+          <strong>{view.qualityBaseline.passed}/{view.qualityBaseline.total}</strong>
+          <span>{view.qualityBaseline.failed ? `${view.qualityBaseline.failed} 条失败` : "全部通过"}</span>
         </div>
       </section>
 

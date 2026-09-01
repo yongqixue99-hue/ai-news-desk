@@ -60,6 +60,7 @@ const page = (images: SourceImage[]): ExtractedPage => ({
 });
 
 const memoryDependencies = (input: {
+  signal?: StorySignalView;
   images?: SourceImage[];
   extracted?: SourceImage[];
   screenshots?: SourceImage[];
@@ -68,6 +69,7 @@ const memoryDependencies = (input: {
   generated?: SourceImage[];
   stylized?: SourceImage;
 }) => {
+  const sourceSignal = input.signal ?? signal;
   let images = input.images ?? [];
   const calls = { extract: 0, localize: 0, capture: 0, search: 0, stylize: 0, generate: 0, requested: [] as number[] };
   const dependencies: VisualHydrationDependencies = {
@@ -77,7 +79,7 @@ const memoryDependencies = (input: {
       originalTitle: signal.title,
       summary: "Example story summary",
       images,
-      signals: [signal],
+      signals: [sourceSignal],
     }),
     extract: async () => {
       calls.extract += 1;
@@ -134,6 +136,43 @@ test("two remote URLs do not satisfy local readiness and are downloaded", async 
   assert.equal(result.publishReadyImageCount, 0);
   assert.equal(result.rightsReviewImageCount, 2);
   assert.equal(memory.images().length, 2, "localized copies replace, rather than duplicate, remote records");
+});
+
+test("a community link with a verified external page participates in visual hydration", async () => {
+  const linkedSignal: StorySignalView = {
+    ...signal,
+    sourceName: "Hacker News",
+    sourceRole: "community",
+    sourceType: "hackernews",
+    isCommunity: true,
+    factBearing: true,
+    linkedSource: true,
+    discussionUrl: "https://news.ycombinator.com/item?id=42",
+  };
+  const memory = memoryDependencies({
+    signal: linkedSignal,
+    images: [image("open-executive-demo", { sourceUrl: linkedSignal.url })],
+  });
+
+  const result = await runVisualHydration("story-linked-community", 1, memory.dependencies);
+
+  assert.equal(memory.calls.localize, 1);
+  assert.equal(result.localReadyImageCount, 1);
+});
+
+test("badge images never satisfy visual readiness or consume a download slot", async () => {
+  const memory = memoryDependencies({
+    images: [
+      image("license-badge", { caption: "License: Apache 2.0" }),
+      image("product-demo", { caption: "Open Executive 产品演示" }),
+    ],
+  });
+
+  const result = await runVisualHydration("story-no-badges", 1, memory.dependencies);
+
+  assert.equal(memory.calls.localize, 1);
+  assert.equal(memory.images().some((entry) => entry.id === "product-demo" && Boolean(entry.localPath)), true);
+  assert.equal(result.discoveredImageCount, 1);
 });
 
 test("online identity art keeps its real-source tier after editorial styling", async () => {
@@ -321,10 +360,10 @@ test("visual counts reject stale paths and require both platform permissions", (
     }),
   ]);
 
-  assert.equal(counts.discoveredImageCount, 8);
-  assert.equal(counts.localReadyImageCount, 3);
+  assert.equal(counts.discoveredImageCount, 7, "expired images leave the editorial inventory entirely");
+  assert.equal(counts.localReadyImageCount, 2);
   assert.equal(counts.publishReadyImageCount, 1);
-  assert.equal(counts.rightsReviewImageCount, 2);
+  assert.equal(counts.rightsReviewImageCount, 1);
 });
 
 test("visual merge never aliases colliding IDs or shared CDN URLs across sources", () => {

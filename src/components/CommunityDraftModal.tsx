@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   BookOpenText,
+  Newspaper,
   Check,
   FileText,
   Image as ImageIcon,
@@ -13,7 +14,7 @@ import {
 import { useDialogA11y } from "../hooks/useDialogA11y";
 import type { AiProviderConfig, Candidate } from "../types";
 
-export type CommunityDraftMode = "source" | "translation" | "curation";
+export type CommunityDraftMode = "article" | "source" | "translation" | "curation";
 
 interface CommunityDraftModalProps {
   candidate: Candidate;
@@ -29,6 +30,12 @@ const options: Array<{
   icon: typeof FileText;
 }> = [
   {
+    mode: "article",
+    label: "先读来源，再写新闻",
+    description: "以关联文章、项目或公告为事实主干；社区只作补充，少量评论不会撑成正文。",
+    icon: Newspaper,
+  },
+  {
     mode: "source",
     label: "导入私有原文素材",
     description: "不经过模型改写，保留讨论顺序供你编辑；不代表可以整篇转载发布。",
@@ -43,7 +50,7 @@ const options: Array<{
   {
     mode: "curation",
     label: "社区观点素材包",
-    description: "分开整理事件、社区观点与关键原句，并补入可核验来源，推荐作为默认方式。",
+    description: "只有你明确想研究讨论本身时再用，整理观点与原句，不冒充新闻稿。",
     icon: Layers3,
   },
 ];
@@ -54,7 +61,9 @@ export function CommunityDraftModal({
   onClose,
   onCreate,
 }: CommunityDraftModalProps) {
-  const [mode, setMode] = useState<CommunityDraftMode>("curation");
+  const hasLinkedSource = Boolean(candidate.engagement?.discussionUrl
+    && candidate.engagement.discussionUrl !== candidate.url);
+  const [mode, setMode] = useState<CommunityDraftMode>(hasLinkedSource ? "article" : "curation");
   const [busy, setBusy] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useDialogA11y<HTMLElement>({
@@ -91,8 +100,8 @@ export function CommunityDraftModal({
         <header>
           <span className="quick-draft-icon"><BookOpenText size={20} /></span>
           <div>
-            <h2 id="community-draft-title">把社区内容放进草稿箱</h2>
-            <p id="community-draft-description">优先读取社区讨论原句，同时从关联来源文章带入可用图片，再由你专项修改。</p>
+            <h2 id="community-draft-title">这条热点要怎么处理</h2>
+            <p id="community-draft-description">有独立来源时先把新闻讲清；只有你明确选择时，才把社区讨论整理成素材。</p>
           </div>
           <button ref={closeButtonRef} className="modal-close" aria-label="关闭" disabled={busy} onClick={onClose}><X size={17} /></button>
         </header>
@@ -105,7 +114,7 @@ export function CommunityDraftModal({
         </div>
 
         <div className="community-draft-options" role="radiogroup" aria-label="社区入稿方式">
-          {options.map((option) => {
+          {options.filter((option) => option.mode !== "article" || hasLinkedSource).map((option) => {
             const Icon = option.icon;
             const selected = mode === option.mode;
             return (
@@ -137,7 +146,7 @@ export function CommunityDraftModal({
             <button className="secondary-button" disabled={busy} onClick={onClose}>取消</button>
             <button className="primary-button" disabled={busy} onClick={() => void submit()}>
               {busy ? <LoaderCircle className="spin" size={15} /> : null}
-              {busy ? "正在读取正文与图片" : "放入草稿箱"}
+              {busy ? "正在读取正文与图片" : mode === "article" ? "读取来源并生成新闻稿" : "放入草稿箱"}
             </button>
           </div>
         </footer>

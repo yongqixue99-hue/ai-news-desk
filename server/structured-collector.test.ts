@@ -110,3 +110,33 @@ test("portable collector bounds simultaneous source fetches", async () => {
 
   assert.ok(maximumActive <= 4, `expected at most four simultaneous sources, saw ${maximumActive}`);
 });
+
+test("Hacker News Ask/Show posts preserve the original self text as source material", async () => {
+  const hackerNewsSource: SourceConfig = {
+    ...source,
+    id: "hackernews",
+    name: "Hacker News",
+    kind: "hackernews",
+    url: "https://news.ycombinator.com",
+    role: "community",
+  };
+  const result = await collectPortableStructuredSources([hackerNewsSource], { topicIds: ["ai"] }, {
+    now: () => new Date("2026-09-01T03:00:00.000Z"),
+    fetcher: async (url) => String(url).includes("topstories.json")
+      ? new Response(JSON.stringify([42]), { status: 200 })
+      : new Response(JSON.stringify({
+          id: 42,
+          type: "story",
+          by: "builder",
+          title: "Show HN: A detailed launch note",
+          text: "<p>I built this after testing three approaches.</p><p>The important tradeoff is latency.</p>",
+          score: 20,
+          descendants: 8,
+          time: 1_788_236_400,
+        }), { status: 200 }),
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.content, "I built this after testing three approaches. The important tradeoff is latency.");
+  assert.equal(result.items[0]?.url, "https://news.ycombinator.com/item?id=42");
+});

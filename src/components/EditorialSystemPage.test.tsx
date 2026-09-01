@@ -57,6 +57,13 @@ test("content strategy hands real-time selection off to the Today desk instead o
       applicationUnlocked: false,
       memories: [],
     },
+    qualityBaseline: {
+      version: "editorial-golden/v1",
+      total: 20,
+      passed: 20,
+      failed: 0,
+      categoryCounts: { news: 6, community: 6, source: 3, visual: 2, writing: 3 },
+    },
   };
 
   const markup = renderToStaticMarkup(createElement(EditorialSystemPage, {
@@ -78,4 +85,6 @@ test("content strategy hands real-time selection off to the Today desk instead o
   assert.match(markup, />打开今日编辑台</u);
   assert.doesNotMatch(markup, /A duplicated real-time candidate title/u);
   assert.doesNotMatch(markup, /当前值得处理的事件|>进入候选池</u);
+  assert.match(markup, /编辑质量基线/u);
+  assert.match(markup, /20\/20/u);
 });

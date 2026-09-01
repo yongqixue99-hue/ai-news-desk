@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ExternalLink, Image as ImageIcon, Info, LoaderCircle, MessageSquareText, Settings2, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Copy, ExternalLink, Image as ImageIcon, Info, LoaderCircle, MessageSquareText, Settings2, ShieldCheck } from "lucide-react";
 import { bodyHtmlFor } from "../editor-utils";
 import { currentPlatformPublicationConfirmation } from "../publication-view";
+import { buildDraftEvidenceView } from "../../server/draft-evidence-view.js";
 import type { ArticleDraft, WeChatChannelSettings, WeChatDraftSyncReceipt } from "../types";
 
 interface WeChatDraftPanelProps {
@@ -10,8 +11,10 @@ interface WeChatDraftPanelProps {
   dirty: boolean;
   saving: boolean;
   busy: boolean;
+  copiedFormatted: boolean;
   onSaveDraft: () => Promise<unknown>;
   onSync: (input: { author?: string; digest?: string; contentSourceUrl?: string }) => Promise<WeChatDraftSyncReceipt | undefined>;
+  onCopyFormatted: () => Promise<void>;
   onConfirmPublished: () => Promise<void>;
   onOpenSettings: () => void;
 }
@@ -26,7 +29,7 @@ const formatSyncTime = (value: string) => new Intl.DateTimeFormat("zh-CN", {
   hour12: false,
 }).format(new Date(value));
 
-export function WeChatDraftPanel({ draft, settings, dirty, saving, busy, onSaveDraft, onSync, onConfirmPublished, onOpenSettings }: WeChatDraftPanelProps) {
+export function WeChatDraftPanel({ draft, settings, dirty, saving, busy, copiedFormatted, onSaveDraft, onSync, onCopyFormatted, onConfirmPublished, onOpenSettings }: WeChatDraftPanelProps) {
   const [author, setAuthor] = useState(settings.defaultAuthor);
   const [digest, setDigest] = useState(() => shortenedDigest(draft.take));
   const [contentSourceUrl, setContentSourceUrl] = useState(draft.provenance.originalUrl || "");
@@ -51,8 +54,7 @@ export function WeChatDraftPanel({ draft, settings, dirty, saving, busy, onSaveD
       .filter((placement): placement is ArticleDraft["images"][number] => Boolean(placement));
   }, [draft.bodyHtml, draft.images]);
   const cover = insertedImages[0];
-  const weakFactCount = (draft.factClaims ?? []).filter((claim) =>
-    ["excerpt-only", "inference", "unverified"].includes(claim.status)).length;
+  const evidenceView = buildDraftEvidenceView(draft);
   const imagePermissionIssues = insertedImages.filter((placement) => {
     const platforms = placement.image.allowedPlatforms
       ?? (placement.image.rights === "owned" ? ["*"] : []);
@@ -66,8 +68,9 @@ export function WeChatDraftPanel({ draft, settings, dirty, saving, busy, onSaveD
     { label: `摘要 ${characterCount(digest)}/120 字`, ok: characterCount(digest) <= 120 },
     { label: cover ? `已选首张正文图为封面` : "正文缺少封面图", ok: Boolean(cover) },
     { label: imagePermissionIssues ? `${imagePermissionIssues} 张图缺少微信许可或本地文件` : `已检查 ${insertedImages.length} 张正文图`, ok: imagePermissionIssues === 0 },
-    { label: draft.uncertainties.length ? `${draft.uncertainties.length} 项事实待确认` : "没有未解决的事实项", ok: draft.uncertainties.length === 0 },
-    { label: weakFactCount ? `${weakFactCount} 条事实证据不足` : "事实证据可交付", ok: weakFactCount === 0 },
+    { label: evidenceView.factDecisionCount ? `${evidenceView.factDecisionCount} 项事实需要确认` : "没有需要你确认的事实", ok: evidenceView.factDecisionCount === 0 },
+    { label: evidenceView.attentionClaims.length ? `${evidenceView.attentionClaims.length} 条事实证据不足` : "事实证据可交付", ok: evidenceView.attentionClaims.length === 0 },
+    { label: evidenceView.sourceRightsDecisionCount ? "原文工作副本的使用权待确认" : "没有原文转载限制", ok: evidenceView.sourceRightsDecisionCount === 0 },
   ];
   const configured = Boolean(settings.appId && settings.appSecretConfigured);
   const wechatPublication = dirty ? undefined : currentPlatformPublicationConfirmation(draft, "wechat");
@@ -160,12 +163,15 @@ export function WeChatDraftPanel({ draft, settings, dirty, saving, busy, onSaveD
       {syncError ? <p className="preflight-error wechat-sync-error">{syncError}</p> : null}
 
       <div className="wechat-sync-actions">
+        <button type="button" className="secondary-button full wechat-copy-fallback" disabled={busy || saving} onClick={() => void onCopyFormatted()}>
+          <Copy size={16} />{copiedFormatted ? "公众号排版已复制" : "复制公众号排版"}
+        </button>
         <button type="button" className="primary-button full" disabled={busy || saving || syncing || !canSync} onClick={() => void sync()}>
           {busy || saving || syncing ? <LoaderCircle className="spin" size={17} /> : <MessageSquareText size={17} />}
           {receipt ? "更新公众号草稿" : "同步到公众号草稿箱"}
         </button>
         <p className={!configured || !canSync ? "publish-guidance blocked" : "publish-guidance"}>
-          {!configured ? "请先连接公众号并通过草稿接口测试。" : canSync ? "只创建或更新草稿，绝不会自动发布。" : "请先处理上方标记的问题。"}
+          {!configured ? "接口不可用时，复制后粘贴到公众号编辑器；需要自动同步时再连接公众号。" : canSync ? "只创建或更新草稿，绝不会自动发布。" : "请先处理上方标记的问题；也可以先复制排版到公众号编辑器。"}
         </p>
       </div>
     </>

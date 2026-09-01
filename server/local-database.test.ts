@@ -73,6 +73,23 @@ test("content packages are durable and addressable by both package and story", a
   });
 });
 
+test("source snapshots are checksummed and replace only the same normalized URL", async () => {
+  await withDatabase(async (_root, store) => {
+    const first = {
+      urlKey: "https://example.com/article",
+      requestedUrl: "https://example.com/article?utm_source=test",
+      canonicalUrl: "https://example.com/article",
+      page: { title: "第一版", text: "完整正文", images: [] },
+    };
+    store.saveSourceSnapshot(first);
+    assert.deepEqual(store.getSourceSnapshot<typeof first.page>(first.urlKey)?.page, first.page);
+
+    store.saveSourceSnapshot({ ...first, page: { ...first.page, title: "第二版" } });
+    assert.equal(store.getSourceSnapshot<typeof first.page>(first.urlKey)?.page.title, "第二版");
+    assert.equal(store.getSourceSnapshot("https://example.com/other"), undefined);
+  });
+});
+
 test("editorial memory evidence is idempotent and can be disabled or deleted", async () => {
   await withDatabase(async (_root, store) => {
     const input = {

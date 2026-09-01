@@ -26,6 +26,7 @@ export const jobActivitySummary = (job: ProductJob, now = Date.now()) => {
 };
 
 const jobLabel = (job: ProductJob) => {
+  if (job.type === "draft-from-editorial-intake") return "读取来源并生成文章";
   if (job.type === "build-content-package") return "按 1→5 建立素材包";
   if (job.type === "supplement-story-evidence") return "补强独立新闻来源";
   if (job.type === "hydrate-story-assets") return "缓存新闻来源图片";
