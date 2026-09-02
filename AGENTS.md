@@ -61,7 +61,7 @@ Routes and React components should consume these interfaces instead of reimpleme
   - `npm test`
   - `npm run eval:editorial`
   - `npm run build`
-- The baseline at the 2026-09-01 handoff is 448 tests passing and editorial golden set 20/20.
+- The 2026-09-02 macOS merge baseline is 498 tests passing and editorial golden set 20/20. Test discovery totals may differ by shell or platform; zero failures is the invariant.
 - Add a failing regression test before fixing an editorial or migration bug.
 - Preserve unrelated user changes in a dirty worktree.
 - Before running any Git command, explain its purpose and expected effect to the user in Chinese.
@@ -71,4 +71,4 @@ Routes and React components should consume these interfaces instead of reimpleme
 - Start with manual `npm run dev`; install the Scheduled Task only after tests, build, and browser checks pass.
 - Use the existing PowerShell scripts under `scripts/` for service installation and verification.
 - A fresh clone does not contain the Mac `.workflow` directory or protected credentials.
-- Do not manually unpack a portable archive over a live Windows workspace. Portable archive import and path rebasing remain explicit follow-up work.
+- Do not manually unpack a portable archive over a live Windows workspace. Use the implemented read-only preview and confirmed transactional import flow.

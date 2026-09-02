@@ -164,7 +164,13 @@ export const createPortableWorkflowArchive = async (input: {
     await writeFile(path.join(staging, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     const fileName = `ai-news-desk-full-${createdAt.replace(/[:.]/gu, "-")}.tar.gz`;
     const archivePath = path.join(backupsRoot, fileName);
-    await execFileAsync("tar", ["-czf", archivePath, "-C", staging, "."], { maxBuffer: 1024 * 1024 });
+    await execFileAsync("tar", ["-czf", archivePath, "-C", staging, "."], {
+      maxBuffer: 1024 * 1024,
+      // macOS bsdtar otherwise serializes Finder/resource-fork metadata as
+      // undeclared `._*` AppleDouble files. They are not application data and
+      // make an otherwise valid portable archive fail its own manifest gate.
+      env: { ...process.env, COPYFILE_DISABLE: "1" },
+    });
     await prunePortableArchives(backupsRoot, 5);
     return { archivePath, fileName, manifest };
   } finally {

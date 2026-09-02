@@ -1,12 +1,29 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { gunzipSync } from "node:zlib";
 import { createDefaultState } from "./defaults.js";
 import { createPortableWorkflowArchive, createWorkflowBackup, prunePortableArchives, verifyWorkflowBackup } from "./data-management.js";
 import { LocalDatabase } from "./local-database.js";
+
+const rawTarEntryNames = async (archivePath: string) => {
+  const tar = gunzipSync(await readFile(archivePath));
+  const entries: string[] = [];
+  let offset = 0;
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const nul = header.indexOf(0, 0);
+    entries.push(header.subarray(0, nul < 0 || nul > 100 ? 100 : nul).toString("utf8"));
+    const sizeText = header.subarray(124, 136).toString("ascii").replace(/\0/gu, "").trim();
+    const size = sizeText ? Number.parseInt(sizeText, 8) : 0;
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return entries;
+};
 
 test("workflow backups are checksummed and round-trip the complete state", () => {
   const state = createDefaultState();
@@ -65,6 +82,11 @@ test("portable archive contains a consistent database, media, materials and chec
     assert.match(entries, /materials\/source-chart\.png/u);
     assert.match(entries, /state-backup\.json/u);
     assert.match(entries, /manifest\.json/u);
+    const rawEntries = await rawTarEntryNames(archive.archivePath);
+    assert.ok(
+      !rawEntries.some((entry) => /(?:^|\/)\._/u.test(entry.replace(/^(?:\.\/)+/u, ""))),
+      `portable export leaked macOS AppleDouble metadata: ${rawEntries.join(", ")}`,
+    );
     assert.equal(archive.manifest.secretsIncluded, false);
     assert.ok(archive.manifest.files.every((file) => /^[a-f0-9]{64}$/u.test(file.sha256)));
     assert.ok(archive.manifest.files.some((file) => file.path === "newsdesk.db"));

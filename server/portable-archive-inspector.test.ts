@@ -39,13 +39,15 @@ const tarHeader = (name: string, bytes: number, type = "0", linkName = "") => {
 
 const writeTarGzip = async (
   archivePath: string,
-  entries: Array<{ name: string; content?: string; type?: string; linkName?: string }>,
-  trailingEntries: Array<{ name: string; content?: string; type?: string; linkName?: string }> = [],
+  entries: Array<{ name: string; content?: string | Buffer; type?: string; linkName?: string }>,
+  trailingEntries: Array<{ name: string; content?: string | Buffer; type?: string; linkName?: string }> = [],
   trailingZeroBytes = 0,
 ) => {
   const blocks: Buffer[] = [];
   const appendEntries = (items: typeof entries) => items.forEach((entry) => {
-    const content = Buffer.from(entry.content ?? "", "utf8");
+    const content = Buffer.isBuffer(entry.content)
+      ? entry.content
+      : Buffer.from(entry.content ?? "", "utf8");
     blocks.push(tarHeader(entry.name, content.length, entry.type, entry.linkName), content);
     const padding = (512 - (content.length % 512)) % 512;
     if (padding) blocks.push(Buffer.alloc(padding));
@@ -58,7 +60,7 @@ const writeTarGzip = async (
   await writeFile(archivePath, gzipSync(Buffer.concat(blocks)));
 };
 
-const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 
 const paxRecord = (key: string, value: string) => {
   const body = `${key}=${value}\n`;
@@ -116,6 +118,73 @@ test("a complete portable archive can be inspected without importing it", async 
     assert.match(report.archiveSha256, /^[a-f0-9]{64}$/u);
   } finally {
     database.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("archive inspection discards legacy macOS AppleDouble metadata without extracting it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-archive-appledouble-"));
+  const state = createDefaultState();
+  const legacyStatePath = path.join(root, "state.json");
+  const databasePath = path.join(root, "snapshot.db");
+  const archivePath = path.join(root, "legacy-macos.tar.gz");
+  await writeFile(legacyStatePath, JSON.stringify(state), "utf8");
+  const database = await LocalDatabase.open({ workflowRoot: root, legacyStatePath, initialState: createDefaultState });
+  try {
+    database.createSnapshot(databasePath);
+    const databasePayload = await readFile(databasePath);
+    const backup = createWorkflowBackup(state, "2026-08-30T12:00:00.000Z");
+    const statePayload = Buffer.from(`${JSON.stringify(backup, null, 2)}\n`, "utf8");
+    const payloadFiles = [
+      { path: "newsdesk.db", content: databasePayload },
+      { path: "state-backup.json", content: statePayload },
+    ];
+    const manifest = {
+      format: "ai-news-desk-portable-backup",
+      version: 1,
+      createdAt: "2026-08-30T12:00:00.000Z",
+      databaseSchemaVersion: LOCAL_DATABASE_SCHEMA_VERSION,
+      stateVersion: WORKFLOW_STATE_VERSION,
+      stateChecksum: backup.checksum,
+      secretsIncluded: false,
+      files: payloadFiles.map((file) => ({
+        path: file.path,
+        bytes: file.content.length,
+        sha256: sha256(file.content),
+      })),
+    };
+    await writeTarGzip(archivePath, [
+      { name: "._.", content: "legacy macOS metadata" },
+      { name: "media/._preview.png", content: "legacy image metadata" },
+      ...payloadFiles.map((file) => ({ name: file.path, content: file.content })),
+      { name: "manifest.json", content: JSON.stringify(manifest) },
+    ]);
+
+    const report = await withVerifiedPortableArchive(archivePath, {}, async (verified) => {
+      await assert.rejects(stat(path.join(verified.payloadRoot, "._.")), { code: "ENOENT" });
+      await assert.rejects(stat(path.join(verified.payloadRoot, "media", "._preview.png")), { code: "ENOENT" });
+      return verified.report;
+    });
+
+    assert.equal(report.valid, true);
+    assert.equal(report.payloadFileCount, payloadFiles.length);
+  } finally {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an AppleDouble-looking traversal path is still rejected", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-archive-appledouble-traversal-"));
+  const archivePath = path.join(root, "unsafe-appledouble.tar.gz");
+  try {
+    await writeTarGzip(archivePath, [{ name: "../._escape", content: "not metadata" }]);
+
+    await assert.rejects(
+      inspectPortableArchive(archivePath),
+      (error) => error instanceof PortableArchiveInspectionError && error.code === "unsafe-entry",
+    );
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

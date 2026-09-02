@@ -15,6 +15,8 @@ const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
 const MAX_STATE_BACKUP_BYTES = 256 * 1024 * 1024;
 const DEFAULT_MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES = 200_000;
+const MAX_IGNORED_APPLEDOUBLE_ENTRY_BYTES = 64 * 1024 * 1024;
+const MAX_IGNORED_APPLEDOUBLE_TOTAL_BYTES = 256 * 1024 * 1024;
 
 export type PortableArchiveInspectionErrorCode =
   | "archive-unreadable"
@@ -172,6 +174,24 @@ const verifyHeaderChecksum = (header: Buffer) => {
 
 const normalizedTarPath = (value: string) => value.replace(/\\/gu, "/").replace(/^(?:\.\/)+/u, "");
 
+/**
+ * Older macOS exports can contain AppleDouble sidecars even though those files
+ * were never part of the manifest. We may discard a regular sidecar without
+ * extracting it, but only after ruling out absolute and traversal paths. All
+ * other entries continue through the strict cross-platform path validator.
+ */
+const ignorableAppleDoublePath = (value: string) => {
+  const normalized = normalizedTarPath(value);
+  const segments = normalized.split("/");
+  if (!normalized
+    || normalized.startsWith("/")
+    || /^[A-Za-z]:/u.test(normalized)
+    || segments.some((segment) => !segment || segment === "." || segment === ".." || /[\u0000-\u001f]/u.test(segment))) {
+    return undefined;
+  }
+  return segments.at(-1)?.startsWith("._") ? normalized : undefined;
+};
+
 const safeTarPath = (value: string) => {
   const normalized = normalizedTarPath(value);
   const segments = normalized.split("/");
@@ -316,6 +336,7 @@ const readTarFiles = async (
   let nextPaxPath: string | undefined;
   let nextLongPath: string | undefined;
   let entryCount = 0;
+  let ignoredAppleDoubleBytes = 0;
 
   while (true) {
     const header = await reader.readExactly(TAR_BLOCK_BYTES);
@@ -344,7 +365,16 @@ const readTarFiles = async (
     const size = octalField(header, 124, 12);
     const typeFlag = String.fromCharCode(header[156] ?? 0);
     const rawPath = nextPaxPath ?? nextLongPath ?? headerPath(header);
-    const regularEntryPath = typeFlag === "0" || typeFlag === "\0" ? safeTarPath(rawPath) : undefined;
+    const isRegularFile = typeFlag === "0" || typeFlag === "\0";
+    const appleDoubleEntryPath = isRegularFile ? ignorableAppleDoublePath(rawPath) : undefined;
+    if (appleDoubleEntryPath) {
+      ignoredAppleDoubleBytes += size;
+      if (size > MAX_IGNORED_APPLEDOUBLE_ENTRY_BYTES
+        || ignoredAppleDoubleBytes > MAX_IGNORED_APPLEDOUBLE_TOTAL_BYTES) {
+        throw new PortableArchiveInspectionError("archive-too-large", "完整归档中的 macOS 元数据超过安全上限");
+      }
+    }
+    const regularEntryPath = isRegularFile && !appleDoubleEntryPath ? safeTarPath(rawPath) : undefined;
     nextPaxPath = undefined;
     nextLongPath = undefined;
     const chunks: Buffer[] = [];
@@ -389,11 +419,12 @@ const readTarFiles = async (
       if (typeFlag === "g" && paxPath) {
         throw new PortableArchiveInspectionError("unsafe-entry", "完整归档包含不允许的全局 PAX 路径覆盖");
       }
-      if (typeFlag === "x" && paxPath) nextPaxPath = safeTarPath(paxPath);
+      if (typeFlag === "x" && paxPath) nextPaxPath = ignorableAppleDoublePath(paxPath) ?? safeTarPath(paxPath);
       continue;
     }
     if (typeFlag === "L") {
-      nextLongPath = safeTarPath((buffered ?? Buffer.alloc(0)).toString("utf8").replace(/\0+$/gu, ""));
+      const longPath = (buffered ?? Buffer.alloc(0)).toString("utf8").replace(/\0+$/gu, "");
+      nextLongPath = ignorableAppleDoublePath(longPath) ?? safeTarPath(longPath);
       continue;
     }
     if (typeFlag === "5") {
@@ -409,6 +440,7 @@ const readTarFiles = async (
     if (typeFlag !== "0" && typeFlag !== "\0") {
       throw new PortableArchiveInspectionError("archive-malformed", `完整归档包含不支持的 tar 条目类型：${typeFlag || "unknown"}`);
     }
+    if (appleDoubleEntryPath) continue;
     const entryPath = regularEntryPath ?? safeTarPath(rawPath);
     files.set(entryPath, { path: entryPath, bytes: size, sha256: hash.digest("hex") });
     if (entryPath === "manifest.json") manifestBuffer = buffered;
