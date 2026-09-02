@@ -17,10 +17,12 @@
     "eval:editorial": "tsx server/editorial-golden-cli.ts"
   },
   "dependencies": {
+    "@tiptap/core": "^3.29.2",
     "@tiptap/extension-image": "^3.29.2",
     "@tiptap/extension-link": "^3.29.2",
     "@tiptap/extension-placeholder": "^3.29.2",
     "@tiptap/react": "^3.29.2",
+    "@tiptap/pm": "^3.29.2",
     "@tiptap/starter-kit": "^3.29.2",
     "@types/sanitize-html": "^2.16.1",
     "@vitejs/plugin-react": "6.0.5",

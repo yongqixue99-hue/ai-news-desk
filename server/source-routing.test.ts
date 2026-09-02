@@ -83,6 +83,21 @@ test("site-scoped discovery routes include manual keywords and inclusive date ra
   assert.match(query, /before:2026-08-12/);
 });
 
+test("Anthropic official discovery covers root announcements through sitemap and broad site search", () => {
+  const anthropic = defaultSources.find((source) => source.id === "anthropic-official");
+  assert.ok(anthropic);
+
+  const feeds = routedFeedsForSource(anthropic, ["ai"]);
+
+  assert.equal(anthropic.discoveryOnly, false);
+  assert.ok(feeds.some((feed) => feed.url === "https://www.anthropic.com/sitemap.xml"));
+  const searchFeed = feeds.find((feed) => feed.url.includes("news.google.com/rss/search"));
+  assert.ok(searchFeed);
+  const query = new URL(searchFeed.url).searchParams.get("q") ?? "";
+  assert.match(query, /site:anthropic\.com/u);
+  assert.doesNotMatch(query, /site:anthropic\.com\/news/u);
+});
+
 test("esports sources cover LoL China and Korea, Dota 2 and Counter-Strike with visible notes", () => {
   const expected = [
     ["lpl-official", "英雄联盟 · LPL 国服"],

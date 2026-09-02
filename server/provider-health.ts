@@ -280,6 +280,10 @@ const compatibleHealth = async (
       if (!modelIds.includes(provider.model)) {
         return resultFor(provider, startedAt, dependencies, "warning", "model", `接口认证成功，但模型列表中未发现 ${provider.model}；请核对模型名称。`);
       }
+      const completionModel = provider.inlineCompletionModel?.trim();
+      if (completionModel && !modelIds.includes(completionModel)) {
+        return resultFor(provider, startedAt, dependencies, "warning", "model", `接口认证成功，但模型列表中未发现 Tab 补全模型 ${completionModel}；请核对补全模型名称。`);
+      }
       return resultFor(provider, startedAt, dependencies, "healthy", "none", "API Key 与模型列表检查通过；本次没有生成内容，也未消耗生成 token。");
     }
 

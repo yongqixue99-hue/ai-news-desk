@@ -230,6 +230,22 @@ function App() {
     }
   };
 
+  const openDraftById = async (draftId: string) => {
+    const next = await refresh();
+    if (!next.drafts.some((draft) => draft.id === draftId)) {
+      throw new Error("草稿已经建立，但刷新后暂时没有找到；请重新打开草稿库");
+    }
+    setActiveDraftId(draftId);
+    navigate("drafts");
+  };
+
+  const completeDraftInline = useCallback((
+    draftId: string,
+    input: { before: string; after: string },
+    signal: AbortSignal,
+    onPreview?: (preview: { text?: string; providerName?: string; model?: string }) => void,
+  ) => api.completeDraftInline(draftId, input, signal, onPreview), []);
+
   if ((!state || !editorialSystem) && page === "today") {
     return (
       <AppShell
@@ -244,7 +260,11 @@ function App() {
       >
         <Notice notice={notice} onClose={() => setNotice(null)} />
         <ProductJobCenter onOpenDrafts={() => void openLatestDraft()} />
-        <TodayPage onNavigate={navigate} onNotice={(kind, message) => setNotice({ kind, message })} />
+        <TodayPage
+          onNavigate={navigate}
+          onNotice={(kind, message) => setNotice({ kind, message })}
+          onOpenDraft={openDraftById}
+        />
       </AppShell>
     );
   }
@@ -1074,6 +1094,18 @@ function App() {
     }
   };
 
+  const saveCompletionProvider = async (providerId: string) => {
+    try {
+      const aiSettings = await api.saveCompletionProvider(providerId);
+      setState((current) => current ? { ...current, aiSettings } : current);
+      const providerName = aiSettings.providers.find((provider) => provider.id === providerId)?.name || "所选模型";
+      setNotice({ kind: "success", message: `已把 Tab 补全交给 ${providerName}；不会改变成稿和文章 Agent。` });
+    } catch (error) {
+      reportError(error);
+      throw error;
+    }
+  };
+
   const inspectPortableArchive = async (file: File) => {
     try {
       const preview = await api.inspectPortableArchive(file);
@@ -1203,6 +1235,7 @@ function App() {
         <TodayPage
           onNavigate={navigate}
           onNotice={(kind, message) => setNotice({ kind, message })}
+          onOpenDraft={openDraftById}
         />
       ) : null}
       {page === "workbench" ? (
@@ -1265,6 +1298,7 @@ function App() {
             onOpenWorkbench={() => navigate("workbench")}
             onSelectDraft={setActiveDraftId}
             onSave={saveDraft}
+            onCompleteInline={completeDraftInline}
             onLoadRevisions={loadDraftRevisions}
             onRestoreRevision={restoreDraftRevision}
             onUploadImage={uploadDraftImage}
@@ -1434,6 +1468,7 @@ function App() {
           onSaveProvider={saveAiProvider}
           onTestProvider={testAiProvider}
           onSaveAgentRole={saveAgentRole}
+          onSaveCompletionProvider={saveCompletionProvider}
           onSaveWritingReviewMode={saveWritingReviewMode}
           onSaveSkill={saveSkill}
           onImportSkill={importSkill}

@@ -103,6 +103,7 @@ test("production build opens the primary Windows browser routes", { timeout: 60_
       ["workbench", "新闻工作台"],
       ["drafts", "文章草稿"],
       ["sources", "新闻源"],
+      ["ai-settings", "AI 设置"],
     ] as const) {
       await page.goto(`${origin}/#${route}`, { waitUntil: "networkidle" });
       await page.getByRole("heading", { name: heading, exact: true }).waitFor();

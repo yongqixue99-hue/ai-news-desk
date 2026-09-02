@@ -93,6 +93,48 @@ export const parsePortableFeed = (
 ): RawHorizonItem[] => {
   const $ = cheerio.load(xml, { xmlMode: true });
   const entries = $("item, entry").toArray().slice(0, maximumItemsPerFeed);
+  if (!entries.length) {
+    const sitemapEntries = $("urlset > url").toArray()
+      .map((node) => {
+        const entry = $(node);
+        const url = absoluteHttpUrl(directChild($, entry, ["loc"]), input.feedUrl);
+        if (!url) return undefined;
+        const publishedAt = validDate(directChild($, entry, ["lastmod"]));
+        let title = "website update";
+        try {
+          const segment = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).at(-1) ?? "");
+          title = segment.replace(/\.[a-z0-9]+$/iu, "").replace(/[-_]+/gu, " ").trim() || title;
+        } catch {
+          // The URL was already validated; keep a neutral title if decoding fails.
+        }
+        return {
+          url,
+          title,
+          publishedAt,
+        };
+      })
+      .filter((entry): entry is { url: string; title: string; publishedAt: string | undefined } => Boolean(entry))
+      .sort((left, right) => Date.parse(right.publishedAt ?? "") - Date.parse(left.publishedAt ?? ""))
+      .slice(0, maximumItemsPerFeed);
+    return sitemapEntries.map((entry) => ({
+      id: stableItemId("rss", `${input.sourceId}:${entry.url}`),
+      source_type: "rss",
+      title: entry.title.slice(0, 500),
+      url: entry.url,
+      content: `Official website update: ${entry.title}`,
+      published_at: entry.publishedAt,
+      fetched_at: input.fetchedAt,
+      metadata: {
+        feed_name: input.feedName,
+        feed_url: input.feedUrl,
+        source_id: input.sourceId,
+        source_role: input.sourceRole,
+        source_format: "sitemap",
+        category: input.category,
+        collector: "portable-typescript",
+      },
+    } satisfies RawHorizonItem));
+  }
   return entries.flatMap((node) => {
     const entry = $(node);
     const title = plainText(directChild($, entry, ["title"]));

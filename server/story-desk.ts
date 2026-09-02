@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   EvidenceStrength,
+  ModelReleaseDossier,
   StoryExplanation,
   StorySignalView,
   StoryTrendView,
@@ -23,6 +24,7 @@ interface CandidateRecord {
 interface StoryCluster {
   records: CandidateRecord[];
   exactKeys: Set<string>;
+  versionKeys: Set<string>;
   titles: string[];
   /**
    * The first observed source identity is deliberately immutable. Page
@@ -37,6 +39,13 @@ const titleStopWords = new Set([
   "new", "news", "official", "report", "reports", "发布", "宣布", "推出", "消息", "报道", "关于", "一个", "这个",
 ]);
 const titleTokenCache = new Map<string, Set<string>>();
+const versionEventWords = new Set([
+  "announces", "announced", "introduces", "introducing", "launches", "launched", "releases", "released",
+  "model", "models", "preview", "version", "正式", "模型", "发布", "推出", "上线",
+]);
+const distinctiveModelProductWords = new Set([
+  "fable", "mythos", "astra", "opus", "sonnet", "haiku", "magistral", "devstral",
+]);
 
 const normalizedUrl = (value: string | undefined) => {
   if (!value) return "";
@@ -99,10 +108,53 @@ const recordTitles = (record: CandidateRecord) => [
   record.candidate.briefing?.titleZh,
 ].filter((value): value is string => Boolean(value));
 
+/**
+ * Model releases are often titled from different angles by the owner,
+ * hosting platforms, and communities. Preserve the product token immediately
+ * before a dotted version number so "Claude Fable 5.1" can join an AWS
+ * availability post without collapsing unrelated 5.1 releases.
+ */
+const versionedEntityKeys = (title: string) => {
+  const words = title
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}.+-]+/gu, " ")
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean);
+  const keys = new Set<string>();
+  for (let index = 1; index < words.length; index += 1) {
+    const version = words[index]?.match(/^v?(\d+(?:\.\d+)+(?:[-+][a-z0-9.-]+)?)$/u)?.[1];
+    if (!version) continue;
+    const product = words[index - 1]!;
+    if (product.length < 3 || versionEventWords.has(product)) continue;
+    keys.add(`${product}@${version}`);
+    const family = words[index - 2];
+    if (family && family.length >= 3 && !versionEventWords.has(family) && !titleStopWords.has(family)) {
+      keys.add(`${family}:${product}@${version}`);
+    }
+  }
+  return keys;
+};
+
+const versionKeysFor = (record: CandidateRecord) => new Set(
+  recordTitles(record).flatMap((title) => {
+    const keys = [...versionedEntityKeys(title)];
+    const normalized = title.normalize("NFKC").toLocaleLowerCase();
+    const looksLikeRelease = /(?:\bv?\d+(?:\.\d+)+\b|\b(?:release|released|releases|launch|launched|introducing|announce|announced|preview)\b|发布|推出|上线|预告)/iu.test(normalized);
+    if (!looksLikeRelease) return keys;
+    const words = normalized.replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(/\s+/u);
+    for (const word of words) {
+      if (distinctiveModelProductWords.has(word)) keys.push(`model:${word}`);
+    }
+    return keys;
+  }),
+);
+
 const exactKeysFor = (candidate: Candidate) => [...new Set([
   normalizedUrl(candidate.url),
   normalizedUrl(candidate.canonicalUrl),
-  candidate.evidenceRelation === "independent-report"
+  candidate.evidenceRelation === "independent-report" || candidate.evidenceRelation === "research-material"
     ? normalizedUrl(candidate.evidenceGroupUrl)
     : "",
   normalizedUrl(candidate.engagement?.discussionUrl),
@@ -124,13 +176,23 @@ const withinMergeWindow = (left: CandidateRecord, right: CandidateRecord) => {
 const clustersFor = (state: WorkflowState) => {
   const clusters: StoryCluster[] = [];
   const exactIndex = new Map<string, StoryCluster>();
+  const versionIndex = new Map<string, Set<StoryCluster>>();
   const titleIndex = new Map<string, Set<StoryCluster>>();
   const records = state.runs.flatMap((run) => run.candidates.map((candidate) => ({ runId: run.id, candidate })))
     .sort((left, right) => timeFor(left) - timeFor(right));
 
   for (const record of records) {
     const exactKeys = exactKeysFor(record.candidate);
+    const versionKeys = versionKeysFor(record);
     let cluster = exactKeys.map((key) => exactIndex.get(key)).find(Boolean);
+    if (!cluster) {
+      const versionCandidates = new Set<StoryCluster>();
+      for (const key of versionKeys) {
+        for (const candidateCluster of versionIndex.get(key) ?? []) versionCandidates.add(candidateCluster);
+      }
+      cluster = [...versionCandidates].find((candidateCluster) =>
+        withinMergeWindow(record, candidateCluster.records.at(-1)!));
+    }
     if (!cluster) {
       const nearbyClusters = new Set<StoryCluster>();
       for (const title of recordTitles(record)) {
@@ -146,13 +208,25 @@ const clustersFor = (state: WorkflowState) => {
       });
     }
     if (!cluster) {
-      cluster = { records: [], exactKeys: new Set(), titles: [], identityKey: initialIdentityFor(record) };
+      cluster = {
+        records: [],
+        exactKeys: new Set(),
+        versionKeys: new Set(),
+        titles: [],
+        identityKey: initialIdentityFor(record),
+      };
       clusters.push(cluster);
     }
     cluster.records.push(record);
     for (const key of exactKeys) {
       cluster.exactKeys.add(key);
       exactIndex.set(key, cluster);
+    }
+    for (const key of versionKeys) {
+      cluster.versionKeys.add(key);
+      const indexed = versionIndex.get(key) ?? new Set<StoryCluster>();
+      indexed.add(cluster);
+      versionIndex.set(key, indexed);
     }
     const titles = recordTitles(record);
     cluster.titles.push(...titles);
@@ -316,6 +390,185 @@ const explanationFor = (
   };
 };
 
+const modelReleaseTerms = /(?:\b(?:claude|fable|mythos|gpt(?:-[\w.]+)?|astra|gemini|llama|qwen|deepseek|grok|mistral|kimi|glm|ernie|minimax)\b|\bmodel\b|模型)/iu;
+const releaseEventTerms = /(?:\b(?:release(?:d|s)?|launch(?:ed|es)?|introduc(?:e|ed|es|ing)|announce(?:d|s)?|available|preview|coming soon|on the way|preparing)\b|发布|推出|上线|预告|即将|模型)/iu;
+
+const dossierTextFor = (records: CandidateRecord[]) => records.flatMap(({ candidate }) => [
+  candidate.title,
+  candidate.excerpt,
+  candidate.briefing?.titleZh,
+  candidate.briefing?.summaryZh,
+  candidate.briefing?.explanation?.whatHappenedZh,
+  candidate.briefing?.explanation?.readerBriefZh,
+  ...(candidate.briefing?.explanation?.keyPointsZh ?? []),
+  ...(candidate.briefing?.explanation?.unknownsZh ?? []),
+]).filter((value): value is string => Boolean(value)).join(" \n ");
+
+const hostnameFor = (value: string | undefined) => {
+  try { return value ? new URL(value).hostname.toLocaleLowerCase() : ""; } catch { return ""; }
+};
+
+const knownOwnerDomainsFor = (text: string) => {
+  const rules: Array<[RegExp, string[]]> = [
+    [/(?:anthropic|claude|fable|mythos)/iu, ["anthropic.com", "claude.com"]],
+    [/(?:openai|\bgpt(?:-[\w.]+)?\b|\bastra\b)/iu, ["openai.com"]],
+    [/(?:google|gemini|deepmind)/iu, ["google.com", "google.dev", "deepmind.google"]],
+    [/(?:meta|llama)/iu, ["meta.com"]],
+    [/(?:\bxai\b|\bgrok\b)/iu, ["x.ai"]],
+    [/(?:mistral)/iu, ["mistral.ai"]],
+    [/(?:deepseek)/iu, ["deepseek.com"]],
+    [/(?:qwen|alibaba|通义千问)/iu, ["qwen.ai", "qwenlm.ai", "alibabacloud.com"]],
+  ];
+  return rules.find(([pattern]) => pattern.test(text))?.[1] ?? [];
+};
+
+const domainMatches = (hostname: string, domain: string) => hostname === domain || hostname.endsWith(`.${domain}`);
+
+const releaseDossierFor = (
+  cluster: StoryCluster,
+  records: CandidateRecord[],
+  factRecords: CandidateRecord[],
+  imageCount: number,
+  localImageCount: number,
+): ModelReleaseDossier | undefined => {
+  const text = dossierTextFor(records);
+  const looksLikeRelease = modelReleaseTerms.test(text)
+    && (releaseEventTerms.test(text) || cluster.versionKeys.size > 0);
+  if (!looksLikeRelease) return undefined;
+
+  const ownerDomains = knownOwnerDomainsFor(text);
+  const officialRecords = factRecords.filter(({ candidate }) => candidate.sourceRole === "official");
+  const ownerOfficial = officialRecords.some(({ candidate }) => {
+    const hostname = hostnameFor(candidate.canonicalUrl || candidate.url);
+    return ownerDomains.length ? ownerDomains.some((domain) => domainMatches(hostname, domain)) : true;
+  });
+  const preview = /(?:\b(?:coming soon|on the way|preparing|not yet (?:released|available))\b|即将|预告|尚未发布|仍在准备)/iu.test(text);
+  const released = /(?:\b(?:released|launched|available now|generally available)\b|正式发布|已经发布|现已可用|上线)/iu.test(text);
+  const releaseStatus: ModelReleaseDossier["releaseStatus"] = preview && !released
+    ? "preview"
+    : released
+      ? "released"
+      : "reported";
+
+  const modelIdMentioned = /(?:\b(?:api\s+)?model\s*(?:id|identifier|snapshot)\b|模型\s*(?:ID|标识|快照))/iu.test(text);
+  const lifecycleMentioned = releaseStatus !== "reported"
+    || /(?:\b(?:ga|general availability|deprecated|deprecation|retired|sunset|preview)\b|正式版|预览版|弃用|下线|生命周期)/iu.test(text);
+  const accessSignals = [
+    /(?:\b(?:api|chatgpt|gemini app|ai studio|model studio|vertex ai|bedrock|azure|cloud console)\b|接口|应用端|开发者平台|云平台)/iu,
+    /(?:\b(?:available|availability|public beta|private beta|waitlist|rollout|region|countries|accounts?|tiers?)\b|开放范围|灰度|地区|区域|账号门槛|可用范围)/iu,
+  ].filter((pattern) => pattern.test(text)).length;
+  const specSignals = [
+    /(?:\bcontext(?: window)?\b|上下文窗口|上下文长度)/iu,
+    /(?:\b(?:maximum|max) output\b|最大输出)/iu,
+    /(?:\b(?:parameters?|weights?)\b|参数量|权重)/iu,
+    /(?:\b(?:multimodal|vision|audio|image input|video input|tool use|function calling|thinking|reasoning|fim)\b|多模态|视觉|音频|图像输入|视频输入|工具调用|思考模式|推理模式)/iu,
+  ].filter((pattern) => pattern.test(text)).length;
+  const pricingMentioned = /(?:\b(?:pricing|price|costs?)\b|定价|价格|费用)/iu.test(text);
+  const pricingExplicitlyUnknown = /(?:\b(?:pricing|price)\b[^.。]{0,30}\b(?:unknown|unannounced|not (?:yet )?(?:announced|available))\b|(?:尚未|还未|未)(?:公布|说明|提供)?[^。；]{0,12}(?:定价|价格|费用)|(?:定价|价格|费用)[^。；]{0,12}(?:尚未|还未|未知|待定))/iu.test(text);
+  const exactPricing = pricingMentioned && !pricingExplicitlyUnknown && /(?:[$€£¥]\s*\d|\d+(?:\.\d+)?\s*(?:dollars?|usd|美元|元|\/\s*(?:m|million|百万)|per\s+(?:million|token)))/iu.test(text);
+  const pricingKnownMention = pricingMentioned && !pricingExplicitlyUnknown;
+  const benchmarkMentioned = /(?:\b(?:benchmark|leaderboard|evaluation|evals?|swe-bench|gpqa|mmlu|aime|artificial analysis|arena)\b|跑分|评测|基准|排行榜)/iu.test(text);
+  const benchmarkMeasured = benchmarkMentioned && /(?:\b\d+(?:\.\d+)?\s*%|(?:score|index|得分|指数)\s*[:：]?\s*\d)/iu.test(text);
+  const safetyMentioned = /(?:\b(?:system card|model card|safety report|risk assessment|responsible ai|technical report)\b|系统卡|模型卡|安全报告|风险评估|技术报告)/iu.test(text);
+  const safetyDocument = records.some(({ candidate }) => /(?:system[-_/ ]?card|model[-_/ ]?card|safety|technical[-_/ ]?report|系统卡|模型卡|安全报告|技术报告)/iu.test(
+    `${candidate.title} ${candidate.canonicalUrl || candidate.url}`,
+  ));
+
+  const facets: ModelReleaseDossier["facets"] = [
+    {
+      id: "official",
+      label: "官方介绍",
+      status: ownerOfficial ? "ready" : officialRecords.length ? "partial" : "missing",
+      detail: ownerOfficial
+        ? "已找到模型方一手发布页。"
+        : officialRecords.length
+          ? "目前只有平台方或相关官方资料，仍缺模型方原文。"
+          : "尚未找到模型方的一手发布说明。",
+    },
+    {
+      id: "identity",
+      label: "模型身份与生命周期",
+      status: modelIdMentioned && lifecycleMentioned ? "ready" : modelIdMentioned || lifecycleMentioned ? "partial" : "missing",
+      detail: modelIdMentioned && lifecycleMentioned
+        ? "已记录模型 ID 或快照，并区分预告、上线或弃用状态。"
+        : modelIdMentioned
+          ? "已找到模型标识，仍需确认预告、正式上线或弃用状态。"
+          : lifecycleMentioned
+            ? "已确认发布阶段，但仍缺可核对的模型 ID 或快照。"
+            : "尚未确认模型 ID、具体快照与生命周期状态。",
+    },
+    {
+      id: "access",
+      label: "接入与可用范围",
+      status: accessSignals >= 2 ? "ready" : accessSignals === 1 ? "partial" : "missing",
+      detail: accessSignals >= 2
+        ? "已识别接入渠道及至少一项开放范围、地域或账号条件。"
+        : accessSignals === 1
+          ? "已找到接入渠道线索，仍需核对地域、灰度范围或账号门槛。"
+          : "尚未确认是在 App、API 或云平台上线，也未确认可用范围。",
+    },
+    {
+      id: "specs",
+      label: "模型规格",
+      status: specSignals >= 2 ? "ready" : specSignals === 1 ? "partial" : "missing",
+      detail: specSignals >= 2
+        ? `已识别 ${specSignals} 类规格信息。`
+        : specSignals === 1
+          ? "已找到一项规格线索，仍需补齐上下文、输出、模态或工具能力。"
+          : "尚未找到上下文、最大输出、模态、参数或工具能力等规格。",
+    },
+    {
+      id: "pricing",
+      label: "价格信息",
+      status: exactPricing ? "ready" : pricingKnownMention ? "partial" : "missing",
+      detail: exactPricing
+        ? "已找到带数值的价格信息。"
+        : pricingKnownMention
+          ? "来源提到价格，但还没有可核对的完整数值。"
+          : "尚未找到官方定价或可核对的价格信息。",
+    },
+    {
+      id: "benchmarks",
+      label: "跑分与评测",
+      status: benchmarkMeasured ? "ready" : benchmarkMentioned ? "partial" : "missing",
+      detail: benchmarkMeasured
+        ? "已找到带数值的跑分或评测记录，引用时仍需标明测试方与配置。"
+        : benchmarkMentioned
+          ? "已找到评测线索，但缺少可核对的成绩或配置。"
+          : "尚未找到可核对的跑分、榜单或第三方评测。",
+    },
+    {
+      id: "safety",
+      label: "安全与模型卡",
+      status: safetyDocument ? "ready" : safetyMentioned ? "partial" : "missing",
+      detail: safetyDocument
+        ? "已找到系统卡、模型卡、安全报告或适用的技术报告。"
+        : safetyMentioned
+          ? "来源提到安全或模型卡，但仍缺可单独核对的正式文档。"
+          : "尚未找到适用的系统卡、模型卡或安全说明。",
+    },
+    {
+      id: "images",
+      label: "可用图片",
+      status: localImageCount >= 2 ? "ready" : imageCount > 0 ? "partial" : "missing",
+      detail: localImageCount >= 2
+        ? `已有 ${localImageCount} 张本地缓存图片。`
+        : imageCount > 0
+          ? `发现 ${imageCount} 张来源图片，但还需缓存并检查使用权。`
+          : "尚未找到与事件直接相关的合格图片。",
+    },
+  ];
+  const readyCount = facets.filter((facet) => facet.status === "ready").length;
+  const missingLabels = facets.filter((facet) => facet.status === "missing").map((facet) => facet.label);
+  const incompleteLabels = facets.filter((facet) => facet.status !== "ready").map((facet) => facet.label);
+  const nextAction = incompleteLabels.length
+    ? releaseStatus === "preview"
+      ? `继续跟踪正式发布，并补齐${incompleteLabels.join("、")}。`
+      : `优先补齐${incompleteLabels.join("、")}，再决定文章深度。`
+    : "资料面已齐，可以进入详细介绍或横向比较。";
+  return { releaseStatus, readyCount, totalCount: facets.length, facets, missingLabels, nextAction };
+};
+
 const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   const records = [...cluster.records].sort((left, right) => timeFor(right) - timeFor(left));
   const uniqueSignals = uniqueBy(records, (record) => `${record.runId}:${record.candidate.id}`);
@@ -366,6 +619,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     now,
   });
   const id = `story_${createHash("sha1").update(cluster.identityKey).digest("hex").slice(0, 16)}`;
+  const releaseDossier = releaseDossierFor(cluster, records, factRecords, images.length, localImages.length);
   const sourceCount = uniqueBy(records, (record) => `${record.candidate.sourceName}:${normalizedUrl(record.candidate.url)}`).length;
   const topicIds = [...new Set(records.flatMap((record) => record.candidate.topicIds ?? []))] as CollectionTopicId[];
   const signals: StorySignalView[] = uniqueSignals.map((record) => ({
@@ -403,6 +657,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     communityFocus: bestInsight?.focusZh ?? [],
     disagreement: bestInsight?.disagreementZh,
     explanation: explanationFor(records, primary, assignment),
+    releaseDossier,
     topicIds,
     firstSeenAt,
     lastSeenAt,
@@ -434,7 +689,10 @@ const storyRank = (story: StoryView) => {
   const trend = story.trend.direction === "rising" ? 15 : story.trend.direction === "steady" ? 5 : 0;
   const images = Math.min(6, (story.localImageCount ?? 0) * 2 + Math.min(2, story.imageCount)) * 1.5;
   const recency = Math.max(0, 16 - story.ageHours / 3);
-  return story.recommendationScore + evidence + trend + images + recency;
+  const release = story.releaseDossier
+    ? story.releaseDossier.releaseStatus === "released" ? 14 : story.releaseDossier.releaseStatus === "preview" ? 10 : 4
+    : 0;
+  return story.recommendationScore + evidence + trend + images + recency + release;
 };
 
 export const buildStories = (state: WorkflowState, now = new Date().toISOString()) => clustersFor(state)

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   accountsForXSource,
+  applyXAccountObservations,
   applyXSourceCursors,
   collectXOfficialSources,
   createXApiClient,
+  xAccountPolicyFor,
   type XRecentSearchClient,
 } from "./x-official.js";
 import { rawItemToCandidate, sortCandidates } from "./scoring.js";
@@ -26,22 +28,50 @@ const source = (id: string, accounts: string): SourceConfig => ({
   discoveryOnly: false,
 });
 
-test("the default X watchlist contains the nine reviewed accounts but remains opt-in", () => {
+test("the default X watchlist covers core labs, developer channels, China labs and high-value observers", () => {
   const configured = defaultSources.find((entry) => entry.id === "x-ai-official");
   assert.ok(configured);
   assert.equal(configured.enabled, false);
   assert.equal(configured.selected, false);
   assert.deepEqual(accountsForXSource(configured), [
     "OpenAI",
+    "OpenAIDevs",
     "AnthropicAI",
+    "claudeai",
     "GoogleDeepMind",
-    "nvidia",
-    "AIatMeta",
-    "MicrosoftAI",
+    "GoogleAI",
+    "GeminiApp",
+    "GoogleAIStudio",
+    "deepseek_ai",
+    "Alibaba_Qwen",
+    "alibaba_cloud",
     "xai",
+    "AIatMeta",
+    "MistralAI",
+    "cohere",
+    "MicrosoftAI",
+    "NVIDIAAI",
+    "huggingface",
+    "perplexity_ai",
     "sama",
+    "gdb",
     "demishassabis",
+    "ArtificialAnlys",
   ]);
+});
+
+test("reviewed X organizations remain first-party while executives and unknown handles stay discovery-only", () => {
+  assert.deepEqual(xAccountPolicyFor("@OpenAI"), {
+    username: "OpenAI",
+    role: "official",
+    kind: "vendor_official",
+    priority: "critical",
+    vendor: "OpenAI",
+  });
+  assert.equal(xAccountPolicyFor("sama").role, "discovery");
+  assert.equal(xAccountPolicyFor("sama").kind, "official_executive");
+  assert.equal(xAccountPolicyFor("not_reviewed_yet").role, "discovery");
+  assert.equal(xAccountPolicyFor("not_reviewed_yet").kind, "unreviewed");
 });
 
 test("X cursor persistence advances monotonically and never regresses after overlapping runs", () => {
@@ -52,6 +82,67 @@ test("X cursor persistence advances monotonically and never regresses after over
   assert.equal(configured.cursor, "400");
   applyXSourceCursors([configured], { "x-ai-official": "401" });
   assert.equal(configured.cursor, "401");
+});
+
+test("X account observations persist stable user IDs and follow a reviewed handle rename", () => {
+  const configured = source("x-ai-official", "OpenAI");
+  applyXAccountObservations([configured], {
+    "x-ai-official": [{
+      userId: "42",
+      username: "OpenAI",
+      role: "official",
+      kind: "vendor_official",
+      priority: "critical",
+      vendor: "OpenAI",
+      observedAt: "2026-09-03T01:00:00.000Z",
+    }],
+  });
+  applyXAccountObservations([configured], {
+    "x-ai-official": [{
+      userId: "42",
+      username: "OpenAIResearch",
+      role: "official",
+      kind: "vendor_official",
+      priority: "critical",
+      vendor: "OpenAI",
+      observedAt: "2026-09-03T02:00:00.000Z",
+    }],
+  });
+
+  assert.equal(configured.xAccounts?.[0]?.userId, "42");
+  assert.equal(configured.xAccounts?.[0]?.username, "OpenAIResearch");
+  assert.deepEqual(configured.xAccounts?.[0]?.usernameHistory, ["OpenAI", "OpenAIResearch"]);
+  assert.equal(configured.xAccounts?.[0]?.status, "handle-changed");
+  assert.deepEqual(accountsForXSource(configured), ["OpenAIResearch"]);
+});
+
+test("X collection fails closed when a reviewed handle unexpectedly resolves to another user ID", async () => {
+  const configured = source("x-ai-official", "OpenAI");
+  configured.xAccounts = [{
+    userId: "42",
+    username: "OpenAI",
+    usernameHistory: ["OpenAI"],
+    role: "official",
+    accountKind: "vendor_official",
+    priority: "critical",
+    vendor: "OpenAI",
+    policyReviewed: true,
+    firstSeenAt: "2026-09-02T01:00:00.000Z",
+    lastSeenAt: "2026-09-02T01:00:00.000Z",
+    status: "observed",
+  }];
+  const client: XRecentSearchClient = {
+    searchRecent: async () => ({
+      data: [{ id: "takeover", author_id: "99", text: "Unexpected identity" }],
+      includes: { users: [{ id: "99", username: "OpenAI", name: "Not the registered identity" }] },
+    }),
+  };
+
+  const result = await collectXOfficialSources([configured], { client });
+
+  assert.equal(result.items.length, 0);
+  assert.match(result.failures[configured.id] ?? "", /用户 ID|身份/u);
+  assert.deepEqual(result.cursors, {});
 });
 
 test("X API client uses one authenticated recent-search query for the account whitelist", async () => {
@@ -81,6 +172,39 @@ test("X API client uses one authenticated recent-search query for the account wh
     "media_key,type,url,preview_image_url,width,height,alt_text",
   );
   assert.equal(authorization, "Bearer secret-bearer-token");
+});
+
+test("X API client follows every recent-search next_token page and merges stable user identities", async () => {
+  const requestedTokens: Array<string | null> = [];
+  const client = createXApiClient({
+    getBearerToken: async () => "secret-bearer-token",
+    fetcher: async (input) => {
+      const url = new URL(String(input));
+      const nextToken = url.searchParams.get("next_token");
+      requestedTokens.push(nextToken);
+      if (!nextToken) {
+        return Response.json({
+          data: [{ id: "202", author_id: "42", text: "Newest" }],
+          includes: { users: [{ id: "42", username: "OpenAI", name: "OpenAI" }] },
+          meta: { newest_id: "202", result_count: 1, next_token: "page-2" },
+        });
+      }
+      return Response.json({
+        data: [{ id: "201", author_id: "42", text: "Older" }],
+        includes: { users: [{ id: "42", username: "OpenAI", name: "OpenAI" }] },
+        meta: { result_count: 1 },
+      });
+    },
+  });
+
+  const result = await client.searchRecent({ accounts: ["OpenAI"], sinceId: "200" });
+
+  assert.deepEqual(requestedTokens, [null, "page-2"]);
+  assert.deepEqual(result.data?.map((post) => post.id), ["202", "201"]);
+  assert.equal(result.includes?.users?.length, 1);
+  assert.equal(result.meta?.newest_id, "202");
+  assert.equal(result.meta?.result_count, 2);
+  assert.equal(result.meta?.next_token, undefined);
 });
 
 test("X API client turns rate limits into a safe actionable error", async () => {
@@ -195,6 +319,10 @@ test("X official source admits only configured authors and preserves first-party
   assert.equal(result.items[0]?.author, "@OpenAI");
   assert.equal(result.items[0]?.metadata?.source_role, "official");
   assert.equal(result.items[0]?.metadata?.is_official_account, true);
+  assert.equal(result.items[0]?.metadata?.x_user_id, "user-openai");
+  assert.equal(result.items[0]?.metadata?.x_account_kind, "vendor_official");
+  assert.equal(result.items[0]?.metadata?.x_evidence_role, "canonical_link_pointer");
+  assert.equal(result.items[0]?.metadata?.x_post_kind, "announcement");
   assert.equal(result.items[0]?.metadata?.like_count, 900);
   assert.equal(result.items[0]?.metadata?.canonical_url, "https://openai.com/index/model-x");
   const xCandidate = rawItemToCandidate(result.items[0]!, 24);
@@ -206,6 +334,30 @@ test("X official source admits only configured authors and preserves first-party
   const [rankedCandidate] = sortCandidates([xCandidate]);
   assert.ok(rankedCandidate.heatBreakdown.engagement > 0);
   assert.deepEqual(result.cursors, { "x-ai-official": "200" });
+});
+
+test("an executive X post is a high-value discovery signal, not company-confirmed evidence", async () => {
+  const configured = source("x-ai-official", "sama");
+  const client: XRecentSearchClient = {
+    searchRecent: async () => ({
+      data: [{
+        id: "leader-201",
+        author_id: "leader-user",
+        created_at: "2026-09-02T07:45:00.000Z",
+        text: "Launching our next model soon.",
+      }],
+      includes: { users: [{ id: "leader-user", username: "sama", name: "Sam Altman", verified: true }] },
+    }),
+  };
+
+  const result = await collectXOfficialSources([configured], { client });
+
+  assert.equal(result.items[0]?.metadata?.source_role, "discovery");
+  assert.equal(result.items[0]?.metadata?.is_official_account, false);
+  assert.equal(result.items[0]?.metadata?.x_account_kind, "official_executive");
+  assert.equal(result.items[0]?.metadata?.x_account_priority, "critical");
+  assert.equal(result.items[0]?.metadata?.x_evidence_role, "discovery_only");
+  assert.equal(result.items[0]?.metadata?.x_post_kind, "preview");
 });
 
 test("X post photos and video previews become rights-gated candidate source images", async () => {

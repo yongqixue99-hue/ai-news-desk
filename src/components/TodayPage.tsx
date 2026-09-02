@@ -12,6 +12,7 @@ import {
   Image as ImageIcon,
   Images,
   MessageSquareText,
+  Pencil,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
@@ -68,6 +69,18 @@ const relativeTime = (value: string) => {
   if (hours < 24) return `${hours} 小时前`;
   return `${Math.round(hours / 24)} 天前`;
 };
+
+const releaseStatusLabels = {
+  released: "已发布",
+  preview: "官方预告",
+  reported: "待核实发布状态",
+} as const;
+
+const dossierFacetStatusLabels = {
+  ready: "已齐",
+  partial: "待完善",
+  missing: "缺失",
+} as const;
 
 const terminalJobStatuses = new Set<ProductJob["status"]>(["complete", "failed", "cancelled"]);
 
@@ -127,6 +140,24 @@ const StoryImage = ({ story, eager = false }: { story: StoryView; eager?: boolea
   );
 };
 
+const ReleaseDossierStrip = ({ story, compact = false }: { story: StoryView; compact?: boolean }) => {
+  const dossier = story.releaseDossier;
+  if (!dossier) return null;
+  return (
+    <div className={`release-dossier-strip${compact ? " compact" : ""}`}>
+      <div className="release-dossier-summary">
+        <span>{releaseStatusLabels[dossier.releaseStatus]}</span>
+        <strong>专题资料 {dossier.readyCount}/{dossier.totalCount}</strong>
+      </div>
+      <div className="release-dossier-facets" aria-label="模型发布资料完整度">
+        {dossier.facets.map((facet) => (
+          <span key={facet.id} className={`dossier-facet ${facet.status}`}>{facet.label}</span>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 interface StoryRowProps {
   story: StoryView;
   rank?: number;
@@ -151,6 +182,7 @@ const StoryRow = ({ story, rank, featured = false, busy = false, processing = fa
         </div>
         <h3>{story.title}</h3>
         <p className="today-story-summary">{story.summary}</p>
+        <ReleaseDossierStrip story={story} compact={!featured} />
         {featured ? (
           <div className="today-story-reasons">
             <p><strong>编辑备注</strong>{story.explanation.editorNote || story.assignment.reason}</p>
@@ -171,7 +203,7 @@ const StoryRow = ({ story, rank, featured = false, busy = false, processing = fa
         {story.selected ? <><Check size={14} />已加入待写</> : "加入待写"}
       </button>
       <button type="button" className="primary-button" disabled={busy || processing || !story.assignment.canDraft || story.drafted} onClick={() => onQuickDraft(story)}>
-        {story.drafted ? "已有草稿" : <><Sparkles size={14} />采用并生成</>}
+        {story.drafted ? "已有草稿" : <><Pencil size={14} />采用并开始写</>}
       </button>
     </div>
   </article>
@@ -229,8 +261,9 @@ interface StoryDrawerProps {
   onQueue: (selected: boolean) => void;
   onRestoreFeedback: () => void;
   onBuildPackage: (mode: Exclude<AssignmentMode, "watch" | "skip">) => void;
-  onCreateDraft: (contentPackage: ContentPackage) => void;
-  onQuickDraft: (mode: Exclude<AssignmentMode, "watch" | "skip">) => void;
+  onStartWriting: (contentPackage: ContentPackage) => void;
+  onGenerateDraft: (contentPackage: ContentPackage) => void;
+  onQuickWrite: (mode: Exclude<AssignmentMode, "watch" | "skip">) => void;
 }
 
 const StoryDrawer = ({
@@ -246,8 +279,9 @@ const StoryDrawer = ({
   onQueue,
   onRestoreFeedback,
   onBuildPackage,
-  onCreateDraft,
-  onQuickDraft,
+  onStartWriting,
+  onGenerateDraft,
+  onQuickWrite,
 }: StoryDrawerProps) => {
   const { story } = detail;
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -289,14 +323,32 @@ const StoryDrawer = ({
                 <div className="story-blockers"><AlertTriangle size={18} /><div><strong>当前不能成稿</strong>{story.assignment.blockers.map((item) => <p key={item}>{item}</p>)}</div></div>
               ) : null}
 
+              {story.releaseDossier ? (
+                <section className="story-release-dossier" aria-label="模型发布专题资料">
+                  <div className="story-release-dossier-heading">
+                    <div><span>{releaseStatusLabels[story.releaseDossier.releaseStatus]}</span><strong>模型发布资料</strong></div>
+                    <em>{story.releaseDossier.readyCount}/{story.releaseDossier.totalCount}</em>
+                  </div>
+                  <ul>
+                    {story.releaseDossier.facets.map((facet) => (
+                      <li key={facet.id} className={facet.status}>
+                        <div><strong>{facet.label}</strong><span>{facet.detail}</span></div>
+                        <em>{dossierFacetStatusLabels[facet.status]}</em>
+                      </li>
+                    ))}
+                  </ul>
+                  <p>{story.releaseDossier.nextAction}</p>
+                </section>
+              ) : null}
+
               <section className="story-detail-section story-source-section">
                 <div className="story-detail-heading">
                   <h3>文章来源</h3><span>{story.sourceCount} 个</span>
-                  {story.evidenceStrength !== "strong" ? (
+                  {story.evidenceStrength !== "strong" || Boolean(story.releaseDossier && story.releaseDossier.readyCount < story.releaseDossier.totalCount) ? (
                     <button type="button" className="text-button" disabled={busy || processing} onClick={onSupplementEvidence}>
                       {activeJob?.type === "supplement-story-evidence" && !terminalJobStatuses.has(activeJob.status)
-                        ? <><RefreshCw className="spin" size={13} />{activeJob.stage || "正在寻找独立来源"}</>
-                        : <><ShieldCheck size={13} />自动补强证据</>}
+                        ? <><RefreshCw className="spin" size={13} />{activeJob.stage || "正在寻找来源与专题资料"}</>
+                        : <><ShieldCheck size={13} />{story.releaseDossier ? "自动补齐资料" : "自动补强证据"}</>}
                     </button>
                   ) : <span className="evidence-ready-copy"><Check size={13} />已达到强证据</span>}
                 </div>
@@ -427,10 +479,15 @@ const StoryDrawer = ({
               ) : null}
               {contentPackage.status === "ready" ? (
                 <div className="package-draft-action">
-                  <div><strong>素材边界已经冻结</strong><span>成稿只能使用下列事实、原句、来源和图片。</span></div>
-                  <button type="button" className="primary-button" disabled={busy || processing} onClick={() => onCreateDraft(contentPackage)}>
-                    {busy ? <RefreshCw className="spin" size={16} /> : <Sparkles size={16} />}生成图文草稿
-                  </button>
+                  <div><strong>素材边界已经冻结</strong><span>先由你写；事实、角度、来源和图片会一起带进编辑器。</span></div>
+                  <div className="package-draft-buttons">
+                    <button type="button" className="primary-button" disabled={busy || processing} onClick={() => onStartWriting(contentPackage)}>
+                      {busy ? <RefreshCw className="spin" size={16} /> : <Pencil size={16} />}开始写作
+                    </button>
+                    <button type="button" className="secondary-button" disabled={busy || processing} onClick={() => onGenerateDraft(contentPackage)}>
+                      <Sparkles size={16} />AI 生成整稿
+                    </button>
+                  </div>
                 </div>
               ) : null}
               {contentPackage.blockers.length ? (
@@ -504,7 +561,7 @@ const StoryDrawer = ({
               <button type="button" className="secondary-button" disabled={busy} onClick={() => onQueue(!story.selected)}>
                 {story.selected ? <><Check size={15} />移出待写</> : <><FileStack size={15} />加入待写</>}
               </button>
-              <button type="button" className="primary-button" disabled={busy || processing || !story.assignment.canDraft} onClick={() => onQuickDraft(mode)}><Sparkles size={15} />采用并生成草稿</button>
+              <button type="button" className="primary-button" disabled={busy || processing || !story.assignment.canDraft} onClick={() => onQuickWrite(mode)}><Pencil size={15} />采用并开始写作</button>
             </>
           )}
         </footer>
@@ -516,9 +573,10 @@ const StoryDrawer = ({
 interface TodayPageProps {
   onNavigate: (page: AppPage) => void;
   onNotice: (kind: "success" | "info" | "error", message: string) => void;
+  onOpenDraft?: (draftId: string) => Promise<void> | void;
 }
 
-export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
+export function TodayPage({ onNavigate, onNotice, onOpenDraft }: TodayPageProps) {
   const [today, setToday] = useState<TodayView>();
   const [detail, setDetail] = useState<StoryDetailResult>();
   const [loading, setLoading] = useState(true);
@@ -531,7 +589,7 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
   const activeStoryJobRef = useRef<ProductJob | undefined>(undefined);
   const handledJobIdsRef = useRef(new Set<string>());
   const storyJobIntentsRef = useRef(new Map<string, {
-    kind: "package" | "evidence" | "quick-draft";
+    kind: "package" | "evidence" | "quick-write";
     storyId: string;
   }>());
 
@@ -744,7 +802,7 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
       onNavigate("drafts");
   };
 
-  const createDraft = async (contentPackage: ContentPackage) => {
+  const generateDraft = async (contentPackage: ContentPackage) => {
     setBusy(true);
     try {
       await generateDraftFromPackage(contentPackage);
@@ -755,7 +813,27 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
     }
   };
 
-  const quickDraft = async (
+  const startWritingFromPackage = async (contentPackage: ContentPackage) => {
+    setBusy(true);
+    try {
+      const result = await api.createHumanDraftFromPackage(contentPackage.id);
+      onNotice(
+        "success",
+        result.reused
+          ? "已重新打开这份人工草稿；原来的修改都还在。"
+          : `写作台已准备好，并带入 ${result.draft.factClaims?.length ?? 0} 条事实和 ${result.draft.images.length} 张来源图片。`,
+      );
+      setDetail(undefined);
+      if (onOpenDraft) await onOpenDraft(result.draft.id);
+      else onNavigate("drafts");
+    } catch (draftError) {
+      onNotice("error", draftError instanceof Error ? draftError.message : String(draftError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const quickWrite = async (
     story: StoryView,
     requestedMode?: Exclude<AssignmentMode, "watch" | "skip">,
   ) => {
@@ -769,9 +847,9 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
       if (!story.selected) await updateQueuedState(story, true);
       const queued = await api.createContentPackage(story.id, mode);
       if (!queued.contentPackage) {
-        storyJobIntentsRef.current.set(queued.job.id, { kind: "quick-draft", storyId: story.id });
+        storyJobIntentsRef.current.set(queued.job.id, { kind: "quick-write", storyId: story.id });
         setActiveStoryJob(queued.job);
-        onNotice("info", "素材包正在后台准备；完成后会自动接续成稿，你可以继续选题。");
+        onNotice("info", "素材包正在后台准备；完成后会自动打开写作台，你可以继续选题。");
         return;
       }
       if (queued.contentPackage.status !== "ready") {
@@ -781,7 +859,7 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
         await loadToday(true);
         return;
       }
-      await generateDraftFromPackage(queued.contentPackage);
+      await startWritingFromPackage(queued.contentPackage);
     } catch (draftError) {
       onNotice("error", draftError instanceof Error ? draftError.message : String(draftError));
     } finally {
@@ -809,8 +887,8 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
           const packageId = packageIdFromJob(job);
           if (!packageId) throw new Error("素材包任务完成，但没有返回素材包 ID");
           const contentPackage = await api.contentPackage(packageId);
-          if (intent.kind === "quick-draft" && contentPackage.status === "ready") {
-            await generateDraftFromPackage(contentPackage);
+          if (intent.kind === "quick-write" && contentPackage.status === "ready") {
+            await startWritingFromPackage(contentPackage);
           } else {
             setDetail((current) => current?.story.id === intent.storyId ? { ...current, contentPackage } : current);
             onNotice(contentPackage.status === "ready" ? "success" : "info", contentPackage.status === "ready"
@@ -870,7 +948,7 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
             </div>
             {today.mustReads.length ? (
               <div className="today-featured-list">{today.mustReads.map((story, index) => (
-                <StoryRow key={story.id} story={story} rank={index + 1} featured busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickDraft} />
+                <StoryRow key={story.id} story={story} rank={index + 1} featured busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />
               ))}</div>
             ) : (
               <div className="today-empty"><Eye size={22} /><div><strong>暂时没有达到必写门槛的事件</strong><p>可以去新闻工作台补充来源，或查看仍在观察的事件。</p></div><button type="button" className="secondary-button" onClick={() => onNavigate("workbench")}>打开新闻工作台</button></div>
@@ -882,7 +960,7 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
               <div className="today-section-heading"><div><span>次级候选</span><h2>值得浏览，但不必立刻写</h2></div><button type="button" className="text-button" onClick={() => onNavigate("workbench")}>查看全部新闻 <ArrowRight size={14} /></button></div>
               <div className="today-secondary-list">
                 {today.secondary.length ? today.secondary.map((story) => (
-                  <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickDraft} />
+                  <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />
                 )) : <p className="story-empty-copy">当前没有额外可成稿候选。</p>}
               </div>
             </section>
@@ -917,7 +995,7 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
               </div>
               <div className="today-secondary-list">
                 {today.backlog.map((story) => (
-                  <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickDraft} />
+                  <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />
                 ))}
               </div>
             </section>
@@ -945,8 +1023,9 @@ export function TodayPage({ onNavigate, onNotice }: TodayPageProps) {
           onQueue={(selected) => void queueStory(detail.story, selected)}
           onRestoreFeedback={restoreFeedback}
           onBuildPackage={buildPackage}
-          onCreateDraft={createDraft}
-          onQuickDraft={(mode) => void quickDraft(detail.story, mode)}
+          onStartWriting={(contentPackage) => void startWritingFromPackage(contentPackage)}
+          onGenerateDraft={generateDraft}
+          onQuickWrite={(mode) => void quickWrite(detail.story, mode)}
         />
       ) : null}
     </div>

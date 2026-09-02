@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectionReadinessLog, mergeCandidateProbeImages } from "./horizon.js";
+import { collectionReadinessLog, mergeCandidateProbeImages, scheduledWindowHoursFor } from "./horizon.js";
 import type { SourceImage } from "./types.js";
 
 test("collection readiness does not claim Chinese briefs are ready when generation completed zero items", () => {
@@ -8,6 +8,12 @@ test("collection readiness does not claim Chinese briefs are ready when generati
     message: "候选列表已准备好；中文摘要生成 0/60 条，可稍后重试补全",
     level: "warning",
   });
+});
+
+test("scheduled collection uses a 48-hour minimum without shrinking a larger imported window", () => {
+  assert.equal(scheduledWindowHoursFor(24), 48);
+  assert.equal(scheduledWindowHoursFor(48), 48);
+  assert.equal(scheduledWindowHoursFor(72), 72);
 });
 
 test("page probing merges into X media without replacing rights, attribution, or local evidence", () => {

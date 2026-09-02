@@ -54,17 +54,23 @@ const configuredDefaultSources: SourceConfig[] = [
     topicIds: ["ai"],
     routes: [{
       topicId: "ai",
-      label: "Newsroom",
+      label: "Official sitemap",
       homepageUrl: "https://www.anthropic.com/news",
-      query: "site:anthropic.com/news Anthropic",
+      url: "https://www.anthropic.com/sitemap.xml",
+      category: "ai-official",
+    }, {
+      topicId: "ai",
+      label: "Official site search",
+      homepageUrl: "https://www.anthropic.com/news",
+      query: "site:anthropic.com (Anthropic OR Claude)",
       category: "ai-official",
     }],
     enabled: true,
     selected: true,
     category: "ai-official",
     role: "official",
-    discoveryOnly: true,
-    note: "官方网站 · Newsroom（经新闻索引发现）",
+    discoveryOnly: false,
+    note: "一级信源 · 官网 sitemap 捕获根路径产品公告，新闻索引作补充发现",
   },
   {
     id: "deepmind-official",
@@ -93,6 +99,42 @@ const configuredDefaultSources: SourceConfig[] = [
     category: "ai-official",
     discoveryOnly: false,
     note: "官方网站 · News",
+  },
+  {
+    id: "gemini-official",
+    name: "Google Gemini 官方",
+    kind: "rss",
+    homepageUrl: "https://blog.google/products-and-platforms/products/gemini/",
+    topicIds: ["ai", "technology"],
+    routes: [
+      {
+        topicId: "ai",
+        label: "Gemini product announcements",
+        homepageUrl: "https://blog.google/products-and-platforms/products/gemini/",
+        query: "site:blog.google/products-and-platforms/products/gemini (Gemini OR AI)",
+        category: "ai-official",
+      },
+      {
+        topicId: "ai",
+        label: "Gemini API changelog",
+        homepageUrl: "https://ai.google.dev/gemini-api/docs/changelog",
+        query: "site:ai.google.dev/gemini-api/docs/changelog (Gemini OR model OR API)",
+        category: "ai-official",
+      },
+      {
+        topicId: "technology",
+        label: "Gemini developer changes",
+        homepageUrl: "https://ai.google.dev/gemini-api/docs/changelog",
+        query: "site:ai.google.dev/gemini-api/docs/changelog (Gemini OR model OR API)",
+        category: "technology",
+      },
+    ],
+    enabled: true,
+    selected: true,
+    category: "ai-official",
+    role: "official",
+    discoveryOnly: false,
+    note: "一级信源 · Gemini 产品公告与 API 变更记录",
   },
   {
     id: "bbc-technology",
@@ -1188,14 +1230,14 @@ const configuredDefaultSources: SourceConfig[] = [
     name: "AI 官方账号（X）",
     kind: "x",
     homepageUrl: "https://x.com/",
-    query: "OpenAI, AnthropicAI, GoogleDeepMind, nvidia, AIatMeta, MicrosoftAI, xai, sama, demishassabis",
+    query: "OpenAI, OpenAIDevs, AnthropicAI, claudeai, GoogleDeepMind, GoogleAI, GeminiApp, GoogleAIStudio, deepseek_ai, Alibaba_Qwen, alibaba_cloud, xai, AIatMeta, MistralAI, cohere, MicrosoftAI, NVIDIAAI, huggingface, perplexity_ai, sama, gdb, demishassabis, ArtificialAnlys",
     topicIds: ["ai", "technology", "science"],
     enabled: false,
     selected: false,
     category: "ai-official",
     role: "official",
     discoveryOnly: false,
-    note: "X API v2 · 9 个素材观察账号原帖 · 默认停用 · 需配置 Bearer Token 并人工复核账号与媒体权利",
+    note: "X API v2 · 23 个分层账号：四家核心厂商与开发者官号优先，高管号只作预告线索，研究平台只作资料线索 · 默认停用 · 需配置 Bearer Token 并复核媒体权利",
   },
 ];
 
@@ -1218,6 +1260,7 @@ export const defaultSourcePresets: SourcePreset[] = [
       "x-ai-official",
       "anthropic-official",
       "deepmind-official",
+      "gemini-official",
       "microsoft-official",
       "nvidia-official",
       "aws-ml-official",
@@ -1265,6 +1308,7 @@ export const defaultSourcePresets: SourcePreset[] = [
       "x-ai-official",
       "anthropic-official",
       "deepmind-official",
+      "gemini-official",
       "microsoft-official",
       "nvidia-official",
       "aws-ml-official",
@@ -1338,7 +1382,7 @@ const defaultDailyAiSourceIds = new Set(
 );
 
 export const defaultSettings: Settings = {
-  windowHours: 24,
+  windowHours: 48,
   collectionTopics: ["ai"],
   personalizationEnabled: true,
   notificationsMuted: true,
@@ -1407,6 +1451,7 @@ export const defaultProviders: AiProviderConfig[] = [
     description: "适合中文成稿；可预先配置视觉模型，为截图成稿入口做准备。",
     kind: "openai-compatible",
     model: "qwen-plus",
+    inlineCompletionModel: "qwen-plus",
     visionModel: "qwen3-vl-plus",
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     supportsVision: true,
@@ -1416,10 +1461,36 @@ export const defaultProviders: AiProviderConfig[] = [
     id: "deepseek",
     name: "DeepSeek",
     vendor: "DeepSeek",
-    description: "适合文本成稿、改写与观点润色。",
+    description: "中文补全性价比高；非思考模式适合低延迟续写。",
     kind: "openai-compatible",
-    model: "deepseek-chat",
+    model: "deepseek-v4-flash",
+    inlineCompletionModel: "deepseek-v4-flash",
     baseUrl: "https://api.deepseek.com",
+    supportsVision: false,
+    apiKeyConfigured: false,
+  },
+  {
+    id: "gemini",
+    name: "Gemini Flash-Lite",
+    vendor: "Google",
+    description: "提供免费层与低价轻量模型，适合日常短补全。",
+    kind: "openai-compatible",
+    model: "gemini-3.1-flash-lite",
+    inlineCompletionModel: "gemini-3.1-flash-lite",
+    visionModel: "gemini-3.1-flash-lite",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    supportsVision: true,
+    apiKeyConfigured: false,
+  },
+  {
+    id: "groq",
+    name: "Groq 高速补全",
+    vendor: "Groq",
+    description: "优先追求首字延迟与生成速度，适合实时灰字建议。",
+    kind: "openai-compatible",
+    model: "openai/gpt-oss-20b",
+    inlineCompletionModel: "openai/gpt-oss-20b",
+    baseUrl: "https://api.groq.com/openai/v1",
     supportsVision: false,
     apiKeyConfigured: false,
   },
@@ -1430,6 +1501,7 @@ export const defaultProviders: AiProviderConfig[] = [
     description: "使用独立 OpenAI API Key，与 ChatGPT 订阅分开计费。",
     kind: "openai-compatible",
     model: "gpt-5-mini",
+    inlineCompletionModel: "gpt-5.4-nano",
     baseUrl: "https://api.openai.com/v1",
     supportsVision: true,
     apiKeyConfigured: false,
@@ -1496,6 +1568,7 @@ export const defaultSkills: ArticleSkillConfig[] = [
 
 export const defaultAiSettings = (): AiSettings => ({
   activeProviderId: "codex-cli",
+  completionProviderId: "deepseek",
   analysisProviderId: "codex-cli",
   optimizationProviderId: "codex-cli",
   writingReviewMode: "auto",
@@ -1732,16 +1805,24 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   const storedProviderHealth = state.aiSettings?.latestProviderHealth ?? {};
   state.aiSettings = {
     activeProviderId: state.aiSettings?.activeProviderId || "codex-cli",
+    completionProviderId: state.aiSettings?.completionProviderId || "deepseek",
     analysisProviderId: state.aiSettings?.analysisProviderId || state.aiSettings?.activeProviderId || "codex-cli",
     optimizationProviderId: state.aiSettings?.optimizationProviderId || state.aiSettings?.activeProviderId || "codex-cli",
     writingReviewMode: ["auto", "minimal", "voice", "off"].includes(state.aiSettings?.writingReviewMode)
       ? state.aiSettings.writingReviewMode
       : "auto",
-    providers: defaultProviders.map((provider) => ({
-      ...provider,
-      ...storedProviders.find((stored) => stored.id === provider.id),
-      description: provider.description,
-    })),
+    providers: defaultProviders.map((provider) => {
+      const stored = storedProviders.find((entry) => entry.id === provider.id);
+      const migrated = stored?.id === "deepseek" && stored.model === "deepseek-chat"
+        ? { ...stored, model: "deepseek-v4-flash" }
+        : stored;
+      return {
+        ...provider,
+        ...migrated,
+        inlineCompletionModel: migrated?.inlineCompletionModel || provider.inlineCompletionModel,
+        description: provider.description,
+      };
+    }),
     latestProviderHealth: {},
     skills: [
       ...defaultSkills.map((skill) => {
@@ -1765,6 +1846,10 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   }
   if (!state.aiSettings.providers.some((provider) => provider.id === state.aiSettings.activeProviderId)) {
     state.aiSettings.activeProviderId = "codex-cli";
+  }
+  if (!state.aiSettings.providers.some((provider) =>
+    provider.id === state.aiSettings.completionProviderId && provider.kind === "openai-compatible")) {
+    state.aiSettings.completionProviderId = "deepseek";
   }
   if (!state.aiSettings.providers.some((provider) => provider.id === state.aiSettings.analysisProviderId)) {
     state.aiSettings.analysisProviderId = "codex-cli";

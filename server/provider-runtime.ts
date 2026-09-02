@@ -255,6 +255,146 @@ export interface ProviderRunResult {
   meta: ProviderExecutionMeta;
 }
 
+export interface InlineCompletionProviderInput {
+  provider: AiProviderConfig;
+  systemPrompt: string;
+  userPrompt: string;
+  signal?: AbortSignal;
+  /** Boundary injection used by tests and embedded runtimes. */
+  fetcher?: typeof fetch;
+  /** Optional already-resolved secret for an embedded runtime. */
+  apiKey?: string;
+}
+
+export interface InlineCompletionStreamInput extends InlineCompletionProviderInput {
+  /** Receives cumulative plain text as provider chunks arrive. */
+  onText: (text: string) => void;
+}
+
+/**
+ * Fast, cancellable plain-text path for editor suggestions. It intentionally
+ * does not inherit long-form JSON mode, retries, or the three-minute timeout.
+ */
+const requestInlineCompletion = async ({
+  provider,
+  systemPrompt,
+  userPrompt,
+  signal,
+  fetcher = fetch,
+  apiKey: suppliedApiKey,
+}: InlineCompletionProviderInput, stream: boolean) => {
+  throwIfAborted(signal);
+  if (provider.kind !== "openai-compatible") {
+    throw new Error("当前模型不支持低延迟 Tab 补全");
+  }
+  const apiKey = suppliedApiKey ?? await getProviderApiKey(provider.id);
+  const baseUrl = provider.baseUrl?.trim().replace(/\/+$/u, "");
+  if (!baseUrl) throw new Error("请先配置 API Base URL");
+  const parsed = new URL(baseUrl);
+  const local = ["127.0.0.1", "localhost", "::1"].includes(parsed.hostname);
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && local)) {
+    throw new Error("外部模型接口必须使用 HTTPS；本机接口可使用 127.0.0.1");
+  }
+  const endpoint = baseUrl.endsWith("/chat/completions") ? baseUrl : `${baseUrl}/chat/completions`;
+  const timeoutSignal = AbortSignal.timeout(12_000);
+  const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  const requestBody: Record<string, unknown> = {
+    model: assertModelName(provider.inlineCompletionModel || provider.model),
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0.15,
+    max_tokens: 240,
+    stream,
+  };
+  // DeepSeek V4 enables thinking by default. Inline suggestions are a
+  // low-latency editing path, so explicitly avoid paying for hidden reasoning.
+  if (parsed.hostname === "api.deepseek.com") requestBody.thinking = { type: "disabled" };
+  return fetcher(endpoint, {
+    method: "POST",
+    signal: requestSignal,
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(requestBody),
+  });
+};
+
+export const runInlineCompletionProvider = async (input: InlineCompletionProviderInput) => {
+  const response = await requestInlineCompletion(input, false);
+  const payload = await response.json().catch(() => ({})) as {
+    error?: { message?: string };
+    choices?: Array<{ message?: { content?: unknown } }>;
+  };
+  if (!response.ok) throw new Error(payload.error?.message || `模型接口请求失败：HTTP ${response.status}`);
+  const output = contentText(payload.choices?.[0]?.message?.content).trim();
+  if (!output) throw new Error("模型接口没有返回补全文字");
+  return output;
+};
+
+const streamErrorMessage = async (response: Response) => {
+  const payload = await response.json().catch(() => ({})) as { error?: { message?: string } };
+  return payload.error?.message || `模型接口请求失败：HTTP ${response.status}`;
+};
+
+/**
+ * Stream cumulative completion text from an OpenAI-compatible SSE response.
+ * Callers must still run the completed text through the deterministic evidence
+ * gate before making it insertable.
+ */
+export const streamInlineCompletionProvider = async ({
+  onText,
+  ...input
+}: InlineCompletionStreamInput) => {
+  const response = await requestInlineCompletion(input, true);
+  if (!response.ok) throw new Error(await streamErrorMessage(response));
+  if (!response.body) throw new Error("模型接口没有返回流式正文");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let output = "";
+  let completed = false;
+  const consumeFrame = (frame: string) => {
+    const data = frame
+      .split(/\r?\n/u)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+    if (!data) return;
+    if (data === "[DONE]") {
+      completed = true;
+      return;
+    }
+    const payload = JSON.parse(data) as {
+      error?: { message?: string };
+      choices?: Array<{ delta?: { content?: unknown } }>;
+    };
+    if (payload.error?.message) throw new Error(payload.error.message);
+    const delta = contentText(payload.choices?.[0]?.delta?.content);
+    if (!delta) return;
+    output += delta;
+    onText(output);
+  };
+
+  while (!completed) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const frames = buffer.split(/\r?\n\r?\n/u);
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) consumeFrame(frame);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim() && !completed) consumeFrame(buffer);
+  const result = output.trim();
+  if (!result) throw new Error("模型接口没有返回补全文字");
+  return result;
+};
+
 export const runGenerationProviderObserved = async (
   input: ProviderRunInput,
 ): Promise<ProviderRunResult> => {

@@ -20,6 +20,7 @@ test("default sources are classified by editorial role and ship useful topic bun
   assert.ok(esports);
   assert.equal(state.sources.find((source) => source.id === "hackernews")?.role, "community");
   assert.ok(dailyAi.sourceIds.includes("openai-official"));
+  assert.ok(dailyAi.sourceIds.includes("gemini-official"));
   assert.ok(dailyAi.sourceIds.includes("x-ai-official"));
   assert.ok(dailyAi.sourceIds.includes("reuters-ai"));
   assert.ok(discovery.sourceIds.includes("google-news-ai"));
@@ -50,6 +51,28 @@ test("Zhihu is a disabled-by-default community discovery source until its CLI lo
   assert.equal(source.discoveryOnly, true);
   assert.equal(source.enabled, false);
   assert.equal(source.selected, false);
+});
+
+test("Gemini product and API changes have a dedicated first-party discovery source", () => {
+  const source = defaultSources.find((entry) => entry.id === "gemini-official");
+  assert.ok(source);
+  assert.equal(source.role, "official");
+  assert.equal(source.discoveryOnly, false);
+  assert.equal(source.enabled, true);
+  assert.equal(source.selected, true);
+  assert.ok(source.routes?.some((route) => route.query?.includes("site:blog.google/products-and-platforms/products/gemini")));
+  assert.ok(source.routes?.some((route) => route.query?.includes("site:ai.google.dev/gemini-api/docs/changelog")));
+});
+
+test("scheduled reading covers the same 48-hour window promised by Today", () => {
+  const fresh = createDefaultState();
+  assert.equal(fresh.settings.windowHours, 48);
+
+  // State migration preserves an explicit imported preference. The scheduler
+  // applies the 48-hour minimum when it creates a run.
+  fresh.settings.windowHours = 24;
+  const upgraded = upgradeState(fresh);
+  assert.equal(upgraded.settings.windowHours, 24);
 });
 
 test("X official accounts ship as an opt-in first-party source until a bearer token is configured", () => {

@@ -144,6 +144,117 @@ test("evidence supplementation matches reordered Chinese news titles", async () 
   assert.equal(result.evidenceStrength, "strong");
 });
 
+test("evidence supplementation attaches an official match to a community-discovered story", async () => {
+  let state: WorkflowState = createDefaultState();
+  state.runs = [run(candidate({
+    id: "community-fable",
+    rawId: "community-fable",
+    sourceType: "hackernews",
+    sourceName: "Hacker News",
+    sourceRole: "community",
+    title: "Claude Fable 5.1 and Claude Mythos 5.1",
+    url: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+    canonicalUrl: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+    publishedAt: "2026-09-01T17:53:53.000Z",
+    fetchedAt: "2026-09-01T18:00:00.000Z",
+    briefing: {
+      titleZh: "Claude Fable 5.1 与 Claude Mythos 5.1 发布",
+      summaryZh: "目前由社区链接发现该发布页。",
+      basis: "title",
+      generatedAt: "2026-09-01T18:00:00.000Z",
+      providerId: "test",
+    },
+    engagement: { points: 180, comments: 64, discussionUrl: "https://news.ycombinator.com/item?id=51" },
+  }))];
+  const story = buildStories(state, "2026-09-01T20:00:00.000Z")[0]!;
+  assert.equal(story.factSourceCount, 0);
+
+  const desk = createStoryEvidenceDesk({
+    readState: async () => state,
+    updateState: async (mutate) => mutate(state),
+    search: async () => ({
+      items: [{
+        id: "aws-fable",
+        source_type: "rss",
+        title: "Introducing Claude Fable 5.1 on AWS",
+        url: "https://aws.example/introducing-claude-fable-5-1",
+        content: "AWS announced availability of Claude Fable 5.1.",
+        published_at: "2026-09-01T19:12:43.000Z",
+        fetched_at: "2026-09-01T19:20:00.000Z",
+        metadata: { feed_name: "AWS Machine Learning", source_role: "official" },
+      }],
+      failures: {},
+      searchedSourceCount: 1,
+    }),
+    now: () => new Date("2026-09-01T20:00:00.000Z"),
+  });
+
+  const result = await desk.supplement(story.id);
+  const updated = storyById(state, story.id, "2026-09-01T20:00:00.000Z");
+
+  assert.equal(result.addedSourceCount, 1);
+  assert.equal(updated?.factSourceCount, 1);
+  assert.equal(updated?.communitySourceCount, 1);
+  assert.equal(updated?.signals.length, 2);
+});
+
+test("a strong model-release story can still fill a missing dossier facet from official docs", async () => {
+  let state: WorkflowState = createDefaultState();
+  const official = candidate({
+    id: "fable-owner",
+    rawId: "fable-owner",
+    sourceName: "Anthropic",
+    title: "Claude Fable 5.1 and Claude Mythos 5.1",
+    url: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+    canonicalUrl: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+    excerpt: "Anthropic released Claude Fable 5.1 with a 1M context window and API model ID claude-fable-5-1.",
+    publishedAt: "2026-09-01T13:00:00.000Z",
+  });
+  const verification = candidate({
+    id: "fable-report",
+    rawId: "fable-report",
+    sourceName: "Independent Wire",
+    sourceRole: "verification",
+    title: "Anthropic releases Claude Fable 5.1",
+    url: "https://wire.example/anthropic-fable-5-1",
+    canonicalUrl: "https://wire.example/anthropic-fable-5-1",
+    evidenceGroupUrl: official.url,
+    evidenceRelation: "independent-report",
+    publishedAt: "2026-09-01T13:30:00.000Z",
+  });
+  state.runs = [{ ...run(official), candidates: [official, verification], rawCount: 2 }];
+  const story = buildStories(state, "2026-09-01T20:00:00.000Z")[0]!;
+  assert.equal(story.evidenceStrength, "strong");
+  assert.equal(story.releaseDossier?.facets.find((facet) => facet.id === "pricing")?.status, "missing");
+
+  const desk = createStoryEvidenceDesk({
+    readState: async () => state,
+    updateState: async (mutate) => mutate(state),
+    search: async () => ({
+      items: [{
+        id: "fable-price-docs",
+        source_type: "rss",
+        title: "API pricing",
+        url: "https://platform.claude.com/docs/en/about-claude/pricing",
+        content: "Claude Fable 5.1 costs $10 per million input tokens and $50 per million output tokens.",
+        published_at: "2026-09-01T13:05:00.000Z",
+        fetched_at: "2026-09-01T20:00:00.000Z",
+        metadata: { feed_name: "Claude Platform Docs", source_role: "official" },
+      }],
+      failures: {},
+      searchedSourceCount: 2,
+    }),
+    now: () => new Date("2026-09-01T20:00:00.000Z"),
+  });
+
+  const result = await desk.supplement(story.id);
+  const updated = storyById(state, story.id, "2026-09-01T20:00:00.000Z");
+
+  assert.equal(result.addedSourceCount, 1);
+  assert.equal(updated?.releaseDossier?.facets.find((facet) => facet.id === "pricing")?.status, "ready");
+  assert.ok(updated?.signals.some((signal) => signal.url.includes("/pricing")));
+});
+
 test("evidence supplementation rejects discovery feeds and same-publisher syndication", async () => {
   let state: WorkflowState = createDefaultState();
   state.runs = [run(candidate())];

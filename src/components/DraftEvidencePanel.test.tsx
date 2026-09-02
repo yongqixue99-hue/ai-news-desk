@@ -31,6 +31,11 @@ const draft: ArticleDraft = {
     "部分原图可进入私人编辑草稿，但公众号同步前会被预检拦截，需确认权利或替换",
   ],
   images: [],
+  writingBrief: {
+    suggestedAngles: ["多代理项目如何分工", "Apache 2.0 对二次开发意味着什么"],
+    communityFocus: ["生产环境可用性", "许可证边界"],
+    communityEvidenceLabel: "有限样本",
+  },
   community: "",
   topics: ["AI"],
   provenance: {
@@ -51,6 +56,11 @@ test("the evidence panel explains automatic work without turning internal notes 
   assert.match(markup, /事实来源已自动整理/u);
   assert.match(markup, /1 条正文事实已回指来源，不需要你逐条勾选/u);
   assert.match(markup, /事件来源/u);
+  assert.match(markup, /可写切口/u);
+  assert.match(markup, /多代理项目如何分工/u);
+  assert.match(markup, /社区关注点/u);
+  assert.match(markup, /生产环境可用性/u);
+  assert.match(markup, /有限样本/u);
   assert.match(markup, /发现线索/u);
   assert.match(markup, /只说明这条选题从哪里被发现，不参与新闻事实核验/u);
   assert.match(markup, /已知边界 · 1/u);

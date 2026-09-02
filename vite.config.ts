@@ -13,9 +13,7 @@ export default defineConfig({
       output: {
         codeSplitting: {
           minSize: 24_000,
-          maxSize: 360_000,
           groups: [
-            { name: "tiptap", test: /node_modules\/(?:@tiptap|prosemirror-)/ },
             { name: "react-core", test: /node_modules\/(?:react|react-dom|scheduler)\// },
           ],
         },

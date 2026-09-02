@@ -55,6 +55,7 @@ export const normalizeDraftCatalog = (drafts: ArticleDraft[]): ArticleDraft[] =>
       const replacement = newest(currentDrafts);
       if (!replacement) continue;
       for (const draft of group) {
+        if (draft.provenance.authoringMode === "human-first") continue;
         const revision = generatorRevisionNumber(draft);
         if (draft.id === replacement.id || revision === currentRevision || hasDeliveryHistory(draft)) continue;
         supersededBy.set(draft.id, replacement.id);
@@ -70,6 +71,7 @@ export const normalizeDraftCatalog = (drafts: ArticleDraft[]): ArticleDraft[] =>
         canonicalSourceUrl(draft.provenance.originalUrl),
         draft.draftStrategy ?? "legacy",
         draft.contentFormat ?? "article",
+        draft.provenance.authoringMode ?? "legacy",
       ].join("::");
       const current = legacySourceGroups.get(key) ?? [];
       current.push(draft);

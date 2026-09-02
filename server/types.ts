@@ -53,6 +53,30 @@ export interface SourceRoute {
   category?: string;
 }
 
+export type XAccountClass =
+  | "vendor_official"
+  | "product_official"
+  | "developer_official"
+  | "platform_official"
+  | "official_executive"
+  | "research_platform"
+  | "unreviewed";
+
+/** Stable identity learned from the X API; handles remain mutable display data. */
+export interface XAccountIdentity {
+  userId: string;
+  username: string;
+  usernameHistory: string[];
+  role: "official" | "research" | "discovery";
+  accountKind: XAccountClass;
+  priority: "critical" | "core" | "observer";
+  vendor?: string;
+  policyReviewed: boolean;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  status: "observed" | "handle-changed" | "identity-conflict";
+}
+
 export interface SourceConfig {
   id: string;
   name: string;
@@ -63,6 +87,8 @@ export interface SourceConfig {
   query?: string;
   /** Opaque incremental cursor owned by the source adapter. */
   cursor?: string;
+  /** X-only stable account registry. It never contains credentials or private profile data. */
+  xAccounts?: XAccountIdentity[];
   topicIds?: CollectionTopicId[];
   routes?: SourceRoute[];
   enabled: boolean;
@@ -379,10 +405,10 @@ export interface Candidate {
   title: string;
   url: string;
   canonicalUrl?: string;
-  /** Stable source URL of the Story this independently discovered evidence verifies. */
+  /** Stable source URL of the Story this evidence or research material belongs to. */
   evidenceGroupUrl?: string;
-  /** Only independently verified reports may use evidenceGroupUrl to join an existing Story. */
-  evidenceRelation?: "independent-report";
+  /** Research material enriches a Story but does not count as an independent publisher. */
+  evidenceRelation?: "independent-report" | "research-material";
   excerpt: string;
   publishedAt: string;
   fetchedAt: string;
@@ -547,6 +573,8 @@ export interface AiProviderConfig {
   description: string;
   kind: AiProviderKind;
   model: string;
+  /** Optional small/fast model reserved for editor Tab completion. */
+  inlineCompletionModel?: string;
   visionModel?: string;
   baseUrl?: string;
   supportsVision: boolean;
@@ -599,6 +627,7 @@ export interface ArticleSkillConfig {
 
 export interface AiSettings {
   activeProviderId: string;
+  completionProviderId: string;
   analysisProviderId: string;
   optimizationProviderId: string;
   /**
@@ -859,6 +888,14 @@ export interface DraftQualityWarning {
   missingDimensions?: DraftCompletenessDimension[];
 }
 
+export interface DraftWritingBrief {
+  /** Frozen editorial angles copied from the ContentPackage. */
+  suggestedAngles: string[];
+  /** Useful discussion themes; never promoted to factual claims. */
+  communityFocus: string[];
+  communityEvidenceLabel?: string;
+}
+
 export interface ArticleDraft {
   id: string;
   runId: string;
@@ -886,6 +923,8 @@ export interface ArticleDraft {
   images: DraftImagePlacement[];
   /** Repairable generation findings. They never replace fact or rights blockers. */
   qualityWarnings?: DraftQualityWarning[];
+  /** Read-only writing guidance captured from the immutable ContentPackage. */
+  writingBrief?: DraftWritingBrief;
   community: string;
   topics: string[];
   provenance: {
@@ -896,6 +935,8 @@ export interface ArticleDraft {
     reviewTraceId?: string;
     storyId?: string;
     contentPackageId?: string;
+    /** Separates a user-authored working draft from an optional AI-generated alternative. */
+    authoringMode?: "human-first" | "ai-generated";
     /** Writing-policy revision; permits a safe regeneration after pipeline fixes. */
     generatorRevision?: string;
     /** Newer safe draft that replaced this historical attempt without deleting it. */

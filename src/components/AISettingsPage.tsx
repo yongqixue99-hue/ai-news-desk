@@ -25,6 +25,7 @@ import {
   Upload,
   WandSparkles,
   X,
+  Zap,
 } from "lucide-react";
 import { siDeepseek, siOpenaigym, siQwen } from "simple-icons";
 import type { MaterialMetadataInput } from "../api";
@@ -61,6 +62,7 @@ interface AISettingsPageProps {
   ) => Promise<void>;
   onTestProvider: (providerId: string) => Promise<ProviderHealthResult>;
   onSaveAgentRole: (role: ArticleAgentRole, providerId: string) => Promise<void>;
+  onSaveCompletionProvider: (providerId: string) => Promise<void>;
   onSaveWritingReviewMode: (mode: AiSettings["writingReviewMode"]) => Promise<void>;
   onSaveSkill: (skillId: string, enabled: boolean) => Promise<void>;
   onImportSkill: (path: string) => Promise<void>;
@@ -140,6 +142,7 @@ export function AISettingsPage({
   onSaveProvider,
   onTestProvider,
   onSaveAgentRole,
+  onSaveCompletionProvider,
   onSaveWritingReviewMode,
   onSaveSkill,
   onImportSkill,
@@ -148,10 +151,12 @@ export function AISettingsPage({
   onDeleteMaterial,
 }: AISettingsPageProps) {
   const activeProvider = aiSettings.providers.find((provider) => provider.id === aiSettings.activeProviderId);
+  const completionProvider = aiSettings.providers.find((provider) => provider.id === aiSettings.completionProviderId);
   const analysisProvider = aiSettings.providers.find((provider) => provider.id === aiSettings.analysisProviderId);
   const optimizationProvider = aiSettings.providers.find((provider) => provider.id === aiSettings.optimizationProviderId);
   const [providerModal, setProviderModal] = useState<AiProviderConfig>();
   const [providerModel, setProviderModel] = useState("");
+  const [providerInlineCompletionModel, setProviderInlineCompletionModel] = useState("");
   const [providerVisionModel, setProviderVisionModel] = useState("");
   const [providerBaseUrl, setProviderBaseUrl] = useState("");
   const [providerApiKey, setProviderApiKey] = useState("");
@@ -160,6 +165,7 @@ export function AISettingsPage({
   const [skillPath, setSkillPath] = useState("");
   const [skillBusy, setSkillBusy] = useState<string>();
   const [roleBusy, setRoleBusy] = useState<ArticleAgentRole>();
+  const [completionBusy, setCompletionBusy] = useState(false);
   const [writingModeBusy, setWritingModeBusy] = useState(false);
   const [materialComposerOpen, setMaterialComposerOpen] = useState(false);
   const [materialMode, setMaterialMode] = useState<"file" | "url">("file");
@@ -191,6 +197,7 @@ export function AISettingsPage({
   const openProvider = (provider: AiProviderConfig) => {
     setProviderModal(provider);
     setProviderModel(provider.model);
+    setProviderInlineCompletionModel(provider.inlineCompletionModel || provider.model);
     setProviderVisionModel(provider.visionModel || "");
     setProviderBaseUrl(provider.baseUrl || "");
     setProviderApiKey("");
@@ -213,6 +220,7 @@ export function AISettingsPage({
     try {
       await onSaveProvider(providerModal.id, {
         model: providerModel,
+        inlineCompletionModel: providerInlineCompletionModel,
         visionModel: providerVisionModel,
         baseUrl: providerBaseUrl,
         apiKey: providerApiKey || undefined,
@@ -266,6 +274,17 @@ export function AISettingsPage({
       // The parent notice contains the actionable API error.
     } finally {
       setRoleBusy(undefined);
+    }
+  };
+
+  const assignCompletionProvider = async (provider: AiProviderConfig) => {
+    setCompletionBusy(true);
+    try {
+      await onSaveCompletionProvider(provider.id);
+    } catch {
+      // The parent notice contains the actionable API error.
+    } finally {
+      setCompletionBusy(false);
     }
   };
 
@@ -333,13 +352,14 @@ export function AISettingsPage({
       <header className="page-header">
         <div>
           <h1>AI 设置</h1>
-          <p>分别配置成稿、文章理解与优化模型，再组装可复用的 Skill。</p>
+          <p>分别配置成稿、低延迟补全、文章理解与优化模型，再组装可复用的 Skill。</p>
         </div>
       </header>
 
       <section className="ai-role-overview" aria-label="AI 工作角色">
         {[
           { id: "draft", label: "成稿", description: "生成快讯与正文", provider: activeProvider, icon: <Sparkles size={17} /> },
+          { id: "completion", label: "补全", description: "停顿后预测下一句或下一段", provider: completionProvider, icon: <Zap size={17} /> },
           { id: "analysis", label: "分析", description: "理解原文、核对事实", provider: analysisProvider, icon: <FileSearch size={17} /> },
           { id: "optimization", label: "优化", description: "诊断问题、提出改稿", provider: optimizationProvider, icon: <WandSparkles size={17} /> },
         ].map((slot) => {
@@ -353,7 +373,9 @@ export function AISettingsPage({
               <div className="ai-role-copy">
                 <span>{slot.label}<small>{slot.description}</small></span>
                 <strong>{slot.provider?.name || "尚未选择"}</strong>
-                <small>{slot.provider?.model || "未填写模型"}</small>
+                <small>{slot.id === "completion"
+                  ? slot.provider?.inlineCompletionModel || slot.provider?.model || "未填写模型"
+                  : slot.provider?.model || "未填写模型"}</small>
               </div>
               <div className={`ai-role-health ${presentation.tone}`} title={presentation.detail}>
                 {presentation.tone === "success" ? <CheckCircle2 size={13} /> : presentation.tone === "error" ? <AlertTriangle size={13} /> : <RefreshCw size={13} />}
@@ -367,12 +389,13 @@ export function AISettingsPage({
       <section className="ai-settings-section provider-section">
         <div className="ai-section-heading">
           <span className="section-icon"><Bot size={20} /></span>
-          <div><h2>AI 接口与 Agent 分工</h2><p>成稿、理解和改稿可以使用不同模型；API Key 只保存在这台 Mac 的系统钥匙串。</p></div>
+          <div><h2>AI 接口与 Agent 分工</h2><p>成稿、补全、理解和改稿可以使用不同模型；API Key 只进入本机受保护存储。</p></div>
           <span className="secure-note"><LockKeyhole size={14} />不写入项目文件</span>
         </div>
         <div className="provider-list">
           {aiSettings.providers.map((provider) => {
             const active = provider.id === aiSettings.activeProviderId;
+            const completion = provider.id === aiSettings.completionProviderId;
             const activating = skillBusy === `provider:${provider.id}`;
             const testing = providerTestBusy === provider.id;
             const latestHealth = aiSettings.latestProviderHealth[provider.id];
@@ -381,11 +404,12 @@ export function AISettingsPage({
               <article className={active ? "provider-row active" : "provider-row"} key={provider.id}>
                 <span className={`provider-logo provider-logo-${provider.id}`}><ProviderBrandIcon provider={provider} /></span>
                 <div className="provider-copy">
-                  <div><strong>{provider.name}</strong>{active ? <span className="active-pill"><Check size={11} />正在使用</span> : null}</div>
+                  <div><strong>{provider.name}</strong>{active ? <span className="active-pill"><Check size={11} />正在成稿</span> : null}{completion ? <span className="active-pill"><Zap size={11} />{provider.apiKeyConfigured ? "正在补全" : "补全预设 · 待配置"}</span> : null}</div>
                   <p>{provider.description}</p>
                   <div className="provider-capabilities">
                     <span>{provider.model || "未填写模型"}</span>
                     <span>文本成稿</span>
+                    {provider.kind === "openai-compatible" ? <span>补全 {provider.inlineCompletionModel || provider.model}</span> : <span className="muted">不用于实时补全</span>}
                     {provider.supportsVision ? <span className="vision">截图识别</span> : <span className="muted">不支持看图</span>}
                     {provider.kind === "codex-cli" ? <span className="native">原生 Skill</span> : <span>提示词 Skill</span>}
                   </div>
@@ -406,9 +430,19 @@ export function AISettingsPage({
                     </span>
                   </div>
                 </div>
-                <div className="provider-agent-roles" aria-label={`${provider.name} 的文章 Agent 分工`}>
-                  <span><BrainCircuit size={13} />文章 Agent</span>
+                <div className="provider-agent-roles" aria-label={`${provider.name} 的 AI 分工`}>
+                  <span><BrainCircuit size={13} />AI 分工</span>
                   <div>
+                    <button
+                      type="button"
+                      className={completion ? "selected" : ""}
+                      disabled={completionBusy || provider.kind !== "openai-compatible" || !provider.apiKeyConfigured}
+                      title={provider.kind === "openai-compatible" ? "用这个低延迟 API 预测下一句或下一段" : "本机 Codex 适合长任务，不用于逐字补全"}
+                      onClick={() => void assignCompletionProvider(provider)}
+                    >
+                      {completionBusy && !completion ? <LoaderCircle className="spin" size={12} /> : <Zap size={12} />}
+                      用于补全
+                    </button>
                     <button
                       type="button"
                       className={aiSettings.analysisProviderId === provider.id ? "selected" : ""}
@@ -613,6 +647,7 @@ export function AISettingsPage({
             <h2 id="provider-modal-title">配置 {providerModal.name}</h2>
             <p id="provider-modal-description">{providerModal.kind === "codex-cli" ? "这里使用 Codex CLI 的 ChatGPT 登录态，不需要 API Key。" : "保存后密钥会进入本机受保护存储，项目状态里只记录是否已配置。"}</p>
             <label><span>文本模型</span><input ref={providerModelInputRef} value={providerModel} onChange={(event) => setProviderModel(event.target.value)} placeholder="模型名称" /></label>
+            {providerModal.kind === "openai-compatible" ? <label><span>Tab 补全模型</span><input value={providerInlineCompletionModel} onChange={(event) => setProviderInlineCompletionModel(event.target.value)} placeholder="可填写更便宜、更快的小模型" /><small>只负责灰字续写，不影响成稿、分析或优化模型。</small></label> : null}
             {providerModal.supportsVision ? <label><span>视觉模型</span><input value={providerVisionModel} onChange={(event) => setProviderVisionModel(event.target.value)} placeholder="为截图成稿入口预留（可选）" /></label> : null}
             {providerModal.kind !== "codex-cli" ? (
               <>

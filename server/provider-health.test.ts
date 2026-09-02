@@ -50,6 +50,22 @@ test("an OpenAI-compatible probe uses the no-generation models endpoint and neve
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
+test("provider health warns when the dedicated Tab completion model is missing", async () => {
+  const result = await probeProviderConnection(provider({
+    inlineCompletionModel: "qwen-turbo-missing",
+  }), {
+    now: () => new Date("2026-09-03T00:00:00.000Z"),
+    clock: deterministicTime(),
+    getApiKey: async () => "test-key",
+    validateUrl: async (url) => new URL(url),
+    fetcher: async () => Response.json({ data: [{ id: "qwen-plus" }] }),
+  });
+
+  assert.equal(result.status, "warning");
+  assert.equal(result.errorCategory, "model");
+  assert.match(result.safeMessage, /Tab 补全模型.*qwen-turbo-missing/u);
+});
+
 test("an unsupported models endpoint falls back to a one-output-token compatibility check", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const result = await probeProviderConnection(provider(), {

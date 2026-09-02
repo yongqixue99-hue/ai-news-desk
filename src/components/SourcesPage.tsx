@@ -305,9 +305,9 @@ export function SourcesPage({
 
       <section className="x-credential-panel" aria-labelledby="x-credential-heading">
         <div className="x-credential-copy">
-          <strong id="x-credential-heading">X 官方账号采集</strong>
-          <span>通过 X API v2 读取账号白名单中的公开原帖；不读取私信、不执行点赞，也不会代你发帖。</span>
-          <small>Bearer Token 仅保存在当前 Windows 用户的 DPAPI 安全存储。X 开发者访问可能按用量计费，请留意自己的套餐和额度。</small>
+          <strong id="x-credential-heading">X 重点账号监控</strong>
+          <span>保存 Token 并启用后，每 5 分钟增量读取 23 个重点账号的公开原帖；公司官号先作一手线索并回查官网，高管个人号只作预告线索，跑分平台只作研究材料。</span>
+          <small>不读取私信、不点赞、不代发帖，也不会自动成稿。Bearer Token 仅保存在当前 Windows 用户的 DPAPI 安全存储；X API 按用量计费，请在开发者后台设置预算提醒。</small>
         </div>
         <div className="x-credential-form">
           <input

@@ -161,6 +161,150 @@ test("legacy fixed-field explanations remain readable but request a v2 editorial
   assert.equal(story?.explanation.readerBrief, "Acme 发布了 Model X，并开放 API。");
 });
 
+test("StoryDesk merges a versioned model release across platform and community titles", () => {
+  const state = createDefaultState();
+  state.runs = [run("run-fable", [
+    candidate("community-fable", {
+      sourceType: "hackernews",
+      sourceName: "Hacker News",
+      sourceRole: "community",
+      title: "Claude Fable 5.1 and Claude Mythos 5.1",
+      url: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+      canonicalUrl: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+      publishedAt: "2026-09-01T17:53:53.000Z",
+      engagement: { points: 180, comments: 64, discussionUrl: "https://news.ycombinator.com/item?id=51" },
+      briefing: {
+        titleZh: "Claude Fable 5.1 与 Claude Mythos 5.1 发布",
+        summaryZh: "社区发现了 Anthropic 的模型发布页面。",
+        basis: "title",
+        generatedAt: "2026-09-01T18:00:00.000Z",
+        providerId: "test",
+      },
+    }),
+    candidate("aws-fable", {
+      sourceName: "AWS Machine Learning 官方博客",
+      sourceRole: "official",
+      title: "Introducing Claude Fable 5.1 on AWS",
+      url: "https://aws.amazon.com/blogs/machine-learning/introducing-claude-fable-5-1-on-aws/",
+      canonicalUrl: "https://aws.amazon.com/blogs/machine-learning/introducing-claude-fable-5-1-on-aws/",
+      publishedAt: "2026-09-01T19:12:43.000Z",
+      briefing: {
+        titleZh: "AWS 上线 Claude Fable 5.1",
+        summaryZh: "AWS 宣布 Claude Fable 5.1 已可通过其模型平台使用。",
+        basis: "full-source",
+        generatedAt: "2026-09-01T19:20:00.000Z",
+        providerId: "test",
+      },
+    }),
+    candidate("techcrunch-fable", {
+      sourceName: "TechCrunch",
+      sourceRole: "verification",
+      title: "Anthropic's new Fable release is cheaper, less restrictive",
+      url: "https://techcrunch.example/anthropic-new-fable-release",
+      canonicalUrl: "https://techcrunch.example/anthropic-new-fable-release",
+      publishedAt: "2026-09-01T19:39:22.000Z",
+      briefing: {
+        titleZh: "Anthropic 新版 Fable 更便宜，限制更少",
+        summaryZh: "TechCrunch 对 Anthropic 新版 Fable 的价格和产品变化进行了报道。",
+        basis: "full-source",
+        generatedAt: "2026-09-01T19:45:00.000Z",
+        providerId: "test",
+      },
+    }),
+  ])];
+
+  const stories = buildStories(state, "2026-09-02T00:00:00.000Z");
+
+  assert.equal(stories.length, 1);
+  assert.equal(stories[0]?.communitySourceCount, 1);
+  assert.equal(stories[0]?.factSourceCount, 2);
+  assert.equal(stories[0]?.signals.length, 3);
+});
+
+test("model releases expose a research dossier instead of pretending one headline is complete", () => {
+  const state = createDefaultState();
+  state.runs = [run("run-fable-dossier", [
+    candidate("anthropic-fable", {
+      sourceName: "Anthropic",
+      sourceRole: "official",
+      title: "Claude Fable 5.1 and Claude Mythos 5.1",
+      url: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+      canonicalUrl: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+      excerpt: "Anthropic released Claude Fable 5.1 with a 1M token context window, 128K maximum output and API model ID claude-fable-5-1.",
+      briefing: {
+        titleZh: "Anthropic 发布 Claude Fable 5.1 与 Mythos 5.1",
+        summaryZh: "Anthropic 公布 Claude Fable 5.1，并给出上下文、最大输出和 API 模型 ID。",
+        basis: "full-source",
+        generatedAt: "2026-09-01T13:10:00.000Z",
+        providerId: "test",
+      },
+      publishedAt: "2026-09-01T13:00:00.000Z",
+    }),
+    candidate("fable-pricing", {
+      sourceName: "Claude Platform Docs",
+      sourceRole: "official",
+      title: "Claude Fable 5.1 pricing",
+      url: "https://platform.claude.com/docs/en/about-claude/pricing",
+      canonicalUrl: "https://platform.claude.com/docs/en/about-claude/pricing",
+      excerpt: "Claude Fable 5.1 costs $10 per million input tokens and $50 per million output tokens.",
+      briefing: {
+        titleZh: "Claude Fable 5.1 API 定价",
+        summaryZh: "官方文档列出了输入与输出 Token 价格。",
+        basis: "full-source",
+        generatedAt: "2026-09-01T13:12:00.000Z",
+        providerId: "test",
+      },
+      publishedAt: "2026-09-01T13:05:00.000Z",
+    }),
+  ])];
+
+  const story = buildStories(state, "2026-09-02T00:00:00.000Z")[0];
+
+  assert.equal(story?.releaseDossier?.releaseStatus, "released");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "official")?.status, "ready");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "identity")?.status, "ready");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "access")?.status, "partial");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "specs")?.status, "ready");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "pricing")?.status, "ready");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "benchmarks")?.status, "missing");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "safety")?.status, "missing");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "images")?.status, "missing");
+  assert.deepEqual(story?.releaseDossier?.missingLabels, ["跑分与评测", "安全与模型卡", "可用图片"]);
+});
+
+test("an officially announced upcoming model stays a preview with unknown fields visible", () => {
+  const state = createDefaultState();
+  state.runs = [run("run-astra", [candidate("openai-astra", {
+    sourceName: "OpenAI",
+    sourceRole: "official",
+    title: "Path to Astra: preparing the next OpenAI model",
+    url: "https://openai.com/index/path-to-astra/",
+    canonicalUrl: "https://openai.com/index/path-to-astra/",
+    excerpt: "OpenAI says Astra is coming soon and is still being prepared.",
+    briefing: {
+      titleZh: "OpenAI 预告 Astra 模型即将到来",
+      summaryZh: "OpenAI 已确认 Astra 正在准备中，但尚未公布发布日期、API 与价格。",
+      basis: "full-source",
+      generatedAt: "2026-09-01T13:10:00.000Z",
+      providerId: "test",
+    },
+    publishedAt: "2026-09-01T13:00:00.000Z",
+  })])];
+
+  const story = buildStories(state, "2026-09-02T00:00:00.000Z")[0];
+
+  assert.equal(story?.releaseDossier?.releaseStatus, "preview");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "official")?.status, "ready");
+  assert.equal(story?.releaseDossier?.facets.find((facet) => facet.id === "pricing")?.status, "missing");
+  assert.match(story?.releaseDossier?.nextAction ?? "", /正式发布|价格|跑分/u);
+
+  const today = buildTodayView(state, "2026-09-02T00:00:00.000Z");
+  assert.ok(
+    [...today.mustReads, ...today.secondary, ...today.watching].some((entry) => entry.id === story?.id),
+    "an official model preview must stay visible even while dossier facets are missing",
+  );
+});
+
 test("today excludes unhandled stories after the 48-hour editorial window", () => {
   const state = createDefaultState();
   state.runs = [run("run-1", [

@@ -5,6 +5,7 @@ import type {
   RawHorizonItem,
   SourceConfig,
 } from "./types.js";
+import type { XAccountObservation } from "./x-official.js";
 
 export interface SignalBatch {
   items: RawHorizonItem[];
@@ -12,6 +13,7 @@ export interface SignalBatch {
   adapterCounts: Record<string, number>;
   horizonRunId?: string;
   sourceCursors?: Record<string, string>;
+  xAccountObservations?: Record<string, XAccountObservation[]>;
 }
 
 export interface SourceCollectRequest {
@@ -41,7 +43,12 @@ interface SourceDeskDependencies {
   collectXOfficial?: (
     sources: SourceConfig[],
     options: { signal?: AbortSignal },
-  ) => Promise<{ items: RawHorizonItem[]; failures: Record<string, string>; cursors: Record<string, string> }>;
+  ) => Promise<{
+    items: RawHorizonItem[];
+    failures: Record<string, string>;
+    cursors: Record<string, string>;
+    accountObservations?: Record<string, XAccountObservation[]>;
+  }>;
 }
 
 const isCommunityAdapter = (source: SourceConfig) =>
@@ -83,14 +90,15 @@ export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
         ? dependencies.collectXOfficial(xSources, { signal: request.signal }).catch((error) => {
           const message = error instanceof Error ? error.message : String(error);
           for (const source of xSources) failures[source.id] = message;
-          return { items: [], failures: {}, cursors: {} };
+          return { items: [], failures: {}, cursors: {}, accountObservations: {} };
         })
         : Promise.resolve({
           items: [],
           failures: Object.fromEntries(xSources.map((source) => [source.id, "X 官方来源适配器尚未配置"])),
           cursors: {},
+          accountObservations: {},
         })
-      : Promise.resolve({ items: [], failures: {}, cursors: {} });
+      : Promise.resolve({ items: [], failures: {}, cursors: {}, accountObservations: {} });
     const [structured, community, xOfficial] = await Promise.all([structuredPromise, communityPromise, xPromise]);
     Object.assign(failures, structured.failures);
     Object.assign(failures, community.failures);
@@ -104,6 +112,7 @@ export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
       adapterCounts,
       horizonRunId: structured.horizonRunId,
       sourceCursors: xOfficial.cursors,
+      xAccountObservations: xOfficial.accountObservations,
     };
   },
 });

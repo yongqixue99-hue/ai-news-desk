@@ -90,6 +90,12 @@ interface DraftWorkspaceProps {
   onOpenWorkbench: () => void;
   onSelectDraft: (draftId: string) => void;
   onSave: (draftId: string, patch: Partial<ArticleDraft>, saveMode: DraftSaveMode) => Promise<ArticleDraft>;
+  onCompleteInline: (
+    draftId: string,
+    input: { before: string; after: string },
+    signal: AbortSignal,
+    onPreview?: (preview: { text?: string; providerName?: string; model?: string }) => void,
+  ) => Promise<{ available: boolean; text?: string; reason?: string; providerName?: string; model?: string }>;
   onLoadRevisions: (draftId: string) => Promise<DraftRevision[]>;
   onRestoreRevision: (
     draftId: string,
@@ -209,6 +215,7 @@ export function DraftWorkspace({
   onOpenWorkbench,
   onSelectDraft,
   onSave,
+  onCompleteInline,
   onLoadRevisions,
   onRestoreRevision,
   onUploadImage,
@@ -523,6 +530,7 @@ export function DraftWorkspace({
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         void save("manual").catch(() => undefined);
@@ -1144,6 +1152,7 @@ export function DraftWorkspace({
       <RichArticleEditor
         key={`${editing.id}-editor`}
         ref={richEditor}
+        draftId={editing.id}
         title={editing.title}
         content={editing.bodyHtml || ""}
         preview={false}
@@ -1151,6 +1160,9 @@ export function DraftWorkspace({
         onChange={(bodyHtml) => updateEditing({ bodyHtml })}
         onUploadFile={uploadImage}
         onImportUrl={importImage}
+        onRequestCompletion={editing.provenance.contentPackageId
+          ? (input, signal, onPreview) => onCompleteInline(editing.id, input, signal, onPreview)
+          : undefined}
       />
     </section>
   );

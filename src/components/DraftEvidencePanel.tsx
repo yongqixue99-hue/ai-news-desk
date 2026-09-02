@@ -28,6 +28,33 @@ export function DraftEvidencePanel({ draft, onUpdateFactClaim, onResolveFactUnce
         </span>
       </section>
 
+      {draft.writingBrief?.suggestedAngles.length || draft.writingBrief?.communityFocus.length ? (
+        <section className="utility-section draft-writing-brief">
+          {draft.writingBrief.suggestedAngles.length ? (
+            <div className="writing-brief-group">
+              <div className="inspector-heading">
+                <h3>可写切口</h3>
+                <span>{draft.writingBrief.suggestedAngles.length} 个</span>
+              </div>
+              <p className="evidence-section-help">这些是组织文章的方向，不是必须写入的结论。</p>
+              <ol>{draft.writingBrief.suggestedAngles.map((angle) => <li key={angle}>{angle}</li>)}</ol>
+            </div>
+          ) : null}
+          {draft.writingBrief.communityFocus.length ? (
+            <div className="writing-brief-group community-focus-group">
+              <div className="inspector-heading">
+                <h3>社区关注点</h3>
+                <span>{draft.writingBrief.communityEvidenceLabel || "讨论样本"}</span>
+              </div>
+              <div className="writing-focus-tags">
+                {draft.writingBrief.communityFocus.map((focus) => <span key={focus}>{focus}</span>)}
+              </div>
+              <small>仅用于寻找问题意识，不自动作为新闻事实。</small>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       <section className="utility-section evidence-source-section">
         <div className="inspector-heading">
           <h3>事件来源</h3>

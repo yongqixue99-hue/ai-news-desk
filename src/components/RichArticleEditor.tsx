@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { Editor } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -23,6 +24,22 @@ import {
   X,
 } from "lucide-react";
 import type { DraftImagePlacement, DraftLayoutTheme } from "../types";
+import {
+  beginInlineCompletion,
+  createInlineCompletionState,
+  invalidateInlineCompletion,
+  resolveInlineCompletion,
+} from "../inline-completion-state";
+import {
+  inlineCompletionIdleDelay,
+  inlineCompletionRetryDelay,
+} from "../inline-completion-policy";
+import {
+  clearInlineCompletion,
+  currentInlineCompletion,
+  InlineCompletionExtension,
+  showInlineCompletion,
+} from "../tiptap-inline-completion";
 
 export interface RichArticleEditorHandle {
   insertImage: (placement: DraftImagePlacement) => void;
@@ -30,6 +47,7 @@ export interface RichArticleEditorHandle {
 }
 
 interface RichArticleEditorProps {
+  draftId?: string;
   title: string;
   content: string;
   preview: boolean;
@@ -37,7 +55,27 @@ interface RichArticleEditorProps {
   onChange: (html: string) => void;
   onUploadFile: (file: File) => Promise<DraftImagePlacement>;
   onImportUrl: (url: string, caption?: string) => Promise<DraftImagePlacement>;
+  onRequestCompletion?: (
+    input: { before: string; after: string },
+    signal: AbortSignal,
+    onPreview?: (preview: Pick<InlineCompletionResponse, "text" | "providerName" | "model">) => void,
+  ) => Promise<InlineCompletionResponse>;
 }
+
+interface InlineCompletionResponse {
+  available: boolean;
+  text?: string;
+  reason?: string;
+  providerName?: string;
+  model?: string;
+}
+
+type CompletionUi =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "streaming"; preview: string; providerName?: string }
+  | { status: "visible"; paragraphs: number; providerName?: string }
+  | { status: "unavailable"; message: string };
 
 const NewsImage = Image.extend({
   addAttributes() {
@@ -83,7 +121,7 @@ const visibleAttributionFor = (placement: DraftImagePlacement) => {
 
 export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticleEditorProps>(
   function RichArticleEditor(
-    { title, content, preview, theme, onChange, onUploadFile, onImportUrl },
+    { draftId, title, content, preview, theme, onChange, onUploadFile, onImportUrl, onRequestCompletion },
     ref,
   ) {
     const fileInput = useRef<HTMLInputElement>(null);
@@ -94,6 +132,178 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
     const [imageCaption, setImageCaption] = useState("");
     const [uploading, setUploading] = useState(false);
     const [uploadError, setUploadError] = useState("");
+    const [completionUi, setCompletionUi] = useState<CompletionUi>({ status: "idle" });
+    const completionState = useRef(createInlineCompletionState());
+    const completionTimer = useRef<number | undefined>(undefined);
+    const completionAbort = useRef<AbortController | undefined>(undefined);
+    const completionRequest = useRef(onRequestCompletion);
+    const completionCache = useRef(new Map<string, InlineCompletionResponse>());
+    const completionDraftId = useRef(draftId);
+    const completionDisabledReason = useRef<string | undefined>(undefined);
+    const completionRetryAt = useRef(0);
+    const completionProviderName = useRef<string | undefined>(undefined);
+    completionRequest.current = onRequestCompletion;
+    completionDraftId.current = draftId;
+
+    const clearCompletionRuntime = (currentEditor?: Editor, updateUi = true) => {
+      if (completionTimer.current !== undefined) window.clearTimeout(completionTimer.current);
+      completionTimer.current = undefined;
+      completionAbort.current?.abort();
+      completionAbort.current = undefined;
+      completionState.current = invalidateInlineCompletion(completionState.current);
+      completionProviderName.current = undefined;
+      if (currentEditor && !currentEditor.isDestroyed) clearInlineCompletion(currentEditor);
+      if (updateUi) setCompletionUi({ status: "idle" });
+    };
+
+    const completionContextFor = (currentEditor: Editor) => {
+      const { selection, doc } = currentEditor.state;
+      if (!selection.empty) return undefined;
+      const parentName = selection.$from.parent.type.name;
+      if (!(["paragraph", "heading"] as string[]).includes(parentName)) return undefined;
+      if (selection.$from.parentOffset !== selection.$from.parent.content.size) return undefined;
+      const before = doc.textBetween(0, selection.from, "\n", "\n").slice(-1_600);
+      if (before.trim().length < 4) return undefined;
+      const after = doc.textBetween(selection.from, doc.content.size, "\n", "\n").slice(0, 500);
+      return {
+        position: selection.from,
+        before,
+        after,
+        key: `${completionDraftId.current ?? "draft"}:${selection.from}:${before}:${after}`,
+      };
+    };
+
+    const syncForwardStableCompletion = (currentEditor: Editor) => {
+      const ghost = currentInlineCompletion(currentEditor);
+      const context = completionContextFor(currentEditor);
+      if (!ghost || !context || ghost.position !== context.position || !ghost.text.trim()) return false;
+      completionState.current = {
+        status: "visible",
+        token: completionState.current.token,
+        contextKey: context.key,
+        text: ghost.text,
+      };
+      setCompletionUi({
+        status: "visible",
+        paragraphs: ghost.text.split(/\r?\n\s*\r?\n+/u).length,
+        providerName: completionProviderName.current,
+      });
+      return true;
+    };
+
+    const scheduleCompletion = (currentEditor: Editor) => {
+      if (syncForwardStableCompletion(currentEditor)) return;
+      clearCompletionRuntime(currentEditor);
+      const requestCompletion = completionRequest.current;
+      if (
+        preview
+        || !requestCompletion
+        || !currentEditor.isFocused
+        || currentEditor.view.composing
+        || completionDisabledReason.current
+        || Date.now() < completionRetryAt.current
+      ) return;
+      const scheduledContext = completionContextFor(currentEditor);
+      if (!scheduledContext) return;
+      completionTimer.current = window.setTimeout(() => {
+        completionTimer.current = undefined;
+        const latestContext = completionContextFor(currentEditor);
+        if (!latestContext || latestContext.key !== scheduledContext.key || !currentEditor.isFocused) return;
+        const started = beginInlineCompletion(completionState.current, latestContext.key);
+        completionState.current = started.state;
+        const cached = completionCache.current.get(latestContext.key);
+        if (cached?.available && cached.text) {
+          const resolved = resolveInlineCompletion(completionState.current, {
+            token: started.token,
+            contextKey: latestContext.key,
+            text: cached.text,
+          });
+          completionState.current = resolved;
+          if (resolved.status === "visible" && resolved.text) {
+            completionProviderName.current = cached.providerName;
+            showInlineCompletion(currentEditor, { position: latestContext.position, text: resolved.text });
+            setCompletionUi({
+              status: "visible",
+              paragraphs: resolved.text.split(/\r?\n\s*\r?\n+/u).length,
+              providerName: cached.providerName,
+            });
+          }
+          return;
+        }
+        const controller = new AbortController();
+        completionAbort.current = controller;
+        setCompletionUi({ status: "loading" });
+        void requestCompletion(
+          { before: latestContext.before, after: latestContext.after },
+          controller.signal,
+          (previewResult) => {
+            if (controller.signal.aborted || currentEditor.isDestroyed || !previewResult.text?.trim()) return;
+            const currentContext = completionContextFor(currentEditor);
+            if (currentContext?.key !== latestContext.key || currentContext.position !== latestContext.position) return;
+            if (completionState.current.token !== started.token) return;
+            setCompletionUi({
+              status: "streaming",
+              preview: previewResult.text.trim(),
+              providerName: previewResult.providerName,
+            });
+          },
+        ).then((result) => {
+          if (controller.signal.aborted || currentEditor.isDestroyed) return;
+          completionRetryAt.current = 0;
+          const currentContext = completionContextFor(currentEditor);
+          const resolved = resolveInlineCompletion(completionState.current, {
+            token: started.token,
+            contextKey: latestContext.key,
+            text: result.available ? result.text : undefined,
+          });
+          completionState.current = resolved;
+          if (result.available && result.text) {
+            completionCache.current.delete(latestContext.key);
+            completionCache.current.set(latestContext.key, result);
+            while (completionCache.current.size > 24) {
+              const oldest = completionCache.current.keys().next().value;
+              if (typeof oldest !== "string") break;
+              completionCache.current.delete(oldest);
+            }
+          }
+          if (
+            resolved.status === "visible"
+            && resolved.text
+            && currentContext?.key === latestContext.key
+            && currentContext.position === latestContext.position
+          ) {
+            completionProviderName.current = result.providerName;
+            showInlineCompletion(currentEditor, {
+              position: latestContext.position,
+              text: resolved.text,
+            });
+            setCompletionUi({
+              status: "visible",
+              paragraphs: resolved.text.split(/\r?\n\s*\r?\n+/u).length,
+              providerName: result.providerName,
+            });
+            return;
+          }
+          if (!result.available && result.reason) {
+            if (/AI 设置.*(?:配置|选择).*(?:API Key|补全模型)/u.test(result.reason)) completionDisabledReason.current = result.reason;
+            setCompletionUi({ status: "unavailable", message: result.reason });
+          } else {
+            setCompletionUi({ status: "idle" });
+          }
+        }).catch((error: unknown) => {
+          if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return;
+          completionState.current = invalidateInlineCompletion(completionState.current);
+          const retryDelay = inlineCompletionRetryDelay(error);
+          completionRetryAt.current = Date.now() + retryDelay;
+          setCompletionUi({
+            status: "unavailable",
+            message: `补全暂不可用，约 ${Math.ceil(retryDelay / 1_000)} 秒后自动重试`,
+          });
+        }).finally(() => {
+          if (completionAbort.current === controller) completionAbort.current = undefined;
+        });
+      }, inlineCompletionIdleDelay(scheduledContext.before));
+    };
 
     const editor = useEditor({
       extensions: [
@@ -103,6 +313,33 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
         }),
         NewsImage.configure({ allowBase64: false, inline: false }),
         Placeholder.configure({ placeholder: "从这里开始自由编辑正文……" }),
+        InlineCompletionExtension.configure({
+          onAccept: (_acceptedText, remainingText) => {
+            if (remainingText) {
+              completionState.current = {
+                ...completionState.current,
+                status: "visible",
+                text: remainingText,
+              };
+              setCompletionUi({
+                status: "visible",
+                paragraphs: remainingText.split(/\r?\n\s*\r?\n+/u).length,
+                providerName: completionProviderName.current,
+              });
+              return;
+            }
+            if (completionTimer.current !== undefined) window.clearTimeout(completionTimer.current);
+            completionTimer.current = undefined;
+            completionAbort.current?.abort();
+            completionAbort.current = undefined;
+            completionState.current = invalidateInlineCompletion(completionState.current);
+            setCompletionUi({ status: "idle" });
+          },
+          onDismiss: () => {
+            completionState.current = invalidateInlineCompletion(completionState.current);
+            setCompletionUi({ status: "idle" });
+          },
+        }),
       ],
       content,
       editorProps: {
@@ -113,8 +350,25 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
       },
       onUpdate: ({ editor: current }) => {
         if (updatesEnabled.current) onChange(current.getHTML());
+        scheduleCompletion(current);
       },
+      onSelectionUpdate: ({ editor: current }) => scheduleCompletion(current),
+      onFocus: ({ editor: current }) => scheduleCompletion(current),
+      onBlur: ({ editor: current }) => clearCompletionRuntime(current),
     });
+
+    useEffect(() => {
+      completionDisabledReason.current = undefined;
+      completionRetryAt.current = 0;
+      completionCache.current.clear();
+      if (editor && !editor.isDestroyed) clearCompletionRuntime(editor);
+    }, [draftId, editor]);
+
+    useEffect(() => () => {
+      if (completionTimer.current !== undefined) window.clearTimeout(completionTimer.current);
+      completionAbort.current?.abort();
+      completionState.current = invalidateInlineCompletion(completionState.current);
+    }, []);
 
     useEffect(() => {
       const frame = window.requestAnimationFrame(() => {
@@ -130,6 +384,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
 
     useEffect(() => {
       if (!editor || editor.isDestroyed || editor.getHTML() === content) return;
+      clearCompletionRuntime(editor);
       editor.commands.setContent(content, { emitUpdate: false });
     }, [content, editor]);
 
@@ -372,6 +627,15 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
           ) : null}
           {preview ? <h1 className="preview-article-title">{title}</h1> : null}
           <EditorContent editor={editor} />
+          {!preview && onRequestCompletion ? (
+            <div className={`inline-completion-status is-${completionUi.status}`} role="status" aria-live="polite">
+              {completionUi.status === "loading" ? <><LoaderCircle className="spin" size={12} />正在补全</> : null}
+              {completionUi.status === "streaming" ? <><LoaderCircle className="spin" size={12} />正在核验 <span className="inline-completion-stream-preview">{completionUi.preview}</span>{completionUi.providerName ? ` · ${completionUi.providerName}` : ""}</> : null}
+              {completionUi.status === "visible" ? <><kbd>Tab</kbd> {completionUi.paragraphs > 1 ? "接受下一段" : "接受"}{completionUi.paragraphs > 1 ? <><span>·</span><kbd>Ctrl+Enter</kbd> 接受全部</> : null}{completionUi.providerName ? ` · ${completionUi.providerName}` : ""} <span>·</span> <kbd>Esc</kbd> 取消</> : null}
+              {completionUi.status === "unavailable" ? completionUi.message : null}
+              {completionUi.status === "idle" ? <>停顿后预测下一句或下一段，按 <kbd>Tab</kbd> 接受</> : null}
+            </div>
+          ) : null}
           {!preview ? <span className="editor-drop-hint">连续编辑 · 支持粘贴、拖放和光标插图</span> : null}
         </div>
       </div>

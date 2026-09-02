@@ -149,9 +149,19 @@ import { contentPackageDesk } from "./content-package-desk.js";
 import { buildTodayView, storyById } from "./story-desk.js";
 import { enrichStoryExplanation } from "./story-explanation-service.js";
 import { storyEvidenceDesk } from "./story-evidence-desk.js";
-import { createDraftFromPackage, editorialGeneratorRevision } from "./draft-desk.js";
+import {
+  createDraftFromPackage,
+  createHumanDraftFromPackage,
+  editorialGeneratorRevision,
+} from "./draft-desk.js";
 import { editorialIntakeDesk } from "./editorial-intake.js";
 import { createJobDesk } from "./job-desk.js";
+import {
+  buildInlineCompletionPrompt,
+  isStableInlineCompletionPreview,
+  prepareInlineCompletion,
+} from "./inline-completion.js";
+import { runInlineCompletionProvider, streamInlineCompletionProvider } from "./provider-runtime.js";
 import { hydrateStoryAssets } from "./visual-desk.js";
 import {
   confirmIntakeReview,
@@ -422,7 +432,8 @@ app.get(
       ...view.watching,
       ...view.mustReads,
       ...view.secondary,
-    ].filter((story, index, stories) => story.evidenceStrength !== "strong"
+    ].filter((story, index, stories) => (story.evidenceStrength !== "strong"
+      || Boolean(story.releaseDossier && story.releaseDossier.readyCount < story.releaseDossier.totalCount))
       && stories.findIndex((entry) => entry.id === story.id) === index);
     const evidenceJobs = database.listJobs(500).filter((job) => job.type === "supplement-story-evidence");
     const activeEvidenceStoryIds = new Set(evidenceJobs
@@ -719,6 +730,15 @@ app.post(
       }
     }
     response.status(202).json({ job: queued.job, reused: queued.reused });
+  }),
+);
+
+app.post(
+  "/api/packages/:packageId/human-draft",
+  asyncRoute(async (request, response) => {
+    const packageId = routeParam(request.params.packageId);
+    const result = await createHumanDraftFromPackage(packageId);
+    response.status(result.reused ? 200 : 201).json(result);
   }),
 );
 
@@ -1063,7 +1083,8 @@ app.post(
       response.status(404).json({ error: "Story 不存在" });
       return;
     }
-    if (story.evidenceStrength === "strong") {
+    if (story.evidenceStrength === "strong"
+      && (!story.releaseDossier || story.releaseDossier.readyCount >= story.releaseDossier.totalCount)) {
       response.json({ story, reused: true });
       return;
     }
@@ -1137,7 +1158,9 @@ app.patch(
         recentTopics: state.settings.recentTopics,
         recentCommunities: state.settings.recentCommunities,
       };
-      next.windowHours = Math.max(1, Math.min(48, Number(next.windowHours) || 24));
+      // Keep scheduled collection aligned with Today's 48-hour editorial
+      // window so a late daily run cannot create an artificial blind spot.
+      next.windowHours = 48;
       next.collectionTopics = normalizeTopicIds(next.collectionTopics);
       next.imageLimit = Math.max(0, Math.min(12, Number(next.imageLimit) || 0));
       next.autoGenerateCount = Math.max(1, Math.min(10, Number(next.autoGenerateCount) || 3));
@@ -1253,16 +1276,21 @@ app.patch(
       const provider = state.aiSettings.providers.find((entry) => entry.id === providerId);
       if (!provider) throw new Error("AI 厂商不存在");
       const nextModel = typeof body.model === "string" ? body.model.trim().slice(0, 120) : provider.model;
+      const nextInlineCompletionModel = typeof body.inlineCompletionModel === "string"
+        ? body.inlineCompletionModel.trim().slice(0, 120)
+        : provider.inlineCompletionModel;
       const nextVisionModel = typeof body.visionModel === "string"
         ? body.visionModel.trim().slice(0, 120)
         : provider.visionModel;
       const nextBaseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim().slice(0, 500) : provider.baseUrl;
       const connectionConfigurationChanged = nextModel !== provider.model
+        || nextInlineCompletionModel !== provider.inlineCompletionModel
         || nextVisionModel !== provider.visionModel
         || nextBaseUrl !== provider.baseUrl
         || Boolean(keyHint)
         || Boolean(body.clearApiKey);
       provider.model = nextModel;
+      provider.inlineCompletionModel = nextInlineCompletionModel;
       provider.visionModel = nextVisionModel;
       provider.baseUrl = nextBaseUrl;
       if (keyHint) {
@@ -2131,6 +2159,145 @@ app.patch(
       saveMode: result.saveMode,
     });
     response.json(result.draft);
+  }),
+);
+
+app.patch(
+  "/api/ai/completion-provider",
+  asyncRoute(async (request, response) => {
+    const providerId = typeof request.body?.providerId === "string" ? request.body.providerId : "";
+    if (!providerId) {
+      response.status(400).json({ error: "补全模型不正确" });
+      return;
+    }
+    const aiSettings = await updateState((state) => {
+      const provider = state.aiSettings.providers.find((entry) => entry.id === providerId);
+      if (!provider) throw new Error("AI 厂商不存在");
+      if (provider.kind !== "openai-compatible") {
+        throw new Error("Tab 补全需要低延迟 API；本机 Codex 登录适合长任务，不用于逐字补全");
+      }
+      if (!provider.apiKeyConfigured) throw new Error(`请先配置 ${provider.name} 的 API Key`);
+      if (!(provider.inlineCompletionModel || provider.model).trim()) throw new Error("请先填写补全模型名称");
+      if (!provider.baseUrl) throw new Error("请先填写 API Base URL");
+      state.aiSettings.completionProviderId = provider.id;
+      return state.aiSettings;
+    });
+    response.json(aiSettings);
+  }),
+);
+
+app.post(
+  "/api/drafts/:draftId/completions",
+  asyncRoute(async (request, response) => {
+    const draftId = routeParam(request.params.draftId);
+    const before = typeof request.body?.before === "string" ? request.body.before.slice(-1_600) : "";
+    const after = typeof request.body?.after === "string" ? request.body.after.slice(0, 500) : "";
+    if (before.trim().length < 4) {
+      response.json({ available: false, reason: "再写几个字后才会出现补全" });
+      return;
+    }
+    const state = await readState();
+    const draft = state.drafts.find((entry) => entry.id === draftId);
+    if (!draft) {
+      response.status(404).json({ error: "草稿不存在" });
+      return;
+    }
+    const packageId = draft.provenance.contentPackageId;
+    const contentPackage = packageId
+      ? (await getLocalDatabase()).getContentPackage<ContentPackage>(packageId)
+      : undefined;
+    if (!contentPackage || contentPackage.status !== "ready") {
+      response.json({ available: false, reason: "当前草稿没有可用于安全补全的素材包" });
+      return;
+    }
+    const provider = state.aiSettings.providers.find((candidate) =>
+      candidate.id === state.aiSettings.completionProviderId
+      && candidate.kind === "openai-compatible");
+    if (!provider) {
+      response.json({ available: false, reason: "请先在 AI 设置中选择一个 Tab 补全模型" });
+      return;
+    }
+    if (!provider.apiKeyConfigured) {
+      response.json({ available: false, reason: `请先在 AI 设置中配置 ${provider.name} 的 API Key` });
+      return;
+    }
+
+    const controller = new AbortController();
+    const wantsStream = String(request.header("accept") ?? "").includes("text/event-stream");
+    const abort = () => controller.abort();
+    const abortIfUnfinished = () => { if (!response.writableEnded) controller.abort(); };
+    request.once("aborted", abort);
+    response.once("close", abortIfUnfinished);
+    try {
+      const prompt = buildInlineCompletionPrompt({
+        contentPackage,
+        title: draft.title,
+        before,
+        after,
+      });
+      if (wantsStream) {
+        response.status(200);
+        response.setHeader("content-type", "text/event-stream; charset=utf-8");
+        response.setHeader("cache-control", "no-cache, no-transform");
+        response.setHeader("connection", "keep-alive");
+        response.flushHeaders();
+        const providerMeta = {
+          providerName: provider.name,
+          model: provider.inlineCompletionModel || provider.model,
+        };
+        let latestPreview = "";
+        const raw = await streamInlineCompletionProvider({
+          provider,
+          systemPrompt: prompt.system,
+          userPrompt: prompt.user,
+          signal: controller.signal,
+          onText: (text) => {
+            if (controller.signal.aborted || response.writableEnded) return;
+            const preview = prepareInlineCompletion({ raw: text, contentPackage, before, after });
+            if (
+              !preview.available
+              || !preview.text
+              || !isStableInlineCompletionPreview(preview.text)
+              || preview.text === latestPreview
+            ) return;
+            latestPreview = preview.text;
+            response.write(`event: preview\ndata: ${JSON.stringify({ text: preview.text, ...providerMeta })}\n\n`);
+          },
+        });
+        if (!controller.signal.aborted && !response.writableEnded) {
+          const final = prepareInlineCompletion({ raw, contentPackage, before, after });
+          response.write(`event: final\ndata: ${JSON.stringify({ ...final, ...providerMeta })}\n\n`);
+          response.end();
+        }
+        return;
+      }
+      const raw = await runInlineCompletionProvider({
+        provider,
+        systemPrompt: prompt.system,
+        userPrompt: prompt.user,
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted && !response.writableEnded) {
+        response.json({
+          ...prepareInlineCompletion({ raw, contentPackage, before, after }),
+          providerName: provider.name,
+          model: provider.inlineCompletionModel || provider.model,
+        });
+      }
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return;
+      if (wantsStream && response.headersSent) {
+        if (!response.writableEnded) {
+          response.write(`event: final\ndata: ${JSON.stringify({ available: false, reason: "补全暂不可用，不影响继续写作" })}\n\n`);
+          response.end();
+        }
+        return;
+      }
+      throw error;
+    } finally {
+      request.off("aborted", abort);
+      response.off("close", abortIfUnfinished);
+    }
   }),
 );
 

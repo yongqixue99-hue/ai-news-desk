@@ -73,6 +73,75 @@ export interface IntakeReviewRequestResult {
   review: IntakeReviewRecord;
 }
 
+export interface InlineCompletionResponse {
+  available: boolean;
+  text?: string;
+  reason?: string;
+  providerName?: string;
+  model?: string;
+}
+
+export type InlineCompletionPreview = Pick<InlineCompletionResponse, "providerName" | "model"> & { text: string };
+
+const requestInlineCompletion = async (
+  url: string,
+  input: { before: string; after?: string },
+  signal?: AbortSignal,
+  onPreview?: (preview: InlineCompletionPreview) => void,
+): Promise<InlineCompletionResponse> => {
+  const response = await fetch(url, {
+    method: "POST",
+    signal,
+    headers: {
+      accept: "text/event-stream, application/json;q=0.8",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error || `请求失败：${response.status}`);
+  }
+  if (!response.headers.get("content-type")?.includes("text/event-stream")) {
+    return response.json() as Promise<InlineCompletionResponse>;
+  }
+  if (!response.body) throw new Error("补全接口没有返回流式正文");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let final: InlineCompletionResponse | undefined;
+  const consumeFrame = (frame: string) => {
+    let event = "message";
+    const data: string[] = [];
+    for (const line of frame.split(/\r?\n/u)) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+    }
+    if (!data.length) return;
+    const payload = JSON.parse(data.join("\n")) as InlineCompletionResponse;
+    if (event === "preview" && payload.text) onPreview?.({
+      text: payload.text,
+      providerName: payload.providerName,
+      model: payload.model,
+    });
+    if (event === "final") final = payload;
+  };
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const frames = buffer.split(/\r?\n\r?\n/u);
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) consumeFrame(frame);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) consumeFrame(buffer);
+  if (!final) throw new Error("补全流在最终校验前中断");
+  return final;
+};
+
 export interface MaterialMetadataInput {
   title: string;
   attribution: string;
@@ -273,6 +342,22 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
+  createHumanDraftFromPackage: (packageId: string) =>
+    request<{ draft: ArticleDraft; reused: boolean }>(
+      `/api/packages/${encodeURIComponent(packageId)}/human-draft`,
+      { method: "POST", body: "{}" },
+    ),
+  completeDraftInline: (
+    draftId: string,
+    input: { before: string; after?: string },
+    signal?: AbortSignal,
+    onPreview?: (preview: InlineCompletionPreview) => void,
+  ) => requestInlineCompletion(
+    `/api/drafts/${encodeURIComponent(draftId)}/completions`,
+    input,
+    signal,
+    onPreview,
+  ),
   productJob: (jobId: string) => request<ProductJob>(`/api/product/jobs/${jobId}`),
   productJobs: (limit = 12) => request<ProductJob[]>(`/api/product/jobs?limit=${encodeURIComponent(String(limit))}`),
   editorialSystem: () => request<EditorialSystemView>("/api/editorial-system"),
@@ -528,6 +613,11 @@ export const api = {
     request<AiSettings>("/api/ai/agent-roles", {
       method: "PATCH",
       body: JSON.stringify({ role, providerId }),
+    }),
+  saveCompletionProvider: (providerId: string) =>
+    request<AiSettings>("/api/ai/completion-provider", {
+      method: "PATCH",
+      body: JSON.stringify({ providerId }),
     }),
   saveWritingReviewMode: (mode: AiSettings["writingReviewMode"]) =>
     request<AiSettings>("/api/ai/writing-review", {

@@ -3,6 +3,7 @@ import { createSourceDesk } from "./source-desk.js";
 import { collectPortableStructuredSources } from "./structured-collector.js";
 import {
   applyXSourceCursors,
+  applyXAccountObservations,
   collectXOfficialSources,
   createXApiClient,
 } from "./x-official.js";
@@ -307,6 +308,11 @@ const windowHoursFromDate = (dateFrom: string) => {
   return Math.max(1, Math.min(32 * 24, Math.ceil((Date.now() - startAt) / 3_600_000) + 1));
 };
 
+export const scheduledWindowHoursFor = (configured: number) => {
+  const value = Number.isFinite(configured) && configured > 0 ? configured : 48;
+  return Math.max(48, value);
+};
+
 export const createCollectionRun = async (
   input: boolean | CollectionRunOptions = false,
 ): Promise<{ run: WorkflowRun; created: boolean }> => {
@@ -327,8 +333,11 @@ export const createCollectionRun = async (
       topicIds,
     ).map((source) => source.id);
     if (!sourceIds.length) throw new Error("所选新闻源不支持本次频道，请调整来源或频道");
-    const windowHours = options.windowHours
+    const requestedWindowHours = options.windowHours
       ?? (options.dateFrom ? windowHoursFromDate(options.dateFrom) : state.settings.windowHours);
+    const windowHours = options.scheduled
+      ? scheduledWindowHoursFor(requestedWindowHours)
+      : requestedWindowHours;
     const keywords = options.keywords?.trim() || undefined;
     const next: WorkflowRun = {
       id: `run_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomUUID().slice(0, 6)}`,
@@ -596,6 +605,7 @@ export const executeCollection = async (runId: string) => {
         applySourceRunResult(source, resultItem, checkedAt);
       }
       applyXSourceCursors(current.sources, batch.sourceCursors ?? {});
+      applyXAccountObservations(current.sources, batch.xAccountObservations ?? {});
     });
     await appendLog(
       runId,

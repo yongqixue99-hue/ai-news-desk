@@ -2,9 +2,13 @@ import { createCollectionRun } from "./horizon.js";
 import { isPortableArchiveImportActive } from "./portable-archive-importer.js";
 import { localScheduleClock, scheduleIsDue } from "./run-policy.js";
 import { readState } from "./storage.js";
+import { officialXMonitor } from "./x-monitor-desk.js";
 
 export const runSchedulerCheck = async () => {
   if (isPortableArchiveImportActive()) return;
+  await officialXMonitor.poll().catch((error) => {
+    console.error("X 官号增量监控失败：", error instanceof Error ? error.message : String(error));
+  });
   const state = await readState();
   if (!scheduleIsDue(state.settings)) return;
   const clock = localScheduleClock();

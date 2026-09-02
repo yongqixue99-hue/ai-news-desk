@@ -20,7 +20,9 @@ test("sources page exposes X credentials and identifies X as an official source 
     onDeletePreset: async () => undefined,
   }));
 
-  assert.match(markup, /X 官方账号采集/u);
+  assert.match(markup, /X 重点账号监控/u);
+  assert.match(markup, /每 5 分钟/u);
+  assert.match(markup, /高管个人号只作预告线索/u);
   assert.match(markup, /type="password"/u);
   assert.match(markup, /Bearer Token/u);
   assert.match(markup, /X 官方/u);

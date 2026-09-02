@@ -70,6 +70,34 @@ test("portable collector parses Atom alternate links and preserves the source bo
   assert.equal(items[0]?.metadata?.source_id, source.id);
 });
 
+test("portable collector parses a publisher sitemap as an incremental official index", () => {
+  const items = parsePortableFeed(`
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url>
+        <loc>https://www.anthropic.com/claude-fable-and-mythos-5-1</loc>
+        <lastmod>2026-09-01T17:53:53Z</lastmod>
+      </url>
+      <url>
+        <loc>https://www.anthropic.com/older-page</loc>
+        <lastmod>2026-08-10</lastmod>
+      </url>
+    </urlset>
+  `, {
+    feedUrl: "https://www.anthropic.com/sitemap.xml",
+    feedName: "Anthropic",
+    sourceId: "anthropic-official",
+    sourceRole: "official",
+    category: "ai-official",
+    fetchedAt: "2026-09-02T00:00:00.000Z",
+  });
+
+  assert.equal(items.length, 2);
+  assert.equal(items[0]?.title, "claude fable and mythos 5 1");
+  assert.equal(items[0]?.url, "https://www.anthropic.com/claude-fable-and-mythos-5-1");
+  assert.equal(items[0]?.published_at, "2026-09-01T17:53:53.000Z");
+  assert.equal(items[0]?.metadata?.source_format, "sitemap");
+});
+
 test("one unavailable portable source is reported without discarding a healthy source", async () => {
   const unavailable = { ...source, id: "unavailable", name: "Unavailable", url: "https://unavailable.example/feed" };
   const result = await collectPortableStructuredSources([source, unavailable], {

@@ -120,6 +120,37 @@ export interface StoryTrendView {
   windowHours?: number;
 }
 
+export type ModelReleaseFacetId =
+  | "official"
+  | "identity"
+  | "access"
+  | "specs"
+  | "pricing"
+  | "benchmarks"
+  | "safety"
+  | "images";
+
+export interface ModelReleaseFacet {
+  id: ModelReleaseFacetId;
+  label: string;
+  status: "ready" | "partial" | "missing";
+  detail: string;
+}
+
+/**
+ * A model announcement is not editorially complete merely because one source
+ * confirms that it happened. Keep the research surfaces visible so the user
+ * can see what is ready and what still needs collecting before writing.
+ */
+export interface ModelReleaseDossier {
+  releaseStatus: "released" | "preview" | "reported";
+  readyCount: number;
+  totalCount: number;
+  facets: ModelReleaseFacet[];
+  missingLabels: string[];
+  nextAction: string;
+}
+
 export interface StoryView {
   id: string;
   title: string;
@@ -130,6 +161,7 @@ export interface StoryView {
   communityFocus: string[];
   disagreement?: string;
   explanation: StoryExplanation;
+  releaseDossier?: ModelReleaseDossier;
   topicIds: CollectionTopicId[];
   firstSeenAt: string;
   lastSeenAt: string;

@@ -26,6 +26,37 @@ test("current state initializes and preserves the latest provider health snapsho
   assert.equal(upgraded.version, createDefaultState().version);
 });
 
+test("a fresh desk separates cheap inline completion from the long-form drafting provider", () => {
+  const state = createDefaultState();
+  const deepseek = state.aiSettings.providers.find((provider) => provider.id === "deepseek");
+  const gemini = state.aiSettings.providers.find((provider) => provider.id === "gemini");
+  const groq = state.aiSettings.providers.find((provider) => provider.id === "groq");
+
+  assert.equal(state.aiSettings.activeProviderId, "codex-cli");
+  assert.equal(state.aiSettings.completionProviderId, "deepseek");
+  assert.equal(deepseek?.model, "deepseek-v4-flash");
+  assert.equal(deepseek?.inlineCompletionModel, "deepseek-v4-flash");
+  assert.equal(gemini?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
+  assert.equal(gemini?.inlineCompletionModel, "gemini-3.1-flash-lite");
+  assert.equal(groq?.baseUrl, "https://api.groq.com/openai/v1");
+  assert.equal(groq?.inlineCompletionModel, "openai/gpt-oss-20b");
+});
+
+test("an older desk gains a completion provider without changing its existing Agent assignments", () => {
+  const saved = createDefaultState();
+  saved.aiSettings.activeProviderId = "qwen";
+  saved.aiSettings.analysisProviderId = "qwen";
+  saved.aiSettings.optimizationProviderId = "openai-api";
+  delete (saved.aiSettings as Partial<typeof saved.aiSettings>).completionProviderId;
+
+  const upgraded = upgradeState(saved);
+
+  assert.equal(upgraded.aiSettings.activeProviderId, "qwen");
+  assert.equal(upgraded.aiSettings.analysisProviderId, "qwen");
+  assert.equal(upgraded.aiSettings.optimizationProviderId, "openai-api");
+  assert.equal(upgraded.aiSettings.completionProviderId, "deepseek");
+});
+
 test("current state drops malformed or orphaned provider health records", () => {
   const saved = createDefaultState() as unknown as Omit<ReturnType<typeof createDefaultState>, "aiSettings"> & {
     aiSettings: Omit<ReturnType<typeof createDefaultState>["aiSettings"], "latestProviderHealth"> & {
