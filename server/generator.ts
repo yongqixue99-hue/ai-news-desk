@@ -51,6 +51,10 @@ interface GeneratedArticle {
     paragraphIndex: number;
     sourceUrls: string[];
   }>;
+  paragraphFactIds: Array<{
+    paragraphIndex: number;
+    factIds: string[];
+  }>;
   uncertainties: string[];
   imageSelections: Array<{
     imageId: string;
@@ -77,6 +81,7 @@ const articleSchema = {
     "take",
     "sources",
     "paragraphEvidence",
+    "paragraphFactIds",
     "uncertainties",
     "imageSelections",
     "discoveredImages",
@@ -118,6 +123,22 @@ const articleSchema = {
           sourceUrls: {
             type: "array",
             minItems: 1,
+            items: { type: "string" },
+          },
+        },
+      },
+    },
+    paragraphFactIds: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["paragraphIndex", "factIds"],
+        properties: {
+          paragraphIndex: { type: "integer", minimum: 0, maximum: 7 },
+          factIds: {
+            type: "array",
+            minItems: 0,
             items: { type: "string" },
           },
         },
@@ -301,6 +322,94 @@ export const buildGeneratedFactClaims = ({
   });
 };
 
+export const buildPackageParagraphClaims = ({
+  candidateId,
+  paragraphs,
+  paragraphEvidence,
+  paragraphFactIds,
+  contentPackage,
+  capturedAt,
+}: {
+  candidateId: string;
+  paragraphs: string[];
+  paragraphEvidence: GeneratedArticle["paragraphEvidence"];
+  paragraphFactIds: GeneratedArticle["paragraphFactIds"];
+  contentPackage: ContentPackage;
+  capturedAt: string;
+}): DraftFactClaim[] => {
+  const packageIntent = contentPackage.intent
+    ?? (contentPackage.mode === "community" ? "community" : contentPackage.mode === "curate" ? "source" : "news");
+  const factById = new Map(contentPackage.facts.map((fact) => [fact.id, fact]));
+  const sourceBySignalId = new Map(contentPackage.sources.map((source) => [source.signalId, source]));
+  const sourceByUrl = new Map(contentPackage.sources.map((source) => [normalizedEvidenceUrl(source.url), source]));
+  const communityUrls = new Set(contentPackage.sources
+    .filter((source) => source.isCommunity)
+    .map((source) => normalizedEvidenceUrl(source.url)));
+  const evidenceByParagraph = new Map(paragraphEvidence.map((entry) => [
+    entry.paragraphIndex,
+    [...new Set(entry.sourceUrls)],
+  ]));
+  const factIdsByParagraph = new Map(paragraphFactIds.map((entry) => [
+    entry.paragraphIndex,
+    [...new Set(entry.factIds)],
+  ]));
+
+  return paragraphs.map((paragraph, index) => {
+    const sourceUrls = evidenceByParagraph.get(index) ?? [];
+    const factIds = factIdsByParagraph.get(index) ?? [];
+    const unknownFactId = factIds.find((factId) => !factById.has(factId));
+    if (unknownFactId) throw new Error(`第 ${index + 1} 段引用了素材包之外的事实：${unknownFactId}`);
+    const communityOnlyEvidence = sourceUrls.length > 0
+      && sourceUrls.every((url) => communityUrls.has(normalizedEvidenceUrl(url)));
+    if (packageIntent === "news" && !factIds.length && !communityOnlyEvidence) {
+      throw new Error(`模型没有为第 ${index + 1} 段登记实际使用的素材包事实`);
+    }
+    const facts = factIds.flatMap((factId) => {
+      const fact = factById.get(factId);
+      return fact ? [fact] : [];
+    });
+    for (const fact of facts) {
+      const factSourceUrls = [...new Set([
+        ...(fact.sourceUrls ?? []),
+        ...fact.sourceSignalIds.flatMap((signalId) => {
+          const source = sourceBySignalId.get(signalId);
+          return source ? [source.url] : [];
+        }),
+      ])];
+      if (factSourceUrls.length && !sourceUrls.some((url) =>
+        factSourceUrls.some((factUrl) => normalizedEvidenceUrl(factUrl) === normalizedEvidenceUrl(url)))) {
+        throw new Error(`第 ${index + 1} 段登记了事实 ${fact.id}，但没有回指支持该事实的来源`);
+      }
+    }
+    const status = !sourceUrls.length
+      ? "unverified" as const
+      : facts.some((fact) => fact.status === "unverified" || fact.status === "conflicted")
+        ? "unverified" as const
+        : facts.some((fact) => fact.status === "partially-supported")
+          ? "excerpt-only" as const
+          : new Set(sourceUrls.map(normalizedEvidenceUrl)).size >= 2
+            ? "cross-confirmed" as const
+            : "full-source" as const;
+    const sourceLabels = [...new Set(sourceUrls.flatMap((url) => {
+      const source = sourceByUrl.get(normalizedEvidenceUrl(url));
+      return source ? [source.label] : [];
+    }))];
+    return {
+      id: `claim_${createHash("sha1").update(`${candidateId}:package:${index}:${paragraph}`).digest("hex").slice(0, 12)}`,
+      claim: paragraph,
+      factIds,
+      status,
+      sourceUrl: sourceUrls[0],
+      sourceUrls,
+      sourceLabel: sourceLabels.join("；") || undefined,
+      capturedAt,
+      note: factIds.length
+        ? `本段使用素材包事实：${factIds.join("、")}。`
+        : "本段只说明可回指的社区发现或讨论材料，没有登记为事件事实。",
+    };
+  });
+};
+
 export const parseGeneratedArticle = (rendered: string) => {
   const withoutFence = rendered
     .trim()
@@ -337,6 +446,16 @@ export const parseGeneratedArticle = (rendered: string) => {
         return sourceUrls.length ? [{ paragraphIndex: Number(entry.paragraphIndex), sourceUrls }] : [];
       })
     : [];
+  const paragraphFactIds = Array.isArray(parsed.paragraphFactIds)
+    ? parsed.paragraphFactIds.flatMap<GeneratedArticle["paragraphFactIds"][number]>((entry) => {
+        if (!isRecord(entry) || !Number.isInteger(entry.paragraphIndex) || !Array.isArray(entry.factIds)) return [];
+        const factIds = [...new Set(entry.factIds
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean))];
+        return [{ paragraphIndex: Number(entry.paragraphIndex), factIds }];
+      })
+    : [];
   const imageSelections = Array.isArray(parsed.imageSelections)
     ? parsed.imageSelections.flatMap<GeneratedArticle["imageSelections"][number]>((selection) => {
         if (!isRecord(selection) || typeof selection.imageId !== "string") return [];
@@ -369,6 +488,7 @@ export const parseGeneratedArticle = (rendered: string) => {
     take: parsed.take,
     sources,
     paragraphEvidence,
+    paragraphFactIds,
     uncertainties: Array.isArray(parsed.uncertainties) ? parsed.uncertainties.filter((item): item is string => typeof item === "string") : [],
     imageSelections,
     discoveredImages,
@@ -452,10 +572,11 @@ ${skills.filter((skill) => skill.compatibility === "codex-native").length
 10. 只有 1–4 级都不存在合格图片时才可选择第 5 级 AI 生成兜底；不要自行生成图片，不要选择无关 logo、头像、装饰图、旧事件图片或仅凭“AI/科技”等泛词命中的通用图。caption 要说明画面是什么并保留来源语义。imageSelections 只是同级图片的段落匹配建议，系统会再次强制执行优先级。
 11. topics 必须返回空数组。平台话题只由用户从已成功发布的历史标签中选择，不能自动生成。
 12. paragraphEvidence 必须覆盖每个 paragraphs 下标。每一段列出直接支持该段的精确来源 URL；URL 必须同时出现在 sources 中，候选原始链接也必须列入 sources。${contentIntent === "source" ? "sourceMaterials 中的社区主帖 URL 只能证明原作者确实这样写过，不能把其陈述升级为已独立核验事实。" : "社区讨论链接只能支持“讨论热度、分数、评论内容”等社区事实，不能支持产品功能、公司行为或裁员传闻。"}没有来源支持的句子不得写入正文。
-13. 返回严格符合 JSON Schema 的 JSON，不要写 Markdown 或解释。
+13. packageLocked 时，paragraphFactIds 也必须覆盖每个 paragraphs 下标，并且只能列出该段实际使用的 job.contentPackage.facts[].id；不能把未写入正文的事实登记为已使用。非素材包任务返回空数组。
+14. 返回严格符合 JSON Schema 的 JSON，不要写 Markdown 或解释。
 `;
 
-const apiSystemPrompt = `你是新闻编辑工作台的中文成稿引擎。只能依据用户提供的候选新闻、正文摘录、ContentPackage 和来源信息写作，不能假装已经浏览网页。evidenceBoundary 为 content-package 时，素材包是唯一事实边界，不能补充模型记忆中的事实、来源或图片。先服从 contentIntent：news 必须以新闻或官方来源建立事实主干，社区只可作为选题发现线索，不能用评论替代新闻内容；source 只处理 sourceMaterials 中冻结的原始材料，按原文顺序保留具体信息和作者语气，中文原文做最小整理，外文做忠实中文翻译，不添加背景、评价、统一模板或虚构过渡，也不能把作者陈述写成已独立核验事实；community 先把事件事实讲清，再使用达到采样门槛的真实观点。再遵守 draftStrategy：brief 只把单一事件说清；当 brief 的素材包已有 5 条以上受支持事实时，写成 5–7 段、正文约 600–1000 个中文字符，具体解释事件、适用规则、受影响对象、后果和限制，不能只交付摘要，也不能同义改写凑字；synthesis 组织多源共识与差异；community 先写事实主干，再保留达到采样门槛的真实社区样本；playbook 只整理可验证步骤；curate 在 news 意图下只做导读与有限引用，在 source 意图下生成带明确来源归属的私有原文工作副本；commentary 只有存在明确 userAngle 时可采用。社区热度不能替代事实来源，少于 5 条社区样本时不得让评论主导正文。storyContext.discoveredViaCommunity 为 true 且 contentIntent 为 news 时，社区仍然只是发现渠道：标题、摘要和首句不得出现社区平台名、热议、讨论、受到关注或重新受到注意，必须直接说明非社区来源支持的项目、产品或公司事实；若项目不是当天发布，就写成项目介绍，不能虚构“重新走红”。只有 contentIntent 为 community 时讨论本身才可成为正文主角。不要为了制造新品新闻，把依赖升级、自动更新或 README 微调抬成标题。paragraphs 是直接交给普通读者的文章，严禁写“输入资料、证据文本、素材包、当前样本、讨论串标题、后续编辑、发布前核验”等后台处理语言。标题具体，开头直接交代谁做了什么；每段都要增加新信息。不要写无关的小时、分钟或 UTC，也不要用“需要指出的是、需要区分的是、值得注意的是”等模型路标。数字、人名、模型名和日期必须来自输入；无法核实的内容放入 uncertainties。paragraphEvidence 必须逐段给出直接支持正文的来源 URL，社区链接不能冒充产品或公司事实来源。图片必须遵守 editorialPriority：1 原新闻图、2 原文截图、3 人物或公司身份图、4 事件相关图、5 AI 生成兜底；同一画面的不同分辨率只能选择一张，低优先级不能挤掉高优先级，只有 1–4 级都不可用时才能选择第 5 级。严格返回符合给定 JSON Schema 的 JSON，不要输出 Markdown。`;
+const apiSystemPrompt = `你是新闻编辑工作台的中文成稿引擎。只能依据用户提供的候选新闻、正文摘录、ContentPackage 和来源信息写作，不能假装已经浏览网页。evidenceBoundary 为 content-package 时，素材包是唯一事实边界，不能补充模型记忆中的事实、来源或图片。先服从 contentIntent：news 必须以新闻或官方来源建立事实主干，社区只可作为选题发现线索，不能用评论替代新闻内容；source 只处理 sourceMaterials 中冻结的原始材料，按原文顺序保留具体信息和作者语气，中文原文做最小整理，外文做忠实中文翻译，不添加背景、评价、统一模板或虚构过渡，也不能把作者陈述写成已独立核验事实；community 先把事件事实讲清，再使用达到采样门槛的真实观点。再遵守 draftStrategy：brief 只把单一事件说清；当 brief 的素材包已有 5 条以上受支持事实时，写成 5–7 段、正文约 600–1000 个中文字符，具体解释事件、适用规则、受影响对象、后果和限制，不能只交付摘要，也不能同义改写凑字；synthesis 组织多源共识与差异；community 先写事实主干，再保留达到采样门槛的真实社区样本；playbook 只整理可验证步骤；curate 在 news 意图下只做导读与有限引用，在 source 意图下生成带明确来源归属的私有原文工作副本；commentary 只有存在明确 userAngle 时可采用。社区热度不能替代事实来源，少于 5 条社区样本时不得让评论主导正文。storyContext.discoveredViaCommunity 为 true 且 contentIntent 为 news 时，社区仍然只是发现渠道：标题、摘要和首句不得出现社区平台名、热议、讨论、受到关注或重新受到注意，必须直接说明非社区来源支持的项目、产品或公司事实；若项目不是当天发布，就写成项目介绍，不能虚构“重新走红”。只有 contentIntent 为 community 时讨论本身才可成为正文主角。不要为了制造新品新闻，把依赖升级、自动更新或 README 微调抬成标题。paragraphs 是直接交给普通读者的文章，严禁写“输入资料、证据文本、素材包、当前样本、讨论串标题、后续编辑、发布前核验”等后台处理语言。标题具体，开头直接交代谁做了什么；每段都要增加新信息。不要写无关的小时、分钟或 UTC，也不要用“需要指出的是、需要区分的是、值得注意的是”等模型路标。数字、人名、模型名和日期必须来自输入；无法核实的内容放入 uncertainties。paragraphEvidence 必须逐段给出直接支持正文的来源 URL，社区链接不能冒充产品或公司事实来源。素材包任务的 paragraphFactIds 必须逐段列出实际使用的 ContentPackage fact ID，不能把未写入正文的事实登记为已使用。图片必须遵守 editorialPriority：1 原新闻图、2 原文截图、3 人物或公司身份图、4 事件相关图、5 AI 生成兜底；同一画面的不同分辨率只能选择一张，低优先级不能挤掉高优先级，只有 1–4 级都不可用时才能选择第 5 级。严格返回符合给定 JSON Schema 的 JSON，不要输出 Markdown。`;
 
 const autoReviewGeneratedArticle = async ({
   runId,
@@ -496,7 +617,7 @@ const autoReviewGeneratedArticle = async ({
     article,
     diagnostics: before.diagnostics,
     rules: [
-      "只改 title、paragraphs 和 take；strategy、sources、paragraphEvidence、uncertainties、imageSelections、discoveredImages、topics 原样返回。",
+      "只改 title、paragraphs 和 take；strategy、sources、paragraphEvidence、paragraphFactIds、uncertainties、imageSelections、discoveredImages、topics 原样返回。",
       "paragraphs 数量和顺序必须保持不变，每段仍由原来的 paragraphEvidence 支持。",
       "保留原段中的日期、数字、专名、产品名、限定条件和事实强度；不能补事实，不能联网，不能增加来源。",
       "把后台报告腔、英文式长定语和清单堆砌改成普通中文。普通读者不需要完整技术栈时，用功能或限制概括，避免一句塞入大量英文名词。",
@@ -943,22 +1064,17 @@ export const generateCandidateDraft = async (
   }
 
   const createdAt = timestamp();
-  const packageClaims = evidenceOverride?.contentPackage?.facts.map((claim) => {
-    const firstSignalId = claim.sourceSignalIds[0];
-    const source = evidenceOverride.contentPackage?.sources.find((entry) => entry.signalId === firstSignalId);
-    return {
-      id: claim.id,
-      claim: claim.text,
-      status: claim.status === "supported"
-        ? claim.sourceSignalIds.length >= 2 ? "cross-confirmed" as const : "full-source" as const
-        : claim.status === "partially-supported" ? "excerpt-only" as const : "unverified" as const,
-      sourceUrl: claim.sourceUrls?.[0] || source?.url,
-      sourceLabel: source?.label,
-      sourceExcerpt: claim.text.slice(0, 900),
-      capturedAt: createdAt,
-      note: claim.note,
-    };
-  });
+  const packageClaims = evidenceOverride?.contentPackage
+    && evidenceOverride.contentPackage.intent !== "source"
+    ? buildPackageParagraphClaims({
+        candidateId: candidate.id,
+        paragraphs: article.paragraphs,
+        paragraphEvidence: article.paragraphEvidence,
+        paragraphFactIds: article.paragraphFactIds,
+        contentPackage: evidenceOverride.contentPackage,
+        capturedAt: createdAt,
+      })
+    : undefined;
   const generatedClaims = buildGeneratedFactClaims({
     candidateId: candidate.id,
     candidateSourceName: candidate.sourceName,

@@ -1,5 +1,11 @@
 import type { ContentPackage } from "./product-types.js";
-import type { ArticleDraft, DraftQualityWarning } from "./types.js";
+import type {
+  ArticleDraft,
+  DraftCompletenessDimension,
+  DraftFactClaim,
+  DraftFactCoverage,
+  DraftQualityWarning,
+} from "./types.js";
 import { uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import { isCommunityDiscoveryFraming } from "./editorial-source-policy.js";
 import { assessWritingQuality } from "./writing-quality.js";
@@ -8,6 +14,8 @@ export interface EditorialQualityIssue {
   id: string;
   message: string;
   blockId: "title" | `paragraph:${number}` | "evidence" | "images" | "source-material";
+  factCoverage?: DraftFactCoverage;
+  missingDimensions?: DraftCompletenessDimension[];
 }
 
 export interface EditorialDraftQualityReport {
@@ -21,20 +29,135 @@ export interface EditorialDraftQualityInput {
   draft: ArticleDraft;
 }
 
-export const draftQualityWarningsFor = (
-  report: EditorialDraftQualityReport,
-): DraftQualityWarning[] => report.warnings.map((warning) => ({
-  id: warning.id,
-  message: warning.message,
-  blockId: warning.blockId,
-  dimension: warning.blockId === "images"
+const qualityWarningForIssue = (issue: EditorialQualityIssue): DraftQualityWarning => ({
+  id: issue.id,
+  message: issue.message,
+  blockId: issue.blockId,
+  dimension: issue.blockId === "images"
     ? "images-rights"
-    : warning.id === "brief-underdeveloped"
+    : issue.id === "brief-underdeveloped"
       ? "content-completeness"
-      : warning.id.startsWith("writing-")
+      : issue.id.startsWith("writing-")
         ? "writing-quality"
         : "fact-safety",
-}));
+  ...(issue.factCoverage ? { factCoverage: structuredClone(issue.factCoverage) } : {}),
+  ...(issue.missingDimensions?.length ? { missingDimensions: [...issue.missingDimensions] } : {}),
+});
+
+export const draftQualityWarningsFor = (
+  report: EditorialDraftQualityReport,
+): DraftQualityWarning[] => report.warnings.map(qualityWarningForIssue);
+
+export const draftQualityFindingsFor = (
+  report: EditorialDraftQualityReport,
+): DraftQualityWarning[] => [...report.blockers, ...report.warnings]
+  .map(qualityWarningForIssue)
+  .filter((finding, index, all) => all.findIndex((entry) =>
+    entry.id === finding.id && entry.blockId === finding.blockId) === index);
+
+const normalizedSourceUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/\/+$/u, "") || "/";
+    return parsed.toString();
+  } catch {
+    return value.trim();
+  }
+};
+
+/**
+ * Rebinds fact ids added by an exact repair patch to the immutable package
+ * sources. It never infers a fact id from prose and rejects ids outside the
+ * package, so a client edit cannot manufacture evidence metadata.
+ */
+export const reconcileDraftFactEvidence = (
+  contentPackage: Pick<ContentPackage, "facts" | "sources">,
+  factClaims: DraftFactClaim[],
+): DraftFactClaim[] => {
+  const factById = new Map(contentPackage.facts.map((fact) => [fact.id, fact]));
+  const sourceBySignalId = new Map(contentPackage.sources.map((source) => [source.signalId, source]));
+  const sourceByUrl = new Map(contentPackage.sources.map((source) => [normalizedSourceUrl(source.url), source]));
+  return factClaims.map((claim) => {
+    if (!claim.factIds?.length) return structuredClone(claim);
+    const facts = claim.factIds.map((factId) => {
+      const fact = factById.get(factId);
+      if (!fact) throw new Error(`草稿引用了素材包之外的事实：${factId}`);
+      return fact;
+    });
+    const sourceUrls = [...new Set([
+      ...(claim.sourceUrls ?? (claim.sourceUrl ? [claim.sourceUrl] : [])),
+      ...facts.flatMap((fact) => [
+        ...(fact.sourceUrls ?? []),
+        ...fact.sourceSignalIds.flatMap((signalId) => {
+          const source = sourceBySignalId.get(signalId);
+          return source ? [source.url] : [];
+        }),
+      ]),
+    ])];
+    const labels = [...new Set(sourceUrls.flatMap((url) => {
+      const source = sourceByUrl.get(normalizedSourceUrl(url));
+      return source ? [source.label] : [];
+    }))];
+    const status = facts.some((fact) => fact.status === "unverified" || fact.status === "conflicted")
+      ? "unverified" as const
+      : facts.some((fact) => fact.status === "partially-supported")
+        ? "excerpt-only" as const
+        : sourceUrls.length >= 2
+          ? "cross-confirmed" as const
+          : "full-source" as const;
+    return {
+      ...structuredClone(claim),
+      status,
+      sourceUrl: sourceUrls[0],
+      sourceUrls,
+      sourceLabel: labels.join("；") || claim.sourceLabel,
+    };
+  });
+};
+
+const completenessDimensionForFact = (text: string): DraftCompletenessDimension => {
+  if (/尚未|仍未|未公开|未知|限制|仅限|不包括|并非|暂未|例外|截止目前/iu.test(text)) return "limitations";
+  if (/罚款|处罚|后果|影响|营收|成本|风险|受影响|面向.{0,8}(?:用户|消费者|开发者|企业)/iu.test(text)) return "impact";
+  if (/义务|规定|规则|门槛|月活|超过|生效|要求|必须|不得|包括|机制|流程|标准|条件/iu.test(text)) return "mechanism";
+  return "event";
+};
+
+const factCoverageFor = (
+  contentPackage: ContentPackage,
+  draft: ArticleDraft,
+): { coverage: DraftFactCoverage; missingDimensions: DraftCompletenessDimension[] } => {
+  const supportedFacts = contentPackage.facts.filter((claim) =>
+    claim.status === "supported" || claim.status === "partially-supported");
+  const supportedIds = new Set(supportedFacts.map((claim) => claim.id));
+  const mappedIds = new Set((draft.factClaims ?? [])
+    .flatMap((claim) => claim.factIds ?? [])
+    .filter((factId) => supportedIds.has(factId)));
+  const usedFactIds = supportedFacts.filter((claim) => mappedIds.has(claim.id)).map((claim) => claim.id);
+  const unusedFactIds = supportedFacts.filter((claim) => !mappedIds.has(claim.id)).map((claim) => claim.id);
+  const requiredDimensions = new Set(supportedFacts.map((claim) => completenessDimensionForFact(claim.text)));
+  const usedDimensions = new Set(supportedFacts
+    .filter((claim) => mappedIds.has(claim.id))
+    .map((claim) => completenessDimensionForFact(claim.text)));
+  const dimensionOrder: DraftCompletenessDimension[] = ["event", "mechanism", "impact", "limitations"];
+  return {
+    coverage: {
+      usedFactIds,
+      unusedFactIds,
+      supportedFactCount: supportedFacts.length,
+      ratio: supportedFacts.length ? Number((usedFactIds.length / supportedFacts.length).toFixed(2)) : 1,
+    },
+    missingDimensions: dimensionOrder.filter((dimension) =>
+      requiredDimensions.has(dimension) && !usedDimensions.has(dimension)),
+  };
+};
+
+const completenessDimensionLabels: Record<DraftCompletenessDimension, string> = {
+  event: "事件",
+  mechanism: "规则或机制",
+  impact: "影响或后果",
+  limitations: "限制或未知",
+};
 
 const consensusLanguagePattern = /(?:社区|评论区|讨论中|用户|开发者)?(?:普遍|多数|大多|一致)(?:认为|觉得|认同|支持)|形成(?:了)?共识|大家都|反复出现|多次出现/iu;
 const communityObservationPattern = /(?:社区|评论区|讨论中|评论者|用户|开发者).{0,20}(?:认为|觉得|提出|表示|指出|分享|反对|支持)/iu;
@@ -109,17 +232,23 @@ export const evaluateDraftPackageQuality = ({
   const supportedFactCount = contentPackage.facts.filter((claim) =>
     claim.status === "supported" || claim.status === "partially-supported").length;
   const bodyCharacterCount = draft.paragraphs.join("").replace(/\s/gu, "").length;
+  const completeness = factCoverageFor(contentPackage, draft);
   if (
     contentPackage.intent === "news"
     && contentPackage.mode === "brief"
     && draft.draftStrategy === "brief"
     && supportedFactCount >= 5
-    && bodyCharacterCount < 500
+    && (completeness.coverage.ratio < 0.8 || completeness.missingDimensions.length > 0)
   ) {
+    const missingText = completeness.missingDimensions.length
+      ? `，还缺少${completeness.missingDimensions.map((dimension) => completenessDimensionLabels[dimension]).join("、")}`
+      : "";
     warnings.push({
       id: "brief-underdeveloped",
       blockId: "evidence",
-      message: `素材包已有 ${supportedFactCount} 条正文级事实，但正文只有 ${bodyCharacterCount} 字；需要讲清事件、适用规则、影响与限制，不能只交付三段摘要。`,
+      message: `素材包有 ${supportedFactCount} 条正文级事实，正文明确覆盖 ${completeness.coverage.usedFactIds.length} 条（${Math.round(completeness.coverage.ratio * 100)}%）${missingText}；当前正文 ${bodyCharacterCount} 字，可只用未覆盖事实做定向补写。`,
+      factCoverage: completeness.coverage,
+      missingDimensions: completeness.missingDimensions,
     });
   }
   if (contentPackage.intent === "source" && (!contentPackage.sourceMaterials?.length || !draft.sourceMaterial)) {

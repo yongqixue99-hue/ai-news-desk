@@ -57,6 +57,11 @@ import {
   PortableArchiveImportError,
 } from "./portable-archive-importer.js";
 import { evaluateDraftReadiness } from "./draft-readiness.js";
+import {
+  draftQualityFindingsFor,
+  evaluateDraftPackageQuality,
+  reconcileDraftFactEvidence,
+} from "./editorial-quality-desk.js";
 import { assertDraftTransition } from "./draft-lifecycle.js";
 import {
   attachWeChatDeliveryReceipt,
@@ -2086,6 +2091,7 @@ app.post(
 app.patch(
   "/api/drafts/:draftId",
   asyncRoute(async (request, response) => {
+    const database = await getLocalDatabase();
     const result = await updateState((state) => {
       const target = state.drafts.find((entry) => entry.id === request.params.draftId);
       if (!target) return undefined;
@@ -2098,6 +2104,16 @@ app.patch(
         if (body[key] !== undefined) (target[key] as unknown) = body[key];
       }
       if (body.bodyHtml !== undefined) target.bodyHtml = sanitizeDraftHtml(body.bodyHtml);
+      const contentPackage = target.provenance.contentPackageId
+        ? database.getContentPackage<ContentPackage>(target.provenance.contentPackageId)
+        : undefined;
+      if (contentPackage) {
+        target.factClaims = reconcileDraftFactEvidence(contentPackage, target.factClaims ?? []);
+        target.qualityWarnings = draftQualityFindingsFor(evaluateDraftPackageQuality({
+          contentPackage,
+          draft: target,
+        }));
+      }
       const updatedAt = new Date().toISOString();
       reconcileDraftPublicationAfterEdit(beforeDraft, target, updatedAt);
       target.updatedAt = updatedAt;
@@ -2108,7 +2124,7 @@ app.patch(
       response.status(404).json({ error: "草稿不存在" });
       return;
     }
-    recordDraftEdit(await getLocalDatabase(), {
+    recordDraftEdit(database, {
       draftId: result.draft.id,
       before: result.before,
       after: result.after,

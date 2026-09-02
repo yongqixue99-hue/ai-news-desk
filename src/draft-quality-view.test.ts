@@ -30,3 +30,25 @@ test("draft quality view separates repairable findings into editorial dimensions
   assert.equal(view.nextTab, "images");
   assert.equal(view.headline, "草稿已保留，还有 2 项可以完善");
 });
+
+test("content coverage warnings expose the exact repair scope instead of a generic rewrite", () => {
+  const view = buildDraftQualityView([{
+    id: "brief-underdeveloped",
+    message: "正文覆盖不足。",
+    blockId: "evidence",
+    dimension: "content-completeness",
+    factCoverage: {
+      usedFactIds: ["fact-1", "fact-2", "fact-3"],
+      unusedFactIds: ["fact-4", "fact-5"],
+      supportedFactCount: 5,
+      ratio: 0.6,
+    },
+    missingDimensions: ["impact", "limitations"],
+  }]);
+
+  assert.equal(view.nextTab, "agent");
+  assert.equal(view.actionKind, "quality-repair");
+  assert.match(view.detail, /3\/5/);
+  assert.match(view.detail, /影响或后果/);
+  assert.match(view.detail, /限制与未知/);
+});

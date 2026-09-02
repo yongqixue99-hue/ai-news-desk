@@ -15,12 +15,13 @@ import {
 import { normalizedDraftBodyHtml, sanitizeDraftHtml } from "./article-html.js";
 import { extractPage } from "./extractor.js";
 import { runGenerationProvider } from "./provider-runtime.js";
+import type { ContentPackage } from "./product-types.js";
 import {
   loadAvailableArticleSkills,
   skillsForArticleTask,
   skillsForWritingReview,
 } from "./skill-registry.js";
-import { readState, updateState, workflowJobsRoot } from "./storage.js";
+import { getLocalDatabase, readState, updateState, workflowJobsRoot } from "./storage.js";
 import {
   assessWritingQuality,
   auditFactPreservation,
@@ -36,6 +37,7 @@ import type {
   ArticleAnalysisResult,
   ArticleDraft,
   ArticleDraftStrategy,
+  DraftCompletenessDimension,
   ArticleOptimizationResult,
   ArticleWritingDiagnostic,
   WritingQualityAssessment,
@@ -312,6 +314,7 @@ interface ArticleOptimizationContext {
   take: string;
   factClaimIds?: string[];
   qualityAssessment?: WritingQualityAssessment;
+  qualityRepair?: boolean;
 }
 
 const diagnosticLayers = new Set(["content", "structure", "surface"]);
@@ -375,6 +378,12 @@ export const parseArticleOptimization = (
         seenChangeIds.add(id);
         const affectedFactIds = cleanStringList(record.affectedFactIds, 12);
         const warnings: string[] = [];
+        if (context?.qualityRepair && !blockId.startsWith("paragraph:")) {
+          warnings.push("定向内容补写只能修改正文段落");
+        }
+        if (context?.qualityRepair && !affectedFactIds.length) {
+          warnings.push("定向内容补写必须登记实际新增的素材包事实编号");
+        }
         const currentBlock = optimizationBlock(context, blockId);
         if (context && (currentBlock === undefined || cleanText(currentBlock, 8_000) !== before)) {
           warnings.push("建议中的原文片段与当前草稿不一致，不能自动应用");
@@ -468,6 +477,94 @@ const headingBlocksFromHtml = (html: string) => {
     .get()
     .filter(Boolean)
     .slice(0, 20);
+};
+
+export interface QualityRepairContext {
+  warningId: string;
+  usedFactIds: string[];
+  unusedFacts: Array<{
+    id: string;
+    text: string;
+    status: "supported" | "partially-supported";
+    sourceUrls: string[];
+    note?: string;
+  }>;
+  missingDimensions: DraftCompletenessDimension[];
+  uncertainties: string[];
+}
+
+export const buildQualityRepairContext = (
+  draft: Pick<ArticleDraft, "factClaims" | "qualityWarnings">,
+  contentPackage: Pick<ContentPackage, "facts" | "sources" | "uncertainties">,
+): QualityRepairContext => {
+  const warning = draft.qualityWarnings?.find((entry) =>
+    entry.dimension === "content-completeness" && entry.factCoverage);
+  if (!warning?.factCoverage) throw new Error("当前草稿没有可执行的内容覆盖修复");
+  const requestedFactIds = new Set(warning.factCoverage.unusedFactIds);
+  const sourceBySignalId = new Map(contentPackage.sources.map((source) => [source.signalId, source.url]));
+  const unusedFacts = contentPackage.facts.flatMap<QualityRepairContext["unusedFacts"][number]>((fact) => {
+    if (!requestedFactIds.has(fact.id)
+      || (fact.status !== "supported" && fact.status !== "partially-supported")) return [];
+    return [{
+      id: fact.id,
+      text: fact.text,
+      status: fact.status,
+      sourceUrls: [...new Set([
+        ...(fact.sourceUrls ?? []),
+        ...fact.sourceSignalIds.flatMap((signalId) => {
+          const url = sourceBySignalId.get(signalId);
+          return url ? [url] : [];
+        }),
+      ])],
+      ...(fact.note ? { note: fact.note } : {}),
+    }];
+  });
+  if (!unusedFacts.length) throw new Error("冻结素材包里没有可用于定向补写的未覆盖事实");
+  return {
+    warningId: warning.id,
+    usedFactIds: [...warning.factCoverage.usedFactIds],
+    unusedFacts,
+    missingDimensions: [...(warning.missingDimensions ?? [])],
+    uncertainties: [...contentPackage.uncertainties],
+  };
+};
+
+export const reusableQualityRepairThread = (
+  threads: ArticleAgentThread[],
+  draftId: string,
+  draftRevision: string,
+) => threads.find((thread) =>
+  thread.draftId === draftId
+  && thread.role === "optimization"
+  && thread.purpose === "quality-repair"
+  && thread.draftRevision === draftRevision);
+
+const qualityRepairSourceSnapshot = (
+  draft: ArticleDraft,
+  contentPackage: ContentPackage,
+  repair: QualityRepairContext,
+): ArticleAgentSourceSnapshot => {
+  const primarySource = contentPackage.sources.find((source) => !source.isCommunity)
+    ?? contentPackage.sources[0];
+  const text = [
+    "以下是冻结 ContentPackage 中允许用于本次补写、且当前正文尚未覆盖的事实：",
+    ...repair.unusedFacts.map((fact) => [
+      `[${fact.id}] ${fact.text}`,
+      `状态：${fact.status}`,
+      `来源：${fact.sourceUrls.join("、") || "未登记"}`,
+      fact.note ? `备注：${fact.note}` : "",
+    ].filter(Boolean).join("\n")),
+    ...(repair.uncertainties.length
+      ? ["不得改写成确定事实的未知项：", ...repair.uncertainties.map((item) => `- ${item}`)]
+      : []),
+  ].join("\n\n");
+  return {
+    url: primarySource?.url || draft.provenance.originalUrl || draft.sources[0]?.url || "",
+    title: `${contentPackage.title}（冻结素材包：定向补写）`,
+    text: text.slice(0, 30_000),
+    method: "content-package",
+    capturedAt: now(),
+  };
 };
 
 const draftInputFor = (draft: ArticleDraft, input?: Partial<ArticleAgentDraftInput>) => {
@@ -589,6 +686,7 @@ const systemPromptFor = (role: ArticleAgentRole) => role === "analysis"
 4. 不得补造或删掉数字、日期、专名、引语、因果和限制条件。affectedFactIds 只能引用 factLedger 中已有编号；拿不准就写 factWarnings，并把 factCheckPassed 设为 false。
 5. 不强制段落数、字数或结尾观点。简讯可以很短，也可以没有 take；不得把“不是……而是……”“真正值得关注的是……”之类外壳当成默认洞察。
 6. diagnostics 分 content、structure、surface 三层。写作 Skill 只能帮助定位具体问题，不能把词表当成机械禁令。
+7. 如果任务含 qualityRepairTargets，这是一次内容覆盖修复：只能把 factLedger 中 allowedUnusedFactIds 对应事实补入现有文本块，必须保留限定条件，并在 affectedFactIds 登记实际新增的事实编号；不得重新抓取、引入外部知识或重写全文。
 
 严格返回 JSON，不返回整篇优化稿。`;
 
@@ -671,8 +769,27 @@ export const createArticleAgentThread = async (
   const state = await readState();
   const draft = state.drafts.find((entry) => entry.id === draftId);
   if (!draft) throw new Error("草稿不存在");
+  const qualityRepairRequested = role === "optimization" && input?.repairQualityWarnings === true;
+  if (qualityRepairRequested) {
+    const reusable = reusableQualityRepairThread(state.articleAgentThreads, draftId, draft.updatedAt);
+    if (reusable) return reusable;
+  }
   const provider = providerForRole(state, role);
-  const sourceSnapshot = await sourceForDraft(draft);
+  const contentPackage = qualityRepairRequested && draft.provenance.contentPackageId
+    ? (await getLocalDatabase()).getContentPackage<ContentPackage>(draft.provenance.contentPackageId)
+    : undefined;
+  if (qualityRepairRequested && !draft.provenance.contentPackageId) {
+    throw new Error("这篇旧草稿没有冻结素材包，不能执行自动定向补写");
+  }
+  if (qualityRepairRequested && !contentPackage) {
+    throw new Error("冻结素材包已不可用，不能执行自动定向补写");
+  }
+  const qualityRepair = qualityRepairRequested && contentPackage
+    ? buildQualityRepairContext(draft, contentPackage)
+    : undefined;
+  const sourceSnapshot = qualityRepair && contentPackage
+    ? qualityRepairSourceSnapshot(draft, contentPackage, qualityRepair)
+    : await sourceForDraft(draft);
   const currentDraft = draftInputFor(draft, input);
   const candidate = state.runs.find((run) => run.id === draft.runId)
     ?.candidates.find((entry) => entry.id === draft.candidateId);
@@ -690,6 +807,23 @@ export const createArticleAgentThread = async (
     headings: currentDraft.headings,
   });
   const threadId = `agent_thread_${randomUUID().slice(0, 12)}`;
+  const factLedger = qualityRepair
+    ? qualityRepair.unusedFacts.map((fact) => ({
+        id: fact.id,
+        claim: fact.text,
+        status: fact.status,
+        sourceUrls: fact.sourceUrls,
+        note: fact.note,
+      }))
+    : (draft.factClaims || []).map((claim) => ({
+        id: claim.id,
+        factIds: claim.factIds,
+        claim: claim.claim,
+        status: claim.status,
+        sourceUrl: claim.sourceUrl,
+        sourceUrls: claim.sourceUrls,
+        note: claim.note,
+      }));
   const payload = {
     role,
     strategy,
@@ -704,15 +838,20 @@ export const createArticleAgentThread = async (
       },
       sourceUrl: sourceSnapshot.url,
     },
-    factLedger: (draft.factClaims || []).map((claim) => ({
-      id: claim.id,
-      claim: claim.claim,
-      status: claim.status,
-      sourceUrl: claim.sourceUrl,
-      note: claim.note,
-    })),
+    factLedger,
+    ...(qualityRepair ? {
+      qualityRepairTargets: {
+        warningId: qualityRepair.warningId,
+        missingDimensions: qualityRepair.missingDimensions,
+        usedFactIds: qualityRepair.usedFactIds,
+        allowedUnusedFactIds: qualityRepair.unusedFacts.map((fact) => fact.id),
+        instruction: "只扩写现有文本块；只可新增 allowedUnusedFactIds 对应事实；不得重写全文。",
+      },
+    } : {}),
     writingQualityAssessment: qualityAssessment,
-    evidenceNote: sourceSnapshot.method === "candidate-excerpt"
+    evidenceNote: sourceSnapshot.method === "content-package"
+      ? "本次只提供冻结素材包中尚未覆盖的事实；不得重新抓取网页或引入素材包之外的信息。"
+      : sourceSnapshot.method === "candidate-excerpt"
       ? "当前无法读取完整原文，只能使用采集摘要；必须降低结论强度。"
       : "已取得正文证据；仍需区分原作者主张与可独立验证事实。",
     selectedSkills,
@@ -730,8 +869,11 @@ export const createArticleAgentThread = async (
           title: currentDraft.title,
           paragraphs: currentDraft.paragraphs,
           take: currentDraft.take,
-          factClaimIds: (draft.factClaims || []).map((claim) => claim.id),
+          factClaimIds: qualityRepair
+            ? qualityRepair.unusedFacts.map((fact) => fact.id)
+            : [...new Set((draft.factClaims || []).flatMap((claim) => [claim.id, ...(claim.factIds ?? [])]))],
           qualityAssessment,
+          qualityRepair: Boolean(qualityRepair),
         }),
   );
   const analysis = role === "analysis" ? observed.value as ArticleAnalysisResult : undefined;
@@ -741,6 +883,8 @@ export const createArticleAgentThread = async (
     id: threadId,
     draftId,
     role,
+    purpose: qualityRepair ? "quality-repair" : "general",
+    draftRevision: draft.updatedAt,
     providerId: provider.id,
     providerName: provider.name,
     traceId: observed.trace.id,

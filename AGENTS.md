@@ -61,7 +61,7 @@ Routes and React components should consume these interfaces instead of reimpleme
   - `npm test`
   - `npm run eval:editorial`
   - `npm run build`
-- The 2026-09-02 macOS merge baseline is 498 tests passing and editorial golden set 20/20. Test discovery totals may differ by shell or platform; zero failures is the invariant.
+- The 2026-09-02 Windows continuation baseline is 522 tests passing and editorial golden set 22/22. Test discovery totals may differ by shell or platform; zero failures is the invariant.
 - Add a failing regression test before fixing an editorial or migration bug.
 - Preserve unrelated user changes in a dirty worktree.
 - Before running any Git command, explain its purpose and expected effect to the user in Chinese.

@@ -3,9 +3,11 @@ import test from "node:test";
 import {
   acceptGeneratedReview,
   buildGeneratedFactClaims,
+  buildPackageParagraphClaims,
   parseGeneratedArticle,
   validateSourceFirstNewsFrame,
 } from "./generator.js";
+import type { ContentPackage } from "./product-types.js";
 
 test("a factual brief may be one paragraph and does not need a forced opinion", () => {
   const article = parseGeneratedArticle(JSON.stringify({
@@ -37,6 +39,38 @@ test("a factual brief may be one paragraph and does not need a forced opinion", 
     paragraphIndex: 0,
     sourceUrls: ["https://help.openai.com/example"],
   }]);
+});
+
+test("generated package drafts preserve the ContentPackage fact ids used by each paragraph", () => {
+  const article = parseGeneratedArticle(JSON.stringify({
+    strategy: "brief",
+    title: "欧盟更新平台监管名单",
+    paragraphs: ["欧盟委员会把三项服务列入新的监管名单。", "新义务将在十二月底前生效。"],
+    take: "",
+    sources: [{
+      label: "European Commission",
+      url: "https://ec.europa.eu/example",
+      kind: "primary",
+      verified: true,
+    }],
+    paragraphEvidence: [
+      { paragraphIndex: 0, sourceUrls: ["https://ec.europa.eu/example"] },
+      { paragraphIndex: 1, sourceUrls: ["https://ec.europa.eu/example"] },
+    ],
+    paragraphFactIds: [
+      { paragraphIndex: 0, factIds: ["fact-designation"] },
+      { paragraphIndex: 1, factIds: ["fact-deadline", "fact-obligations"] },
+    ],
+    uncertainties: [],
+    imageSelections: [],
+    discoveredImages: [],
+    topics: [],
+  }));
+
+  assert.deepEqual(article.paragraphFactIds, [
+    { paragraphIndex: 0, factIds: ["fact-designation"] },
+    { paragraphIndex: 1, factIds: ["fact-deadline", "fact-obligations"] },
+  ]);
 });
 
 test("automatic review may compress list-like prose but cannot change evidence metadata", () => {
@@ -100,6 +134,54 @@ test("paragraph claims keep their exact evidence links instead of inheriting one
   assert.deepEqual(claims.map((claim) => ({ status: claim.status, sourceUrls: claim.sourceUrls })), [
     { status: "full-source", sourceUrls: ["https://github.com/example/repo/blob/main/architecture.md"] },
     { status: "full-source", sourceUrls: ["https://news.ycombinator.com/item?id=1"] },
+  ]);
+});
+
+test("package drafts build one evidence claim per paragraph with the facts actually used", () => {
+  const sourceUrl = "https://ec.europa.eu/example";
+  const contentPackage = {
+    id: "package-eu",
+    storyId: "story-eu",
+    mode: "brief",
+    intent: "news",
+    title: "欧盟更新平台监管名单",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    facts: [
+      { id: "fact-designation", text: "欧盟委员会把三项服务列入监管名单。", status: "supported", sourceSignalIds: ["signal-eu"], sourceUrls: [sourceUrl] },
+      { id: "fact-deadline", text: "新义务将在十二月底前生效。", status: "supported", sourceSignalIds: ["signal-eu"], sourceUrls: [sourceUrl] },
+    ],
+    communityFocus: [],
+    discussionSamples: [],
+    sourceSignalIds: ["signal-eu"],
+    sources: [{ signalId: "signal-eu", label: "European Commission", url: sourceUrl, role: "official", basis: "full-source", publishedAt: "2026-09-01T00:00:00.000Z", isCommunity: false }],
+    imageIds: [],
+    assets: [],
+    uncertainties: [],
+    suggestedAngles: [],
+    communityEvidenceLabel: "无社区样本",
+    status: "ready",
+    blockers: [],
+  } satisfies ContentPackage;
+  const paragraphs = ["欧盟委员会把三项服务列入监管名单。", "新义务将在十二月底前生效。"];
+
+  const claims = buildPackageParagraphClaims({
+    candidateId: "candidate-eu",
+    paragraphs,
+    paragraphEvidence: [
+      { paragraphIndex: 0, sourceUrls: [sourceUrl] },
+      { paragraphIndex: 1, sourceUrls: [sourceUrl] },
+    ],
+    paragraphFactIds: [
+      { paragraphIndex: 0, factIds: ["fact-designation"] },
+      { paragraphIndex: 1, factIds: ["fact-deadline"] },
+    ],
+    contentPackage,
+    capturedAt: "2026-09-02T00:01:00.000Z",
+  });
+
+  assert.deepEqual(claims.map((claim) => ({ claim: claim.claim, factIds: claim.factIds, sourceUrls: claim.sourceUrls })), [
+    { claim: paragraphs[0], factIds: ["fact-designation"], sourceUrls: [sourceUrl] },
+    { claim: paragraphs[1], factIds: ["fact-deadline"], sourceUrls: [sourceUrl] },
   ]);
 });
 

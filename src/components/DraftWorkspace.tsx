@@ -874,26 +874,27 @@ export function DraftWorkspace({
   );
   const safePendingOptimizationChanges = pendingOptimizationChanges.filter((change) => change.factCheckPassed);
   const selectedAgentProvider = agentMode === "analysis" ? analysisProvider : optimizationProvider;
-  const agentDraftInput = (): ArticleAgentDraftInput => {
+  const agentDraftInput = (repairQualityWarnings = false): ArticleAgentDraftInput => {
     const current = editingRef.current ?? editing;
     return {
       title: current.title,
       bodyHtml: current.bodyHtml || bodyHtmlFor(current),
       paragraphs: current.paragraphs,
       take: current.take,
+      ...(repairQualityWarnings ? { repairQualityWarnings: true } : {}),
     };
   };
   const updateAgentThread = (thread: ArticleAgentThread) => {
     setAgentThreads((current) => [thread, ...current.filter((entry) => entry.id !== thread.id)]);
     setOptimizationDecisions({});
   };
-  const runAgent = async (role: ArticleAgentRole) => {
+  const runAgent = async (role: ArticleAgentRole, repairQualityWarnings = false) => {
     setAgentMode(role);
     setAgentBusy(role);
     setAgentError("");
     try {
       if (dirty) await save("manual");
-      updateAgentThread(await onRunArticleAgent(editing.id, role, agentDraftInput()));
+      updateAgentThread(await onRunArticleAgent(editing.id, role, agentDraftInput(repairQualityWarnings)));
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -985,11 +986,21 @@ export function DraftWorkspace({
           nextTake = change.after.trim();
         }
       }
+      const nextFactClaims = current.factClaims?.map((claim, index) => {
+        const paragraphChange = appliedChanges.find((change) => change.blockId === `paragraph:${index}`);
+        if (!paragraphChange?.affectedFactIds.length) return claim;
+        return {
+          ...claim,
+          claim: nextParagraphs[index] ?? claim.claim,
+          factIds: [...new Set([...(claim.factIds ?? []), ...paragraphChange.affectedFactIds])],
+        };
+      });
       updateEditing({
         title: titleResult.draft.title,
         paragraphs: nextParagraphs,
         take: nextTake,
         bodyHtml: htmlResult.html,
+        ...(nextFactClaims ? { factClaims: nextFactClaims } : {}),
       });
       setOptimizationDecisions((decisions) => ({
         ...decisions,
@@ -1237,7 +1248,21 @@ export function DraftWorkspace({
             </span>
           ))}
         </div>
-        <button type="button" className="secondary-button" onClick={() => setUtilityTab(nextAction.tab)}>{nextAction.action}<ChevronRight size={14} /></button>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={nextAction.tab === "agent" && Boolean(agentBusy)}
+          onClick={() => {
+            setUtilityTab(nextAction.tab);
+            if (nextAction.tab === "agent" && draftQuality.actionKind === "quality-repair") {
+              void runAgent("optimization", true);
+            }
+          }}
+        >
+          {nextAction.tab === "agent" && agentBusy === "optimization"
+            ? <><LoaderCircle className="spin" size={14} />正在定向补写</>
+            : <>{nextAction.action}<ChevronRight size={14} /></>}
+        </button>
       </section>
 
       {editing.sourceMaterial ? (

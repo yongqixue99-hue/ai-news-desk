@@ -11,6 +11,8 @@ export interface EditorialGoldenCase {
   intent: EditorialIntent;
   title: string;
   paragraphs: string[];
+  facts?: string[];
+  paragraphFactIds?: string[][];
   communityDiscovery?: boolean;
   discussionSampleCount?: number;
   discussionBranchCount?: number;
@@ -283,6 +285,50 @@ export const editorialGoldenCases: EditorialGoldenCase[] = [
     expectedBlockerIds: [],
     expectedWarningIds: ["image-coverage-missing"],
   },
+  {
+    id: "news-short-but-complete",
+    category: "news",
+    label: "短简讯覆盖全部事实时不按字数误伤",
+    intent: "news",
+    title: "公司发布七十亿参数本地模型，首批面向企业测试",
+    facts: [
+      "公司于九月二日发布新的本地模型。",
+      "模型参数量为七十亿。",
+      "开发者必须先申请测试资格。",
+      "首批测试面向企业客户。",
+      "个人用户开放时间尚未公布。",
+    ],
+    paragraphs: [
+      "公司九月二日发布七十亿参数的本地模型。",
+      "开发者必须先申请资格，首批测试面向企业客户。",
+      "个人用户开放时间尚未公布。",
+    ],
+    paragraphFactIds: [["fact-1", "fact-2"], ["fact-3", "fact-4"], ["fact-5"]],
+    expectedReady: true,
+    expectedBlockerIds: [],
+  },
+  {
+    id: "news-long-but-undercovered",
+    category: "news",
+    label: "长稿反复铺陈少数事实仍提示内容缺口",
+    intent: "news",
+    title: "公司发布七十亿参数本地模型",
+    facts: [
+      "公司于九月二日发布新的本地模型。",
+      "模型参数量为七十亿。",
+      "开发者必须先申请测试资格。",
+      "首批测试面向企业客户。",
+      "个人用户开放时间尚未公布。",
+    ],
+    paragraphs: [
+      "公司在九月二日正式介绍这款新的本地模型，并在说明材料中多次展示模型已经发布、可以进入后续测试流程。发布信息占据了说明材料的大部分篇幅。",
+      "这款模型的参数量为七十亿，官方介绍围绕七十亿参数反复解释产品定位和模型规模，但正文没有进一步交代申请条件、首批开放对象和仍未公布的信息。",
+    ],
+    paragraphFactIds: [["fact-1"], ["fact-2"]],
+    expectedReady: true,
+    expectedBlockerIds: [],
+    expectedWarningIds: ["brief-underdeveloped"],
+  },
 ];
 
 const modeFor = (intent: EditorialIntent): Exclude<AssignmentMode, "watch" | "skip"> =>
@@ -369,6 +415,7 @@ const materialize = (golden: EditorialGoldenCase): { contentPackage: ContentPack
     truncated: false,
     rightsNotice: "仅供私人编辑，发布前确认翻译与转载范围。",
   }] : undefined;
+  const factTexts = golden.facts ?? [golden.paragraphs[0] ?? golden.title];
   const contentPackage: ContentPackage = {
     id: `package-${golden.id}`,
     storyId: `story-${golden.id}`,
@@ -376,13 +423,13 @@ const materialize = (golden: EditorialGoldenCase): { contentPackage: ContentPack
     intent: golden.intent,
     title: golden.title,
     createdAt: "2026-09-01T00:00:00.000Z",
-    facts: golden.intent === "source" ? [] : [{
-      id: "fact-1",
-      text: golden.paragraphs[0] ?? golden.title,
-      status: "supported",
+    facts: golden.intent === "source" ? [] : factTexts.map((text, index) => ({
+      id: `fact-${index + 1}`,
+      text,
+      status: "supported" as const,
       sourceSignalIds: ["signal-official"],
       sourceUrls: [articleUrl],
-    }],
+    })),
     communityFocus: [],
     discussionSamples,
     sourceSignalIds: sources.map((source) => source.signalId),
@@ -401,6 +448,7 @@ const materialize = (golden: EditorialGoldenCase): { contentPackage: ContentPack
     : golden.paragraphs.map((paragraph, index) => ({
       id: `claim-${index}`,
       claim: paragraph,
+      factIds: golden.paragraphFactIds?.[index] ?? (index === 0 ? ["fact-1"] : []),
       status: index > 0 && golden.intent === "community" ? "unverified" : "full-source",
       sourceUrls: [index > 0 && (golden.intent === "community" || /Hacker News|Reddit|V2EX|知乎|社区/u.test(paragraph))
         ? discussionUrl

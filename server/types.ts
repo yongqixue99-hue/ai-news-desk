@@ -619,13 +619,15 @@ export interface ArticleAgentDraftInput {
   bodyHtml: string;
   paragraphs?: string[];
   take?: string;
+  /** Request one evidence-bound repair for the current persisted revision. */
+  repairQualityWarnings?: boolean;
 }
 
 export interface ArticleAgentSourceSnapshot {
   url: string;
   title: string;
   text: string;
-  method: "full-page" | "intake-text" | "candidate-excerpt";
+  method: "full-page" | "intake-text" | "candidate-excerpt" | "content-package";
   capturedAt: string;
 }
 
@@ -718,6 +720,9 @@ export interface ArticleAgentThread {
   id: string;
   draftId: string;
   role: ArticleAgentRole;
+  purpose?: "general" | "quality-repair";
+  /** Persisted draft updatedAt used to make a quality repair idempotent. */
+  draftRevision?: string;
   providerId: string;
   providerName: string;
   createdAt: string;
@@ -818,6 +823,8 @@ export type DraftFactEvidenceStatus =
 export interface DraftFactClaim {
   id: string;
   claim: string;
+  /** ContentPackage facts explicitly used by this paragraph. */
+  factIds?: string[];
   status: DraftFactEvidenceStatus;
   sourceUrl?: string;
   /** Every source the generator explicitly mapped to this paragraph. */
@@ -832,11 +839,22 @@ export type DraftLayoutTheme = "news-clean" | "mono-editorial" | "tech-blue";
 
 export type DraftQualityDimension = "fact-safety" | "content-completeness" | "images-rights" | "writing-quality";
 
+export type DraftCompletenessDimension = "event" | "mechanism" | "impact" | "limitations";
+
+export interface DraftFactCoverage {
+  usedFactIds: string[];
+  unusedFactIds: string[];
+  supportedFactCount: number;
+  ratio: number;
+}
+
 export interface DraftQualityWarning {
   id: string;
   message: string;
   blockId: "title" | `paragraph:${number}` | "evidence" | "images" | "source-material";
   dimension: DraftQualityDimension;
+  factCoverage?: DraftFactCoverage;
+  missingDimensions?: DraftCompletenessDimension[];
 }
 
 export interface ArticleDraft {

@@ -14,7 +14,7 @@ import type { ArticleDraft, Candidate, SourceImage } from "./types.js";
 const inFlight = new Map<string, Promise<{ draft: ArticleDraft; reused: boolean }>>();
 
 /** Bump only when routing/evidence/prompt behavior materially changes. */
-export const editorialGeneratorRevision = "source-first-v11";
+export const editorialGeneratorRevision = "source-first-v12";
 
 const sourceCandidateFor = (state: Awaited<ReturnType<typeof readState>>, contentPackage: ContentPackage) => {
   const source = contentPackage.sources.find((entry) => !entry.isCommunity) ?? contentPackage.sources[0];

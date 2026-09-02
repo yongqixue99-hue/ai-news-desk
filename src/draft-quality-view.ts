@@ -14,6 +14,13 @@ const labels: Record<DraftQualityDimension, string> = {
   "writing-quality": "表达质量",
 };
 
+const completenessLabels = {
+  event: "事件本身",
+  mechanism: "机制与依据",
+  impact: "影响或后果",
+  limitations: "限制与未知",
+} as const;
+
 export const buildDraftQualityView = (warnings: DraftQualityWarning[] = []) => {
   const dimensions = dimensionOrder.map((id) => {
     const issues = warnings.filter((warning) => warning.dimension === id);
@@ -31,11 +38,26 @@ export const buildDraftQualityView = (warnings: DraftQualityWarning[] = []) => {
     : warnings.some((warning) => warning.dimension === "fact-safety")
       ? "sources" as const
       : "agent" as const;
+  const coverageWarning = warnings.find((warning) =>
+    warning.dimension === "content-completeness" && warning.factCoverage);
+  const priorityWarning = nextTab === "images"
+    ? warnings.find((warning) => warning.dimension === "images-rights")
+    : nextTab === "sources"
+      ? warnings.find((warning) => warning.dimension === "fact-safety")
+      : coverageWarning ?? warnings[0];
+  const coverageDetail = coverageWarning?.factCoverage
+    ? `正文已覆盖 ${coverageWarning.factCoverage.usedFactIds.length}/${coverageWarning.factCoverage.supportedFactCount} 条可用事实${coverageWarning.missingDimensions?.length
+        ? `，还缺${coverageWarning.missingDimensions.map((dimension) => completenessLabels[dimension]).join("、")}`
+        : ""}。可只用未覆盖事实生成一次精确补丁。`
+    : undefined;
   return {
     dimensions,
     warnings,
     nextTab,
+    actionKind: nextTab === "agent" && coverageWarning ? "quality-repair" as const : "navigate" as const,
     headline: warnings.length ? `草稿已保留，还有 ${warnings.length} 项可以完善` : "草稿质量检查已通过",
-    detail: warnings[0]?.message ?? "事实、内容、图片和表达检查均无待处理警告。",
+    detail: nextTab === "agent" && coverageDetail
+      ? coverageDetail
+      : priorityWarning?.message ?? "事实、内容、图片和表达检查均无待处理警告。",
   };
 };

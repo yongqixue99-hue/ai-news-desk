@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ArticleAgentTraceError,
+  buildQualityRepairContext,
+  reusableQualityRepairThread,
   parseArticleAnalysis,
   parseArticleOptimization,
   runObservedArticleAgentTask,
 } from "./article-agent.js";
-import type { AiProviderConfig } from "./types.js";
+import type { ContentPackage } from "./product-types.js";
+import type { AiProviderConfig, ArticleAgentThread, ArticleDraft } from "./types.js";
 
 const provider = {
   id: "openai-main",
@@ -133,6 +136,110 @@ test("article optimization returns exact paragraph patches and audits facts loca
   assert.match(result.changes[0]?.factWarnings[0] || "", /30%/);
   assert.equal(result.factCheckPassed, false);
   assert.equal(result.rollbackRecommended, true);
+});
+
+test("quality repair is scoped to unused facts in the frozen ContentPackage", () => {
+  const draft = {
+    factClaims: [{
+      id: "claim-1",
+      claim: "产品今天发布。",
+      factIds: ["fact-1"],
+      status: "full-source",
+      capturedAt: "2026-09-02T08:00:00.000Z",
+    }],
+    qualityWarnings: [{
+      id: "brief-underdeveloped",
+      message: "正文覆盖不足。",
+      blockId: "evidence",
+      dimension: "content-completeness",
+      factCoverage: {
+        usedFactIds: ["fact-1"],
+        unusedFactIds: ["fact-2"],
+        supportedFactCount: 2,
+        ratio: 0.5,
+      },
+      missingDimensions: ["impact", "limitations"],
+    }],
+  } satisfies Pick<ArticleDraft, "factClaims" | "qualityWarnings">;
+  const contentPackage = {
+    facts: [
+      { id: "fact-1", text: "产品今天发布。", status: "supported", sourceSignalIds: ["signal-1"] },
+      { id: "fact-2", text: "目前只向企业客户开放。", status: "supported", sourceSignalIds: ["signal-1"] },
+      { id: "fact-3", text: "网民称它将取代所有产品。", status: "unverified", sourceSignalIds: ["signal-2"] },
+    ],
+    sources: [
+      { signalId: "signal-1", label: "官方公告", url: "https://example.com/official", role: "official", basis: "full-source", publishedAt: "2026-09-02T07:00:00.000Z", isCommunity: false },
+      { signalId: "signal-2", label: "社区讨论", url: "https://example.com/community", role: "community", basis: "excerpt", publishedAt: "2026-09-02T07:10:00.000Z", isCommunity: true },
+    ],
+    uncertainties: ["尚未公布个人用户开放时间"],
+  } satisfies Pick<ContentPackage, "facts" | "sources" | "uncertainties">;
+
+  const context = buildQualityRepairContext(draft, contentPackage);
+
+  assert.deepEqual(context.unusedFacts.map((fact) => fact.id), ["fact-2"]);
+  assert.deepEqual(context.missingDimensions, ["impact", "limitations"]);
+  assert.deepEqual(context.uncertainties, ["尚未公布个人用户开放时间"]);
+  assert.equal(context.unusedFacts[0]?.sourceUrls[0], "https://example.com/official");
+  assert.doesNotMatch(JSON.stringify(context), /取代所有产品/);
+});
+
+test("quality repair is generated at most once for an unchanged draft revision", () => {
+  const repair = {
+    id: "repair-thread",
+    draftId: "draft-1",
+    role: "optimization",
+    purpose: "quality-repair",
+    draftRevision: "2026-09-02T08:00:00.000Z",
+  } as ArticleAgentThread;
+  const ordinary = {
+    id: "ordinary-thread",
+    draftId: "draft-1",
+    role: "optimization",
+    purpose: "general",
+    draftRevision: "2026-09-02T08:00:00.000Z",
+  } as ArticleAgentThread;
+
+  assert.equal(reusableQualityRepairThread(
+    [ordinary, repair],
+    "draft-1",
+    "2026-09-02T08:00:00.000Z",
+  )?.id, "repair-thread");
+  assert.equal(reusableQualityRepairThread(
+    [repair],
+    "draft-1",
+    "2026-09-02T08:01:00.000Z",
+  ), undefined);
+});
+
+test("quality repair cannot spend an unused fact on a title or take patch", () => {
+  const result = parseArticleOptimization(JSON.stringify({
+    strategy: "brief",
+    editMode: "targeted",
+    diagnosis: ["正文覆盖不足"],
+    improvements: ["补充开放范围"],
+    diagnostics: [],
+    changes: [{
+      id: "change-title",
+      blockId: "title",
+      before: "产品发布",
+      after: "仅面向企业的产品发布",
+      reason: "补充范围",
+      affectedFactIds: ["fact-2"],
+    }],
+    preservedBlockIds: ["paragraph:0"],
+    factCheckPassed: true,
+    rollbackRecommended: false,
+    factWarnings: [],
+  }), {
+    title: "产品发布",
+    paragraphs: ["公司今天发布产品。"],
+    take: "",
+    factClaimIds: ["fact-2"],
+    qualityRepair: true,
+  });
+
+  assert.equal(result.changes[0]?.factCheckPassed, false);
+  assert.match(result.changes[0]?.factWarnings.join(""), /只能修改正文段落/);
 });
 
 test("an article Agent call returns a sanitized provider and skill trace", async () => {

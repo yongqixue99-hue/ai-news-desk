@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { draftQualityWarningsFor, evaluateDraftPackageQuality } from "./editorial-quality-desk.js";
+import {
+  draftQualityWarningsFor,
+  draftQualityFindingsFor,
+  evaluateDraftPackageQuality,
+  reconcileDraftFactEvidence,
+} from "./editorial-quality-desk.js";
 import type { ContentPackage } from "./product-types.js";
 import type { ArticleDraft } from "./types.js";
 
@@ -123,6 +128,7 @@ test("DraftDesk quality gate blocks a community discovery channel from becoming 
   });
 
   assert.equal(report.ready, false);
+  assert.equal(draftQualityFindingsFor(report)[0]?.dimension, "fact-safety");
   assert.deepEqual(report.blockers.map((item) => item.id), ["news-discovery-headline"]);
 });
 
@@ -477,6 +483,118 @@ test("DraftDesk quality gate keeps an underdeveloped but sourced brief as a visi
   assert.equal(report.blockers.some((item) => item.id === "brief-underdeveloped"), false);
   assert.ok(report.warnings.some((item) => item.id === "brief-underdeveloped"));
   assert.equal(draftQualityWarningsFor(report).find((item) => item.id === "brief-underdeveloped")?.dimension, "content-completeness");
+});
+
+test("DraftDesk quality report identifies unused supported facts and missing editorial dimensions", () => {
+  const sourceUrl = "https://example.com/policy-update";
+  const facts: ContentPackage["facts"] = [
+    "欧盟委员会把三项服务列为超大型在线平台。",
+    "三项服务在欧盟的月活用户都超过四千五百万。",
+    "更严格的合规义务将在二〇二六年十二月底前生效。",
+    "新增义务包括删除非法内容并加强未成年人保护。",
+    "未履行义务的最高罚款可达全球营收的百分之六。",
+  ].map((text, index) => ({
+    id: `fact-${index + 1}`,
+    text,
+    status: "supported" as const,
+    sourceSignalIds: ["signal-policy"],
+    sourceUrls: [sourceUrl],
+  }));
+  const paragraphs = [
+    "欧盟委员会把三项服务列为超大型在线平台。",
+    "这些服务在欧盟的月活用户都超过四千五百万。",
+    "更严格的合规义务将在二〇二六年十二月底前生效。",
+  ];
+  const report = evaluateDraftPackageQuality({
+    contentPackage: contentPackage({ facts }),
+    draft: draft({
+      paragraphs,
+      factClaims: paragraphs.map((claim, index) => ({
+        id: `claim-${index}`,
+        claim,
+        factIds: [`fact-${index + 1}`],
+        status: "full-source" as const,
+        sourceUrls: [sourceUrl],
+        capturedAt: "2026-09-01T00:00:00.000Z",
+      })),
+    }),
+  });
+
+  const warning = report.warnings.find((item) => item.id === "brief-underdeveloped");
+  assert.deepEqual(warning?.factCoverage, {
+    usedFactIds: ["fact-1", "fact-2", "fact-3"],
+    unusedFactIds: ["fact-4", "fact-5"],
+    supportedFactCount: 5,
+    ratio: 0.6,
+  });
+  assert.deepEqual(warning?.missingDimensions, ["impact"]);
+});
+
+test("DraftDesk quality gate accepts a short brief that covers every supported fact", () => {
+  const sourceUrl = "https://example.com/complete-brief";
+  const facts: ContentPackage["facts"] = [
+    "公司发布新的本地模型。",
+    "模型参数量为七十亿。",
+    "产品从九月三日起开放。",
+    "开发者必须先申请测试资格。",
+    "首批测试仅面向企业用户。",
+  ].map((text, index) => ({
+    id: `complete-${index + 1}`,
+    text,
+    status: "supported" as const,
+    sourceSignalIds: ["signal-complete"],
+    sourceUrls: [sourceUrl],
+  }));
+  const paragraphs = [
+    "公司发布了一款七十亿参数的本地模型。",
+    "产品将从九月三日起开放，开发者需要先申请测试资格。",
+    "首批测试仅面向企业用户。",
+  ];
+  const report = evaluateDraftPackageQuality({
+    contentPackage: contentPackage({ facts }),
+    draft: draft({
+      paragraphs,
+      factClaims: [
+        { id: "complete-claim-1", claim: paragraphs[0]!, factIds: ["complete-1", "complete-2"], status: "full-source", sourceUrls: [sourceUrl], capturedAt: "2026-09-01T00:00:00.000Z" },
+        { id: "complete-claim-2", claim: paragraphs[1]!, factIds: ["complete-3", "complete-4"], status: "full-source", sourceUrls: [sourceUrl], capturedAt: "2026-09-01T00:00:00.000Z" },
+        { id: "complete-claim-3", claim: paragraphs[2]!, factIds: ["complete-5"], status: "full-source", sourceUrls: [sourceUrl], capturedAt: "2026-09-01T00:00:00.000Z" },
+      ],
+    }),
+  });
+
+  assert.equal(report.ready, true, JSON.stringify(report));
+  assert.equal(report.warnings.some((item) => item.id === "brief-underdeveloped"), false);
+});
+
+test("an applied repair binds newly used fact ids to their frozen source URLs", () => {
+  const packageData = contentPackage({
+    facts: [
+      { id: "fact-a", text: "产品发布。", status: "supported", sourceSignalIds: ["signal-github"] },
+      { id: "fact-b", text: "首批仅面向企业。", status: "supported", sourceSignalIds: ["signal-official"] },
+    ],
+    sources: [
+      ...contentPackage().sources,
+      { signalId: "signal-official", label: "官方公告", url: "https://example.com/official", role: "official", basis: "full-source", publishedAt: "2026-09-02T00:00:00.000Z", isCommunity: false },
+    ],
+  });
+  const claims = reconcileDraftFactEvidence(packageData, [{
+    id: "claim-1",
+    claim: "产品发布，首批仅面向企业。",
+    factIds: ["fact-a", "fact-b"],
+    status: "full-source",
+    sourceUrls: ["https://github.com/example/open-executive"],
+    capturedAt: "2026-09-02T00:00:00.000Z",
+  }]);
+
+  assert.deepEqual(claims[0]?.sourceUrls, [
+    "https://github.com/example/open-executive",
+    "https://example.com/official",
+  ]);
+  assert.equal(claims[0]?.sourceLabel, "GitHub；官方公告");
+  assert.throws(() => reconcileDraftFactEvidence(packageData, [{
+    ...claims[0]!,
+    factIds: ["outside-package"],
+  }]), /素材包之外/);
 });
 
 test("DraftDesk quality gate keeps a genuinely small one-fact brief concise", () => {
