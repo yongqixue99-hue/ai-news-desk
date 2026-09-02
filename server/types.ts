@@ -846,6 +846,8 @@ export interface DraftFactCoverage {
   unusedFactIds: string[];
   supportedFactCount: number;
   ratio: number;
+  /** Legacy drafts cannot distinguish omitted facts from missing metadata. */
+  legacyUnmapped?: boolean;
 }
 
 export interface DraftQualityWarning {

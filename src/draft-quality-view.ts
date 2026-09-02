@@ -46,7 +46,9 @@ export const buildDraftQualityView = (warnings: DraftQualityWarning[] = []) => {
       ? warnings.find((warning) => warning.dimension === "fact-safety")
       : coverageWarning ?? warnings[0];
   const coverageDetail = coverageWarning?.factCoverage
-    ? `正文已覆盖 ${coverageWarning.factCoverage.usedFactIds.length}/${coverageWarning.factCoverage.supportedFactCount} 条可用事实${coverageWarning.missingDimensions?.length
+    ? coverageWarning.factCoverage.legacyUnmapped
+      ? "这篇旧稿没有逐段事实映射，不能安全自动补写；请用当前生成器重建后再检查。"
+      : `正文已覆盖 ${coverageWarning.factCoverage.usedFactIds.length}/${coverageWarning.factCoverage.supportedFactCount} 条可用事实${coverageWarning.missingDimensions?.length
         ? `，还缺${coverageWarning.missingDimensions.map((dimension) => completenessLabels[dimension]).join("、")}`
         : ""}。可只用未覆盖事实生成一次精确补丁。`
     : undefined;
@@ -54,7 +56,9 @@ export const buildDraftQualityView = (warnings: DraftQualityWarning[] = []) => {
     dimensions,
     warnings,
     nextTab,
-    actionKind: nextTab === "agent" && coverageWarning ? "quality-repair" as const : "navigate" as const,
+    actionKind: nextTab === "agent" && coverageWarning && !coverageWarning.factCoverage?.legacyUnmapped
+      ? "quality-repair" as const
+      : "navigate" as const,
     headline: warnings.length ? `草稿已保留，还有 ${warnings.length} 项可以完善` : "草稿质量检查已通过",
     detail: nextTab === "agent" && coverageDetail
       ? coverageDetail

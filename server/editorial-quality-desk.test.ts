@@ -482,7 +482,9 @@ test("DraftDesk quality gate keeps an underdeveloped but sourced brief as a visi
   assert.equal(report.ready, true, JSON.stringify(report));
   assert.equal(report.blockers.some((item) => item.id === "brief-underdeveloped"), false);
   assert.ok(report.warnings.some((item) => item.id === "brief-underdeveloped"));
-  assert.equal(draftQualityWarningsFor(report).find((item) => item.id === "brief-underdeveloped")?.dimension, "content-completeness");
+  const warning = draftQualityWarningsFor(report).find((item) => item.id === "brief-underdeveloped");
+  assert.equal(warning?.dimension, "content-completeness");
+  assert.equal(warning?.factCoverage?.legacyUnmapped, true);
 });
 
 test("DraftDesk quality report identifies unused supported facts and missing editorial dimensions", () => {

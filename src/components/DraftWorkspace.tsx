@@ -1111,7 +1111,11 @@ export function DraftWorkspace({
             tab: draftQuality.nextTab,
             label: draftQuality.headline,
             detail: draftQuality.detail,
-            action: draftQuality.nextTab === "images" ? "补齐配图" : draftQuality.nextTab === "sources" ? "查看证据" : "定向补写",
+            action: draftQuality.nextTab === "images"
+              ? "补齐配图"
+              : draftQuality.nextTab === "sources"
+                ? "查看证据"
+                : draftQuality.actionKind === "quality-repair" ? "定向补写" : "查看改稿建议",
           }
       : {
           tab: "sources" as const,

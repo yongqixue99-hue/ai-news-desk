@@ -52,3 +52,22 @@ test("content coverage warnings expose the exact repair scope instead of a gener
   assert.match(view.detail, /影响或后果/);
   assert.match(view.detail, /限制与未知/);
 });
+
+test("legacy drafts without paragraph fact mappings do not offer automatic repair", () => {
+  const view = buildDraftQualityView([{
+    id: "brief-underdeveloped",
+    message: "旧稿没有逐段事实映射。",
+    blockId: "evidence",
+    dimension: "content-completeness",
+    factCoverage: {
+      usedFactIds: [],
+      unusedFactIds: ["fact-1", "fact-2"],
+      supportedFactCount: 2,
+      ratio: 0,
+      legacyUnmapped: true,
+    },
+  }]);
+
+  assert.equal(view.actionKind, "navigate");
+  assert.match(view.detail, /不能安全自动补写/);
+});

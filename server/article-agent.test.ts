@@ -183,6 +183,29 @@ test("quality repair is scoped to unused facts in the frozen ContentPackage", ()
   assert.doesNotMatch(JSON.stringify(context), /取代所有产品/);
 });
 
+test("quality repair refuses a legacy coverage guess without paragraph fact mappings", () => {
+  assert.throws(() => buildQualityRepairContext({
+    factClaims: [],
+    qualityWarnings: [{
+      id: "brief-underdeveloped",
+      message: "旧稿没有映射。",
+      blockId: "evidence",
+      dimension: "content-completeness",
+      factCoverage: {
+        usedFactIds: [],
+        unusedFactIds: ["fact-1"],
+        supportedFactCount: 1,
+        ratio: 0,
+        legacyUnmapped: true,
+      },
+    }],
+  }, {
+    facts: [{ id: "fact-1", text: "产品发布。", status: "supported", sourceSignalIds: ["signal-1"] }],
+    sources: [{ signalId: "signal-1", label: "官方", url: "https://example.com", role: "official", basis: "full-source", publishedAt: "2026-09-02T00:00:00.000Z", isCommunity: false }],
+    uncertainties: [],
+  }), /旧稿没有逐段事实映射/);
+});
+
 test("quality repair is generated at most once for an unchanged draft revision", () => {
   const repair = {
     id: "repair-thread",

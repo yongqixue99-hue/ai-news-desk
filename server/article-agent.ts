@@ -500,6 +500,9 @@ export const buildQualityRepairContext = (
   const warning = draft.qualityWarnings?.find((entry) =>
     entry.dimension === "content-completeness" && entry.factCoverage);
   if (!warning?.factCoverage) throw new Error("当前草稿没有可执行的内容覆盖修复");
+  if (warning.factCoverage.legacyUnmapped) {
+    throw new Error("这篇旧稿没有逐段事实映射，不能安全自动补写；请先用当前生成器重建草稿");
+  }
   const requestedFactIds = new Set(warning.factCoverage.unusedFactIds);
   const sourceBySignalId = new Map(contentPackage.sources.map((source) => [source.signalId, source.url]));
   const unusedFacts = contentPackage.facts.flatMap<QualityRepairContext["unusedFacts"][number]>((fact) => {

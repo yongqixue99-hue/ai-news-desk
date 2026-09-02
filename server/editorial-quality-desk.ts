@@ -129,6 +129,7 @@ const factCoverageFor = (
 ): { coverage: DraftFactCoverage; missingDimensions: DraftCompletenessDimension[] } => {
   const supportedFacts = contentPackage.facts.filter((claim) =>
     claim.status === "supported" || claim.status === "partially-supported");
+  const hasExplicitParagraphMapping = (draft.factClaims ?? []).some((claim) => Array.isArray(claim.factIds));
   const supportedIds = new Set(supportedFacts.map((claim) => claim.id));
   const mappedIds = new Set((draft.factClaims ?? [])
     .flatMap((claim) => claim.factIds ?? [])
@@ -146,6 +147,7 @@ const factCoverageFor = (
       unusedFactIds,
       supportedFactCount: supportedFacts.length,
       ratio: supportedFacts.length ? Number((usedFactIds.length / supportedFacts.length).toFixed(2)) : 1,
+      ...(!hasExplicitParagraphMapping ? { legacyUnmapped: true } : {}),
     },
     missingDimensions: dimensionOrder.filter((dimension) =>
       requiredDimensions.has(dimension) && !usedDimensions.has(dimension)),
@@ -240,13 +242,17 @@ export const evaluateDraftPackageQuality = ({
     && supportedFactCount >= 5
     && (completeness.coverage.ratio < 0.8 || completeness.missingDimensions.length > 0)
   ) {
+    const legacyMessage = completeness.coverage.legacyUnmapped
+      ? `这篇旧稿没有逐段事实映射，系统不能可靠判断 ${supportedFactCount} 条素材包事实是否已经写入；请用当前生成器重建草稿后再定向补写。`
+      : undefined;
     const missingText = completeness.missingDimensions.length
       ? `，还缺少${completeness.missingDimensions.map((dimension) => completenessDimensionLabels[dimension]).join("、")}`
       : "";
     warnings.push({
       id: "brief-underdeveloped",
       blockId: "evidence",
-      message: `素材包有 ${supportedFactCount} 条正文级事实，正文明确覆盖 ${completeness.coverage.usedFactIds.length} 条（${Math.round(completeness.coverage.ratio * 100)}%）${missingText}；当前正文 ${bodyCharacterCount} 字，可只用未覆盖事实做定向补写。`,
+      message: legacyMessage
+        ?? `素材包有 ${supportedFactCount} 条正文级事实，正文明确覆盖 ${completeness.coverage.usedFactIds.length} 条（${Math.round(completeness.coverage.ratio * 100)}%）${missingText}；当前正文 ${bodyCharacterCount} 字，可只用未覆盖事实做定向补写。`,
       factCoverage: completeness.coverage,
       missingDimensions: completeness.missingDimensions,
     });
