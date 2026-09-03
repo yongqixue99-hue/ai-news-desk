@@ -2,6 +2,8 @@
 
 一个运行在 Windows 或 macOS 本地、面向个人公众号创作者的 AI 科技编辑工作台。系统自动读源并把跨平台信号聚合为 Story，在“今日”页准备 3 条必看和 5 条次级候选；用户选题后先冻结事实、社区原句和图片素材包，再生成可编辑图文草稿，最后同步到微信公众号草稿箱。最终发布始终由用户在平台后台完成。
 
+X 与 Gemini 不新增接口支出的具体操作见 [X 与 Gemini 零新增支出操作手册](docs/X-GEMINI-ZERO-COST-WORKFLOW.md)。
+
 准备换到 Windows 或交给新的 Codex 继续开发时，先阅读 [Windows 开发接续文档](docs/WINDOWS-DEVELOPMENT-HANDOFF.md)；项目级 Agent 约束保存在 [AGENTS.md](AGENTS.md)。
 
 ## 已实现的工作流
@@ -149,7 +151,7 @@ npm run start
 
 1. 在 [X Developer Console](https://developer.x.com/) 创建可读取公开帖子的应用，取得 API v2 Bearer Token；X 的开发者访问和搜索接口可能按当前套餐或用量计费。
 2. 打开“新闻源”，在“X 官方账号采集”中粘贴 Bearer Token，点击“保存并启用 X 官方源”。Token 在 Windows 使用当前用户 DPAPI、在 macOS 使用钥匙串，不写入 `.workflow/`、日志或导出备份。
-3. 默认观察白名单包含 `OpenAI, AnthropicAI, GoogleDeepMind, nvidia, AIatMeta, MicrosoftAI, xai, sama, demishassabis` 九个账号，但来源默认停用。可以编辑或新增 X 来源，用逗号填写其他官方账号；账号必须由用户明确加入白名单，平台的认证标记不会自动把陌生账号升级为官方来源。
+3. 默认观察白名单包含 23 个经审阅账号，覆盖 OpenAI、Anthropic、Google、DeepSeek、Qwen、xAI、Meta、Mistral、Cohere、Microsoft、NVIDIA、Hugging Face、Perplexity、核心负责人和 Artificial Analysis；完整 handle 以“新闻源”页当前配置为准，来源默认停用。可以编辑或新增 X 来源，用逗号填写其他官方账号；账号必须由用户明确加入白名单，平台的认证标记不会自动把陌生账号升级为官方来源。
 4. 点击来源行的“测试”会请求 X API recent search；正式采集只保留白名单账号自己的公开原帖，排除回复和转推，并用 `since_id` 断点续采。限流或单个 X 来源失败不会阻断 RSS 和其他来源。
 
 适配器只读公开帖子，不读取私信、不执行互动，也不代发内容。未配置 Token 时默认 X 来源保持停用，不会用网页抓取或模拟数据冒充 API 结果。接口和授权范围以 [X API 文档](https://docs.x.com/x-api/introduction) 与 [Bearer Token 说明](https://docs.x.com/fundamentals/authentication/oauth-2-0/bearer-tokens)为准。

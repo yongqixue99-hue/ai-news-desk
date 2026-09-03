@@ -29,6 +29,31 @@ test("official, timely AI announcements clear the editorial threshold", () => {
   assert.equal(score.breakdown.relevance, 2);
 });
 
+test("an official versioned model release outranks a newer official event listing", () => {
+  const modelRelease = rawItemToCandidate(item({
+    id: "rss:anthropic:model-release",
+    title: "Introducing Claude Fable 5.1 and Claude Mythos 5.1 - Anthropic",
+    url: "https://www.anthropic.com/news/claude-fable-5-1",
+    content: "Anthropic introduces Claude Fable 5.1 with updated model access and pricing.",
+    published_at: new Date(Date.now() - 30 * 60 * 60_000).toISOString(),
+    metadata: { feed_name: "Anthropic", source_role: "official" },
+  }), 48, ["ai"]);
+  const eventListing = rawItemToCandidate(item({
+    id: "rss:anthropic:workshop",
+    title: "Virtual Claude Code Workshop - Anthropic",
+    url: "https://www.anthropic.com/events/virtual-claude-code-workshop",
+    content: "Register for a virtual Claude Code workshop.",
+    published_at: new Date(Date.now() - 60 * 60_000).toISOString(),
+    metadata: { feed_name: "Anthropic", source_role: "official" },
+  }), 48, ["ai"]);
+
+  const ranked = sortCandidates([eventListing, modelRelease]);
+
+  assert.equal(ranked[0]?.id, modelRelease.id);
+  assert.ok(modelRelease.score > eventListing.score);
+  assert.equal(eventListing.scoreBreakdown.penalty, 2);
+});
+
 test("rumor-only wording receives a penalty", () => {
   const confirmed = candidateScore(item(), "BBC Technology", 24);
   const rumor = candidateScore(

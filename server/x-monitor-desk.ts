@@ -11,6 +11,7 @@ import { retainWorkflowRuns } from "./run-retention.js";
 import { rawItemTimeRejectionReason, rawItemToCandidate, sortCandidates } from "./scoring.js";
 import { readState, updateState } from "./storage.js";
 import { normalizeTopicIds } from "./topics.js";
+import { meteredAutomationAllowed } from "./spending-policy.js";
 import type { Candidate, RawHorizonItem, SourceConfig, WorkflowRun, WorkflowState } from "./types.js";
 
 const DEFAULT_INTERVAL_MS = 5 * 60_000;
@@ -35,6 +36,7 @@ interface XMonitorDependencies {
 export type XMonitorPollStatus =
   | "collected"
   | "not-due"
+  | "zero-cost"
   | "source-disabled"
   | "token-missing"
   | "collection-busy";
@@ -76,6 +78,9 @@ export const createXMonitorDesk = (dependencies: XMonitorDependencies) => {
       return { status: "not-due", itemCount: 0, candidateCount: 0 };
     }
     const state = await dependencies.readState();
+    if (!meteredAutomationAllowed(state)) {
+      return { status: "zero-cost", itemCount: 0, candidateCount: 0 };
+    }
     if (findActiveCollectionRun(state.runs)) {
       return { status: "collection-busy", itemCount: 0, candidateCount: 0 };
     }

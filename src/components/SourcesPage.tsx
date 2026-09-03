@@ -6,6 +6,8 @@ import {
   CircleCheck,
   CircleHelp,
   CircleX,
+  Copy,
+  ExternalLink,
   Globe2,
   Layers3,
   LoaderCircle,
@@ -23,11 +25,12 @@ import {
 import { collectionTopics } from "../../server/topics.js";
 import { sourceRoleFor, sourceTopicIds } from "../../server/source-routing.js";
 import { useDialogA11y } from "../hooks/useDialogA11y";
-import type { CollectionTopicId, SourceConfig, SourcePreset, SourceRole } from "../types";
+import type { CollectionTopicId, Settings, SourceConfig, SourcePreset, SourceRole } from "../types";
 
 interface SourcesPageProps {
   sources: SourceConfig[];
   sourcePresets: SourcePreset[];
+  spendingPolicy: Settings["spendingPolicy"];
   onSave: (source: SourceConfig, patch: Partial<SourceConfig>) => Promise<void>;
   onAdd: (source: Partial<SourceConfig>) => Promise<void>;
   onDelete: (sourceId: string) => Promise<void>;
@@ -97,6 +100,7 @@ const sourceMatchesQuery = (source: SourceConfig, query: string) => [
 export function SourcesPage({
   sources,
   sourcePresets,
+  spendingPolicy,
   onSave,
   onAdd,
   onDelete,
@@ -122,6 +126,7 @@ export function SourcesPage({
   const [xToken, setXToken] = useState("");
   const [xCredentialBusy, setXCredentialBusy] = useState(false);
   const [xCredentialError, setXCredentialError] = useState("");
+  const [xWatchlistCopied, setXWatchlistCopied] = useState(false);
   const sourceNameInputRef = useRef<HTMLInputElement>(null);
   const closeSourceModal = () => setAdding(false);
   const sourceDialogRef = useDialogA11y<HTMLElement>({
@@ -130,6 +135,22 @@ export function SourcesPage({
     initialFocusRef: sourceNameInputRef,
   });
   const sourceIdKey = sources.map((source) => source.id).join("\u0000");
+  const zeroCost = spendingPolicy === "zero-cost";
+  const xWatchHandles = useMemo(() => {
+    const configured = sources
+      .filter((source) => source.kind === "x")
+      .flatMap((source) => (source.query || "").split(/[\s,，]+/u))
+      .map((handle) => handle.replace(/^@/u, "").trim())
+      .filter(Boolean);
+    return [...new Set(configured)];
+  }, [sources]);
+
+  const copyXWatchlist = async () => {
+    if (!xWatchHandles.length) return;
+    await navigator.clipboard.writeText(xWatchHandles.map((handle) => `@${handle}`).join("\n"));
+    setXWatchlistCopied(true);
+    window.setTimeout(() => setXWatchlistCopied(false), 1800);
+  };
 
   useEffect(() => {
     const available = new Set(sourceIdKey.split("\u0000").filter(Boolean));
@@ -303,30 +324,52 @@ export function SourcesPage({
         <div><strong>官网入口与采集接口分开</strong><span>单源测试只检查 RSS、索引接口或官网可达性，不会启动成稿；采集时仍会回到原文核验。</span></div>
       </div>
 
-      <section className="x-credential-panel" aria-labelledby="x-credential-heading">
-        <div className="x-credential-copy">
-          <strong id="x-credential-heading">X 重点账号监控</strong>
-          <span>保存 Token 并启用后，每 5 分钟增量读取 23 个重点账号的公开原帖；公司官号先作一手线索并回查官网，高管个人号只作预告线索，跑分平台只作研究材料。</span>
-          <small>不读取私信、不点赞、不代发帖，也不会自动成稿。Bearer Token 仅保存在当前 Windows 用户的 DPAPI 安全存储；X API 按用量计费，请在开发者后台设置预算提醒。</small>
+      <section className="x-free-watch-panel" aria-labelledby="x-free-watch-heading">
+        <div className="x-free-watch-copy">
+          <span className="x-free-badge">0 元方案</span>
+          <strong id="x-free-watch-heading">X 免费监控（人工接力）</strong>
+          <span>用 X 自带的私人列表集中看重点账号；发现新闻后复制原帖链接与正文，到“新闻工作台 → 截图／链接成稿 → X 原帖”导入。</span>
+          <small>不调用 X API、不抓取登录态、不产生接口费用。公司官号可作一手线索；个人号预告与跑分截图仍要回查官网或独立来源。</small>
         </div>
-        <div className="x-credential-form">
-          <input
-            type="password"
-            value={xToken}
-            onChange={(event) => setXToken(event.target.value)}
-            placeholder={xCredential.configured ? `已配置 ${xCredential.hint ?? ""}` : "粘贴 X API Bearer Token"}
-            aria-label="X API Bearer Token"
-            autoComplete="off"
-          />
-          <button type="button" onClick={saveXCredential} disabled={xCredentialBusy || xToken.trim().length < 16}>
-            {xCredentialBusy ? <LoaderCircle className="spin" size={14} /> : <Save size={14} />}
-            保存并启用 X 官方源
-          </button>
-          {xCredential.configured ? <button type="button" className="secondary-button" onClick={() => window.confirm("确定删除本机保存的 X Bearer Token 吗？") && clearXCredential()} disabled={xCredentialBusy}>删除 Token</button> : null}
+        <ol className="x-free-watch-steps">
+          <li><b>1</b><span>在 X 新建私人列表</span></li>
+          <li><b>2</b><span>添加这 {xWatchHandles.length || 23} 个重点账号</span></li>
+          <li><b>3</b><span>看到重要原帖就复制进工作台</span></li>
+        </ol>
+        <div className="x-free-watch-actions">
+          <a href="https://x.com/i/lists" target="_blank" rel="noreferrer"><ExternalLink size={14} />打开 X 列表</a>
+          <button type="button" onClick={() => void copyXWatchlist()} disabled={!xWatchHandles.length}><Copy size={14} />{xWatchlistCopied ? "已复制" : "复制重点账号"}</button>
         </div>
-        <span className={`x-credential-state ${xCredential.configured ? "configured" : ""}`}>{xCredential.configured ? `已安全配置 ${xCredential.hint ?? ""}` : "尚未配置，X 来源默认停用"}</span>
-        {xCredentialError ? <span className="x-credential-error" role="alert">{xCredentialError}</span> : null}
       </section>
+
+      <details className="x-paid-monitor-panel">
+        <summary>付费 X API 自动监控 <small>{zeroCost ? "零成本模式下锁定" : "按 X 官方用量计费"}</small></summary>
+        <section className="x-credential-panel" aria-labelledby="x-credential-heading">
+          <div className="x-credential-copy">
+            <strong id="x-credential-heading">X 重点账号自动监控</strong>
+            <span>保存 Token 并启用后，每 5 分钟增量读取重点账号的公开原帖；公司官号先作一手线索并回查官网，高管个人号只作预告线索，跑分平台只作研究材料。</span>
+            <small>Bearer Token 仅保存在当前 Windows 用户的 DPAPI 安全存储；X API 按用量计费。零成本模式不会调用该接口。</small>
+          </div>
+          <div className="x-credential-form">
+            <input
+              type="password"
+              value={xToken}
+              onChange={(event) => setXToken(event.target.value)}
+              placeholder={xCredential.configured ? `已配置 ${xCredential.hint ?? ""}` : "粘贴 X API Bearer Token"}
+              aria-label="X API Bearer Token"
+              autoComplete="off"
+              disabled={zeroCost}
+            />
+            <button type="button" onClick={saveXCredential} disabled={zeroCost || xCredentialBusy || xToken.trim().length < 16}>
+              {xCredentialBusy ? <LoaderCircle className="spin" size={14} /> : <Save size={14} />}
+              保存并启用 X 官方源
+            </button>
+            {xCredential.configured ? <button type="button" className="secondary-button" onClick={() => window.confirm("确定删除本机保存的 X Bearer Token 吗？") && clearXCredential()} disabled={xCredentialBusy}>删除 Token</button> : null}
+          </div>
+          <span className={`x-credential-state ${xCredential.configured ? "configured" : ""}`}>{zeroCost ? "零成本模式已阻止自动调用" : xCredential.configured ? `已安全配置 ${xCredential.hint ?? ""}` : "尚未配置，X 来源默认停用"}</span>
+          {xCredentialError ? <span className="x-credential-error" role="alert">{xCredentialError}</span> : null}
+        </section>
+      </details>
 
       <section className="source-presets" aria-labelledby="source-presets-heading">
         <div className="source-presets-heading">
@@ -397,6 +440,8 @@ export function SourcesPage({
                 className={`source-collection-state state-${collectionState}`}
                 value={collectionState}
                 aria-label={`${source.name} 的采集状态`}
+                disabled={zeroCost && source.kind === "x"}
+                title={zeroCost && source.kind === "x" ? "零成本模式下请使用上方人工接力流程" : undefined}
                 onChange={(event) => {
                   const next = event.target.value as SourceCollectionState;
                   void onSave(source, { enabled: next !== "disabled", selected: next === "default" });
@@ -413,7 +458,7 @@ export function SourcesPage({
                 {healthIcon}<span><strong>{healthLabel} · 检查 {formatTimestamp(source.lastCheckedAt, "尚未")}</strong><small>最后成功 {formatTimestamp(source.lastSuccessfulAt, "尚无")}{failureCount ? ` · 连续失败 ${failureCount} 次` : ""}</small></span>
               </span>
               <div className="row-actions">
-                <button type="button" className="source-test-button" onClick={() => testSource(source.id)} disabled={Boolean(testingSourceId)} title="只测试这个来源">{testing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}<span>测试</span></button>
+                <button type="button" className="source-test-button" onClick={() => testSource(source.id)} disabled={Boolean(testingSourceId) || (zeroCost && source.kind === "x")} title={zeroCost && source.kind === "x" ? "零成本模式不调用 X API" : "只测试这个来源"}>{testing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}<span>测试</span></button>
                 {homepageUrl ? <a className="source-homepage-link" href={homepageUrl} target="_blank" rel="noreferrer" title="打开官方网站"><Globe2 size={15} /><span>官网</span></a> : null}
                 <button type="button" aria-label={`删除新闻源 ${source.name}`} onClick={() => window.confirm(`确定删除新闻源“${source.name}”吗？`) && onDelete(source.id)} title="删除新闻源"><Trash2 size={16} /></button>
               </div>

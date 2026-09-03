@@ -23,6 +23,7 @@ const xItem = (id: string, publishedAt: string): RawHorizonItem => ({
 
 test("X monitor stays dormant without both an enabled source and a protected token", async () => {
   let state: WorkflowState = createDefaultState();
+  state.settings.spendingPolicy = "allow-metered";
   const configured = state.sources.find((source) => source.id === "x-ai-official")!;
   configured.enabled = true;
   configured.selected = true;
@@ -44,8 +45,36 @@ test("X monitor stays dormant without both an enabled source and a protected tok
   assert.equal(state.runs.length, 0);
 });
 
+test("X monitor never reads a token or calls transport while zero-cost mode is active", async () => {
+  let state: WorkflowState = createDefaultState();
+  const configured = state.sources.find((source) => source.id === "x-ai-official")!;
+  configured.enabled = true;
+  configured.selected = true;
+  let credentialReads = 0;
+  let collectionCalls = 0;
+  const monitor = createXMonitorDesk({
+    readState: async () => state,
+    updateState: async (mutate) => mutate(state),
+    getBearerToken: async () => {
+      credentialReads += 1;
+      return "protected-token-value";
+    },
+    collect: async () => {
+      collectionCalls += 1;
+      return { items: [], failures: {}, cursors: {} };
+    },
+  });
+
+  const result = await monitor.poll();
+
+  assert.equal(result.status, "zero-cost");
+  assert.equal(credentialReads, 0);
+  assert.equal(collectionCalls, 0);
+});
+
 test("X monitor incrementally merges new official posts into one daily run without AI drafting", async () => {
   let state: WorkflowState = createDefaultState();
+  state.settings.spendingPolicy = "allow-metered";
   const configured = state.sources.find((source) => source.id === "x-ai-official")!;
   configured.enabled = true;
   configured.selected = true;

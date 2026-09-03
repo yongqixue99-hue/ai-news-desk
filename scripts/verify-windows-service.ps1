@@ -72,7 +72,7 @@ $failures = New-Object System.Collections.Generic.List[string]
 $projectPath = Get-NormalizedPath ((Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path)
 $serviceEntryPath = Get-NormalizedPath ((Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "windows-service-entry.mjs")).Path)
 $expectedArguments = '--import tsx "{0}"' -f $serviceEntryPath
-$nodeCommand = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue
+$nodeCommand = @(Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue)[0]
 $expectedNodePath = if ($null -ne $nodeCommand) { $nodeCommand.Source } else { $null }
 
 Write-Host "AI News Desk Windows service verification"

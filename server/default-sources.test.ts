@@ -132,7 +132,7 @@ test("Horizon receives comprehensive news search as RSS instead of its empty ada
 
 test("v11 personal state gains classified V2EX and GitHub sources without losing stored source choices", () => {
   const legacy = createDefaultState();
-  legacy.version = 11 as 14;
+  legacy.version = 11 as 15;
   legacy.sources = legacy.sources.filter((source) => !["v2ex-community", "github-project-community"].includes(source.id));
   const openai = legacy.sources.find((source) => source.id === "openai-official");
   assert.ok(openai);
@@ -142,7 +142,7 @@ test("v11 personal state gains classified V2EX and GitHub sources without losing
   }
 
   const upgraded = upgradeState(legacy);
-  assert.equal(upgraded.version, 14);
+  assert.equal(upgraded.version, 15);
   assert.equal(upgraded.sources.find((source) => source.id === "openai-official")?.selected, false);
   assert.equal(upgraded.sources.find((source) => source.id === "v2ex-community")?.role, "community");
   assert.equal(upgraded.sources.find((source) => source.id === "github-project-community")?.kind, "github");
@@ -159,6 +159,6 @@ test("v12 personal state adds the new X source to the AI daily preset exactly on
 
   const upgraded = upgradeState(legacy);
   const sourceIds = upgraded.sourcePresets.find((preset) => preset.id === "preset_ai_daily")?.sourceIds ?? [];
-  assert.equal(upgraded.version, 14);
+  assert.equal(upgraded.version, 15);
   assert.equal(sourceIds.filter((sourceId) => sourceId === "x-ai-official").length, 1);
 });

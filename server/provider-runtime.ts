@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { resolveCodexExecutable } from "./codex-executable.js";
 import { getProviderApiKey } from "./secrets.js";
 import type { AiProviderConfig } from "./types.js";
 
@@ -50,7 +51,7 @@ const runCodex = (
   }
   const model = assertModelName(provider.model);
   const child = spawn(
-    "codex",
+    resolveCodexExecutable(),
     [
       "-c",
       `model="${model}"`,

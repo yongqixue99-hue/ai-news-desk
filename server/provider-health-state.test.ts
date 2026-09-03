@@ -26,13 +26,14 @@ test("current state initializes and preserves the latest provider health snapsho
   assert.equal(upgraded.version, createDefaultState().version);
 });
 
-test("a fresh desk separates cheap inline completion from the long-form drafting provider", () => {
+test("a fresh desk keeps DeepSeek as the optional completion provider under the X and Gemini cost guard", () => {
   const state = createDefaultState();
   const deepseek = state.aiSettings.providers.find((provider) => provider.id === "deepseek");
   const gemini = state.aiSettings.providers.find((provider) => provider.id === "gemini");
   const groq = state.aiSettings.providers.find((provider) => provider.id === "groq");
 
   assert.equal(state.aiSettings.activeProviderId, "codex-cli");
+  assert.equal(state.settings.spendingPolicy, "zero-cost");
   assert.equal(state.aiSettings.completionProviderId, "deepseek");
   assert.equal(deepseek?.model, "deepseek-v4-flash");
   assert.equal(deepseek?.inlineCompletionModel, "deepseek-v4-flash");
@@ -42,7 +43,7 @@ test("a fresh desk separates cheap inline completion from the long-form drafting
   assert.equal(groq?.inlineCompletionModel, "openai/gpt-oss-20b");
 });
 
-test("an older desk gains a completion provider without changing its existing Agent assignments", () => {
+test("the X and Gemini cost guard preserves non-Gemini Agent assignments", () => {
   const saved = createDefaultState();
   saved.aiSettings.activeProviderId = "qwen";
   saved.aiSettings.analysisProviderId = "qwen";

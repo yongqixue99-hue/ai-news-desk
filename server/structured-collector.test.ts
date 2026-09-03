@@ -98,6 +98,41 @@ test("portable collector parses a publisher sitemap as an incremental official i
   assert.equal(items[0]?.metadata?.source_format, "sitemap");
 });
 
+test("portable collector does not treat a shared sitemap batch timestamp as each page's publication time", () => {
+  const sharedLastmod = "2026-09-03T13:48:35.764Z";
+  const batchedUrls = Array.from({ length: 10 }, (_, index) => `
+    <url>
+      <loc>https://www.anthropic.com/site-page-${index + 1}</loc>
+      <lastmod>${sharedLastmod}</lastmod>
+    </url>
+  `).join("");
+  const items = parsePortableFeed(`
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      ${batchedUrls}
+      <url>
+        <loc>https://www.anthropic.com/news/real-release</loc>
+        <lastmod>2026-09-03T12:00:00Z</lastmod>
+      </url>
+    </urlset>
+  `, {
+    feedUrl: "https://www.anthropic.com/sitemap.xml",
+    feedName: "Anthropic",
+    sourceId: "anthropic-official",
+    sourceRole: "official",
+    category: "ai-official",
+    fetchedAt: "2026-09-03T14:00:00.000Z",
+  });
+
+  const batched = items.filter((item) => item.url.includes("/site-page-"));
+  const release = items.find((item) => item.url.endsWith("/news/real-release"));
+
+  assert.equal(batched.length, 10);
+  assert.ok(batched.every((item) => item.published_at === undefined));
+  assert.ok(batched.every((item) => item.metadata?.sitemap_lastmod_status === "shared-batch"));
+  assert.equal(release?.published_at, "2026-09-03T12:00:00.000Z");
+  assert.equal(release?.metadata?.sitemap_lastmod_status, "declared");
+});
+
 test("one unavailable portable source is reported without discarding a healthy source", async () => {
   const unavailable = { ...source, id: "unavailable", name: "Unavailable", url: "https://unavailable.example/feed" };
   const result = await collectPortableStructuredSources([source, unavailable], {

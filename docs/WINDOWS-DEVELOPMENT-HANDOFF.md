@@ -434,3 +434,37 @@ git push -u origin codex/windows-next
 > 先完整阅读 AGENTS.md、README.md、docs/mature-personal-product.md 和 docs/WINDOWS-DEVELOPMENT-HANDOFF.md。运行 npm test、npm run eval:editorial、npm run build，确认 0 fail。不要改写产品方向，不要触碰或提交 .workflow。跨系统完整归档迁移和事实覆盖定向补写已经实现；下一步先预检一份真实 Mac 归档，再用真实 ContentPackage 验证短而完整、覆盖不足和一次定向补写，并进入 P1 连续制作 12 篇公众号草稿，记录耗时、终稿删除内容、图片使用率和阻断原因。发现缺陷时先写失败测试，优先修素材包、稿型和事实主干，不继续叠加去 AI 味提示词。每次使用 Git 命令前，用中文说明命令作用和预期结果。
 
 这样下一次对话不需要重新解释本项目为什么重新闻事实、社区边界、原图和人工最终发布。
+
+## 13. 2026-09-03 Windows 真实采集复验
+
+本轮没有继续堆页面功能，而是用 OpenAI、Anthropic、Google DeepMind、Gemini、DeepSeek、Qwen 六个官方来源完成一次真实采集。运行 `run_20260903140601_1898b1` 在约 56 秒内完成：303 条原始记录进入窗口过滤，形成 5 条候选并生成 5/5 中文速读；Today 最终保持 8 条可写推荐。复验后确认并修复：
+
+- Anthropic sitemap 会把一批页面写成完全相同的构建时间。现在同一 `lastmod` 达到 10 条时只标记为 `shared-batch`，不再伪装成每个页面的发布时间。
+- Story 的 `publishedAt` 固定为最早的事实性发布时间，后续重复观察只推进 `lastSeenAt`；历史 sitemap 构建时间因此不能再把旧事件伪装成刚发生。
+- Windows 计划任务可能没有 npm shim 所在的 PATH。Provider、健康检查与旧状态接口现在会直接解析最新的 Codex Desktop `codex.exe`，真实中文速读不再报 `spawn codex ENOENT`。
+- Workshop、Coworkshop、Webinar、Founder House 等招募活动保留为候选线索，但有明确降权，不能只靠“更新更近”与正式模型发布并列。
+- 模型资料补全增加厂商一致性检查；另一模型厂商的第一方文档不能补入当前发布。StoryDesk 同时在读取阶段隔离历史污染记录，因此不删除旧运行也能让当前故事恢复正确来源、图片和资料完整度。
+
+本轮最终基线：`npm test` 580/580、编辑质量黄金集 22/22、`npm run build` 通过。Windows 计划任务已恢复常驻，Codex 与 Horizon 健康；Chrome 填入助手尚未连接，所以发布通道仍显示警告，不影响采集与编辑。
+
+仍需按真实试用推进：
+
+1. Gemini 独立来源、DeepSeek 和 Qwen 在这次 2026-09-02 至 2026-09-03 窗口内没有形成候选；Google DeepMind 路线能发现 Gemini 发布，但应继续观察这些独立路线是“确实无更新”还是路由覆盖不足。
+2. X 官方账号路线已经实现，但必须由用户配置 Bearer Token 并显式启用；未配置时不要声称正在监控。
+3. 选择本次模型发布 Story 创建一篇人工优先草稿，核对官方介绍、接入、规格、价格、跑分、安全文档和图片是否真正支持正文，再记录缺口。
+4. 旧错误信号保留在历史运行中并由 StoryDesk 动态隔离；未经用户确认不要直接改写或清理 `.workflow`。
+
+## 14. 2026-09-04 X / Gemini 零新增支出接力
+
+本轮把“0 成本”的产品边界明确收窄为 **只限制 X API 与 Gemini API**。这不是全局禁用付费 Provider：DeepSeek、通义、OpenAI API 及其他已配置服务保持原配置和原角色。Windows 当前真实运行状态为：长文主写作、分析和优化使用 `codex-cli`，Tab 补全继续使用已配置的 DeepSeek `deepseek-v4-flash`；Gemini 未配置 API Key；X 未配置 Bearer Token，也未进入自动采集。
+
+已落地两条无需新增 API 支出的人工接力：
+
+1. “新闻源”顶部提供 X 免费监控流程：复制重点账号清单，在 X 网页建立私人 List；发现重要原帖后复制链接和正文。
+2. “新闻工作台 → 快速起稿 → X 原帖”接收用户复制的原帖证据，不调用 X API，并先进入证据核对。X 内容默认是 discovery，身份和原始上下文未经核对不能自动成为新闻事实。
+3. 草稿 Agent 面板提供 Gemini 网页版接力：只复制经过事实边界约束的写作提示词，由用户在 Gemini 网页粘贴和取回答案；系统不接管浏览器 Cookie，不抓取登录态，也不自动覆盖用户正文。
+4. 详细操作见 `docs/X-GEMINI-ZERO-COST-WORKFLOW.md`。
+
+费用保护打开时，服务端会同时阻止 UI 和显式接口绕过：X 自动来源不能启用、测试或手工指定采集；Gemini 不能被激活、测试、分配角色或调用。关闭保护只解除限制，不会自动启用来源或发起付费请求，也不会删除已有凭据。
+
+Windows 计划任务在本轮重启并复验。另修复了机器上同时存在项目 Node 与 Codex 内置 Node 时，校验脚本把多个 `node.exe` 路径拼接后误报失败的问题。最终基线：`npm test` 590/590、编辑质量黄金集 22/22、`npm run build` 通过；计划任务、4317 监听进程和健康接口均通过。构建仍提示 `DraftWorkspace` 压缩前约 584 KB，属于后续按需拆包的非阻断性能事项。

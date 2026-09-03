@@ -1094,6 +1094,36 @@ function App() {
     }
   };
 
+  const quickDraftFromXPost = async (url: string, text: string, author?: string): Promise<IntakeReviewRecord> => {
+    setActionBusy(true);
+    try {
+      const result = await api.intakeXPost(url, text, author);
+      setNotice({ kind: "success", message: "X 原帖已按人工证据导入；请核对账号、原帖链接和上下文后再生成草稿。" });
+      return result.review;
+    } catch (error) {
+      reportError(error);
+      throw error;
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const saveSpendingPolicy = async (spendingPolicy: Settings["spendingPolicy"]) => {
+    try {
+      await api.saveSettings({ spendingPolicy });
+      await refresh();
+      setNotice({
+        kind: "success",
+        message: spendingPolicy === "zero-cost"
+          ? "已锁定 X 和 Gemini 的额外接口支出；DeepSeek 等其他 Provider 保持原配置。"
+          : "已解锁 X / Gemini API；当前仍未自动启用任何模型或 X 来源。",
+      });
+    } catch (error) {
+      reportError(error);
+      throw error;
+    }
+  };
+
   const saveCompletionProvider = async (providerId: string) => {
     try {
       const aiSettings = await api.saveCompletionProvider(providerId);
@@ -1261,6 +1291,7 @@ function App() {
           onClearCandidates={clearCandidates}
           onBriefCandidates={briefCandidates}
           onQuickDraftUrl={quickDraftFromUrl}
+          onQuickDraftXPost={quickDraftFromXPost}
           onQuickDraftScreenshot={quickDraftFromScreenshot}
           onConfirmQuickDraftReview={confirmQuickDraftReview}
           onOpenAiSettings={() => navigate("ai-settings")}
@@ -1298,7 +1329,10 @@ function App() {
             onOpenWorkbench={() => navigate("workbench")}
             onSelectDraft={setActiveDraftId}
             onSave={saveDraft}
-            onCompleteInline={completeDraftInline}
+            onCompleteInline={state.aiSettings.completionProviderId
+              && !(state.settings.spendingPolicy === "zero-cost" && state.aiSettings.completionProviderId === "gemini")
+              ? completeDraftInline
+              : undefined}
             onLoadRevisions={loadDraftRevisions}
             onRestoreRevision={restoreDraftRevision}
             onUploadImage={uploadDraftImage}
@@ -1340,6 +1374,7 @@ function App() {
         <SourcesPage
           sources={state.sources}
           sourcePresets={state.sourcePresets ?? []}
+          spendingPolicy={state.settings.spendingPolicy}
           onSave={saveSource}
           onAdd={async (source) => {
             try {
@@ -1464,7 +1499,9 @@ function App() {
       {page === "ai-settings" ? (
         <AISettingsPage
           aiSettings={state.aiSettings}
+          spendingPolicy={state.settings.spendingPolicy}
           materials={state.materials}
+          onSaveSpendingPolicy={saveSpendingPolicy}
           onSaveProvider={saveAiProvider}
           onTestProvider={testAiProvider}
           onSaveAgentRole={saveAgentRole}

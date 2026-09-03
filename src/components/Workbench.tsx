@@ -81,6 +81,7 @@ interface WorkbenchProps {
   onClearCandidates: (candidateIds?: string[]) => Promise<void>;
   onBriefCandidates: () => Promise<void>;
   onQuickDraftUrl: (url: string) => Promise<IntakeReviewRecord>;
+  onQuickDraftXPost: (url: string, text: string, author?: string) => Promise<IntakeReviewRecord>;
   onQuickDraftScreenshot: (file: File, note?: string) => Promise<IntakeReviewRecord>;
   onConfirmQuickDraftReview: (reviewId: string, selection: EvidenceReviewSelection) => Promise<void>;
   onOpenAiSettings: () => void;
@@ -186,6 +187,7 @@ export function Workbench({
   onClearCandidates,
   onBriefCandidates,
   onQuickDraftUrl,
+  onQuickDraftXPost,
   onQuickDraftScreenshot,
   onConfirmQuickDraftReview,
   onOpenAiSettings,
@@ -968,6 +970,7 @@ export function Workbench({
           onClose={() => setQuickDraftOpen(false)}
           onOpenAiSettings={() => { setQuickDraftOpen(false); onOpenAiSettings(); }}
           onSubmitUrl={onQuickDraftUrl}
+          onSubmitXPost={onQuickDraftXPost}
           onSubmitScreenshot={onQuickDraftScreenshot}
           onConfirmReview={onConfirmQuickDraftReview}
         />

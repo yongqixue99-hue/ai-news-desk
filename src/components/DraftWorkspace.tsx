@@ -53,6 +53,7 @@ import { buildDraftEvidenceView } from "../../server/draft-evidence-view.js";
 import { draftStatusLabel, manualDraftStatuses } from "../draft-lifecycle-view";
 import { buildDraftQualityView } from "../draft-quality-view";
 import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
+import { buildExternalWritingPrompt } from "../external-writing-bridge";
 import { getRovingTabTarget } from "../hooks/rovingTabs";
 import type {
   ArticleDraft,
@@ -90,7 +91,7 @@ interface DraftWorkspaceProps {
   onOpenWorkbench: () => void;
   onSelectDraft: (draftId: string) => void;
   onSave: (draftId: string, patch: Partial<ArticleDraft>, saveMode: DraftSaveMode) => Promise<ArticleDraft>;
-  onCompleteInline: (
+  onCompleteInline?: (
     draftId: string,
     input: { before: string; after: string },
     signal: AbortSignal,
@@ -274,6 +275,7 @@ export function DraftWorkspace({
   const [agentQuestion, setAgentQuestion] = useState("");
   const [agentError, setAgentError] = useState("");
   const [agentCopied, setAgentCopied] = useState(false);
+  const [externalPromptCopied, setExternalPromptCopied] = useState(false);
   const [optimizationDecisions, setOptimizationDecisions] = useState<Record<string, "applied" | "ignored">>({});
   const [fillResult, setFillResult] = useState<PublisherResult | undefined>();
   const [preflight, setPreflight] = useState<PublisherPreflightResult>();
@@ -953,6 +955,12 @@ export function DraftWorkspace({
     setAgentCopied(true);
     window.setTimeout(() => setAgentCopied(false), 1_500);
   };
+  const copyExternalWritingPrompt = async () => {
+    const current = editingRef.current ?? editing;
+    await navigator.clipboard.writeText(buildExternalWritingPrompt(current));
+    setExternalPromptCopied(true);
+    window.setTimeout(() => setExternalPromptCopied(false), 1_800);
+  };
   const applyOptimization = async (requestedChanges: ArticleOptimizationChange[], safeOnly = false) => {
     const proposal = activeAgentThread?.optimization;
     if (!proposal || !requestedChanges.length) return;
@@ -1160,7 +1168,7 @@ export function DraftWorkspace({
         onChange={(bodyHtml) => updateEditing({ bodyHtml })}
         onUploadFile={uploadImage}
         onImportUrl={importImage}
-        onRequestCompletion={editing.provenance.contentPackageId
+        onRequestCompletion={editing.provenance.contentPackageId && onCompleteInline
           ? (input, signal, onPreview) => onCompleteInline(editing.id, input, signal, onPreview)
           : undefined}
       />
@@ -1375,6 +1383,15 @@ export function DraftWorkspace({
             <div className="utility-drawer-scroll">
               {utilityTab === "agent" ? (
                 <div className="article-agent-panel">
+                  <section className="external-writer-bridge">
+                    <div><span className="external-writer-badge">不调用 API</span><strong>用 Gemini 网页版协作写稿</strong></div>
+                    <p>把当前草稿、来源链接、事实边界和待核对项复制成一份约束提示词；在你已有的 Google 账号里运行，再把结果贴回编辑器。</p>
+                    <div>
+                      <button type="button" className="secondary-button" onClick={() => void copyExternalWritingPrompt()}><Copy size={14} />{externalPromptCopied ? "提示词已复制" : "复制证据写作提示词"}</button>
+                      <a href="https://gemini.google.com/app" target="_blank" rel="noreferrer"><ExternalLink size={14} />打开 Gemini</a>
+                    </div>
+                    <small>网页结果不会自动覆盖草稿。粘贴回来后仍需保存，并在“资料”中核对标为待确认的事实。</small>
+                  </section>
                   <div className="agent-mode-switch" role="tablist" aria-label="文章 Agent 类型">
                     <button role="tab" aria-selected={agentMode === "analysis"} className={agentMode === "analysis" ? "active" : ""} onClick={() => setAgentMode("analysis")}><BrainCircuit size={14} />理解文章</button>
                     <button role="tab" aria-selected={agentMode === "optimization"} className={agentMode === "optimization" ? "active" : ""} onClick={() => setAgentMode("optimization")}><WandSparkles size={14} />优化文稿</button>

@@ -68,6 +68,48 @@ const detectedVendor = (title: string): { vendor: ModelResearchVendor; modelSlug
   return undefined;
 };
 
+export const modelResearchVendorFor = (title: string): ModelResearchVendor | undefined =>
+  detectedVendor(title)?.vendor;
+
+export const firstPartyModelVendorFor = (identity: {
+  sourceName?: string;
+  url?: string;
+}): ModelResearchVendor | undefined => {
+  let hostname = "";
+  let pathname = "";
+  try {
+    const url = new URL(identity.url ?? "");
+    hostname = url.hostname.toLocaleLowerCase();
+    pathname = url.pathname.toLocaleLowerCase();
+  } catch {
+    // The caller's URL validation owns malformed URLs. This helper only
+    // classifies a source when its first-party identity is unambiguous.
+  }
+  const sourceName = (identity.sourceName ?? "").toLocaleLowerCase();
+  if (hostname === "openai.com" || hostname.endsWith(".openai.com") || /\bopenai\b/u.test(sourceName)) {
+    return "openai";
+  }
+  if (hostname === "anthropic.com" || hostname.endsWith(".anthropic.com")
+    || hostname === "claude.com" || hostname.endsWith(".claude.com")
+    || /\b(?:anthropic|claude platform)\b/u.test(sourceName)) {
+    return "anthropic";
+  }
+  if (hostname === "deepseek.com" || hostname.endsWith(".deepseek.com") || /\bdeepseek\b/u.test(sourceName)) {
+    return "deepseek";
+  }
+  if (hostname === "qwen.ai" || hostname.endsWith(".qwen.ai")
+    || (hostname.endsWith("alibabacloud.com") && pathname.includes("/model-studio"))
+    || /(?:\bqwen\b|通义千问|alibaba cloud model studio)/u.test(sourceName)) {
+    return "qwen";
+  }
+  if (hostname === "ai.google.dev" || hostname === "deepmind.google"
+    || hostname.endsWith(".deepmind.google")
+    || /(?:\bgemini\b|google deepmind model cards)/u.test(sourceName)) {
+    return "gemini";
+  }
+  return undefined;
+};
+
 /**
  * Stable, vendor-owned pages used to fill a model-release dossier. Exact
  * announcement URLs still come from SourceDesk/X; these targets fill only

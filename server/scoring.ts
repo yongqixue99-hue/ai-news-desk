@@ -14,6 +14,7 @@ import type {
 
 const consequencePattern = /launch|release|announc|acquir|funding|ban|law|regulat|safety|security|chip|model|api|pricing|partnership|lawsuit|fine|breach|open.source|benchmark/i;
 const rumorPattern = /rumou?r|reportedly|may launch|could launch|anonymous sources?|leak(?:ed)?/i;
+const promotionalEventPattern = /\b(?:(?:co)?workshop|webinar|founder house|register now|join us)\b/i;
 const officialPattern = /^(OpenAI|Anthropic|Google DeepMind)$|OpenAI 官方|Anthropic 官方|LPL 官方|LoL Esports|DOTA2 官方|DOTA2 国服|Counter-Strike 官方|CS2 国服|官方|official/i;
 const strongMediaPattern = /Reuters|Associated Press|AP AI|BBC|Bloomberg|华盛顿邮报|CNN/i;
 const specialistMediaPattern = /TechCrunch|Ars Technica|MIT Technology Review|VentureBeat|IGN|The Verge|Wired|GamesIndustry|Polygon|Dot Esports|HLTV|Inven Global/i;
@@ -116,7 +117,12 @@ export const candidateScore = (
       : 1;
   const timeliness = ageHours <= Math.min(12, windowHours) ? 2 : ageHours <= windowHours ? 1 : 0;
   const confirmation = 0;
-  const penalty = rumorPattern.test(text) ? 2 : 0;
+  // Workshops and registration pages are useful discovery signals, but they
+  // should not tie an actual product/model release merely because they are
+  // newer. Keep them eligible while applying a transparent, bounded penalty.
+  const rumorPenalty = rumorPattern.test(text) ? 2 : 0;
+  const promotionalEventPenalty = promotionalEventPattern.test(`${text} ${item.url}`) ? 2 : 0;
+  const penalty = Math.min(4, rumorPenalty + promotionalEventPenalty);
   const breakdown = { consequence, novelty, evidence, relevance, timeliness, confirmation, penalty };
   const total = clamp(
     consequence + novelty + evidence + relevance + timeliness + confirmation - penalty,

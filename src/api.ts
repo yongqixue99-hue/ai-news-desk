@@ -524,6 +524,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ url }),
     }),
+  intakeXPost: (url: string, text: string, author?: string) =>
+    request<IntakeReviewRequestResult>("/api/intakes/x-post", {
+      method: "POST",
+      body: JSON.stringify({ url, text, author }),
+    }),
   intakeScreenshot: async (file: File, note?: string) => {
     const response = await fetch("/api/intakes/screenshot", {
       method: "POST",

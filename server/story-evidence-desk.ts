@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { extractPage } from "./extractor.js";
-import { modelResearchTargetsFor } from "./model-release-research.js";
+import {
+  firstPartyModelVendorFor,
+  modelResearchTargetsFor,
+  modelResearchVendorFor,
+} from "./model-release-research.js";
 import { collectPortableStructuredSources } from "./structured-collector.js";
 import { rawItemToCandidate } from "./scoring.js";
 import { retainWorkflowRuns } from "./run-retention.js";
@@ -81,6 +85,15 @@ const normalizedDomain = (value: string) => {
 const itemSourceName = (item: RawHorizonItem) => {
   const feedName = item.metadata?.feed_name;
   return (typeof feedName === "string" && feedName.trim() ? feedName : item.author || item.source_type).trim();
+};
+
+const matchesReleaseVendor = (storyTitle: string, item: RawHorizonItem) => {
+  const storyVendor = modelResearchVendorFor(storyTitle);
+  const materialVendor = firstPartyModelVendorFor({
+    sourceName: itemSourceName(item),
+    url: item.url,
+  });
+  return !storyVendor || !materialVendor || storyVendor === materialVendor;
 };
 
 const independentRole = (item: RawHorizonItem) => ["official", "research", "verification"]
@@ -308,6 +321,7 @@ export const createStoryEvidenceDesk = (dependencies: Partial<StoryEvidenceDeskD
           .filter(({ item }) => !existingUrls.has(item.url.replace(/[?#].*$/u, "")))
           .filter(({ item }) => !independentlyMatchedUrls.has(item.url.replace(/[?#].*$/u, "")))
           .filter(({ item }) => releaseResearchRole(item))
+          .filter(({ item }) => matchesReleaseVendor(story.originalTitle, item))
           .filter(({ item }) => corroboratesReleaseMaterial(story.originalTitle, item, incompleteDossierFacets))
           .filter(({ item }, index, items) => items.findIndex(({ item: entry }) => entry.url.replace(/[?#].*$/u, "") === item.url.replace(/[?#].*$/u, "")) === index)
           .slice(0, 6)

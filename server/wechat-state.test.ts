@@ -5,7 +5,7 @@ import { createDefaultState, upgradeState } from "./defaults.js";
 test("new workspaces start with a safe unconfigured WeChat draft channel", () => {
   const state = createDefaultState();
 
-  assert.equal(state.version, 14);
+  assert.equal(state.version, 15);
   assert.deepEqual(state.settings.wechat, {
     accountName: "",
     appId: "",
@@ -23,7 +23,7 @@ test("legacy state gains WeChat settings without losing existing preferences", (
 
   const upgraded = upgradeState(legacy as never);
 
-  assert.equal(upgraded.version, 14);
+  assert.equal(upgraded.version, 15);
   assert.equal(upgraded.settings.scheduleTime, "21:15");
   assert.deepEqual(upgraded.settings.wechat, {
     accountName: "",

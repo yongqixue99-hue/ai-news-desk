@@ -8,7 +8,7 @@ import type {
   PublisherReceipt,
 } from "./publisher-preflight.js";
 
-export const WORKFLOW_STATE_VERSION = 14 as const;
+export const WORKFLOW_STATE_VERSION = 15 as const;
 
 export type RunStatus =
   | "queued"
@@ -305,6 +305,8 @@ export interface WeChatConnectionResult {
 export interface Settings {
   windowHours: number;
   collectionTopics: CollectionTopicId[];
+  /** Hard user-owned boundary for connectors and providers that can charge per request. */
+  spendingPolicy: "zero-cost" | "allow-metered";
   /** Apply a small, capped editorial preference adjustment to candidate order. */
   personalizationEnabled: boolean;
   /** Keep notifications in the drawer without showing unread red badges. */

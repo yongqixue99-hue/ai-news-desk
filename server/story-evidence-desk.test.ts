@@ -255,6 +255,47 @@ test("a strong model-release story can still fill a missing dossier facet from o
   assert.ok(updated?.signals.some((signal) => signal.url.includes("/pricing")));
 });
 
+test("model-release research never admits another vendor's first-party documentation", async () => {
+  let state: WorkflowState = createDefaultState();
+  const official = candidate({
+    id: "fable-owner-vendor-guard",
+    rawId: "fable-owner-vendor-guard",
+    sourceName: "Anthropic",
+    title: "Anthropic releases Claude Fable 5.1",
+    url: "https://www.anthropic.com/claude-fable-5-1",
+    canonicalUrl: "https://www.anthropic.com/claude-fable-5-1",
+    excerpt: "Anthropic released Claude Fable 5.1.",
+    publishedAt: "2026-09-01T13:00:00.000Z",
+  });
+  state.runs = [run(official)];
+  const story = buildStories(state, "2026-09-01T20:00:00.000Z")[0]!;
+  const desk = createStoryEvidenceDesk({
+    readState: async () => state,
+    updateState: async (mutate) => mutate(state),
+    search: async () => ({
+      items: [{
+        id: "openai-docs-contamination",
+        source_type: "model-research",
+        title: "Models | OpenAI API",
+        url: "https://developers.openai.com/api/docs/models",
+        content: "OpenAI API pricing documentation compares Claude Fable 5.1 pricing and benchmark results.",
+        published_at: "2026-09-01T13:05:00.000Z",
+        fetched_at: "2026-09-01T20:00:00.000Z",
+        metadata: { feed_name: "OpenAI API Docs", source_role: "official" },
+      }],
+      failures: {},
+      searchedSourceCount: 1,
+    }),
+    now: () => new Date("2026-09-01T20:00:00.000Z"),
+  });
+
+  const result = await desk.supplement(story.id);
+  const updated = storyById(state, story.id, "2026-09-01T20:00:00.000Z");
+
+  assert.equal(result.addedSourceCount, 0);
+  assert.deepEqual(updated?.signals.map((signal) => signal.sourceName), ["Anthropic"]);
+});
+
 test("evidence supplementation rejects discovery feeds and same-publisher syndication", async () => {
   let state: WorkflowState = createDefaultState();
   state.runs = [run(candidate())];

@@ -5,6 +5,7 @@ import {
   Image as ImageIcon,
   Link2,
   LoaderCircle,
+  MessageSquareText,
   ScanText,
   Settings2,
   Upload,
@@ -14,7 +15,7 @@ import type { AiProviderConfig, EvidenceReviewSelection, IntakeReviewRecord } fr
 import { useDialogA11y } from "../hooks/useDialogA11y";
 import { getRovingTabTarget } from "../hooks/rovingTabs";
 
-const quickDraftModes = ["screenshot", "url"] as const;
+const quickDraftModes = ["screenshot", "url", "x-post"] as const;
 type QuickDraftMode = (typeof quickDraftModes)[number];
 
 interface QuickDraftModalProps {
@@ -22,6 +23,7 @@ interface QuickDraftModalProps {
   onClose: () => void;
   onOpenAiSettings: () => void;
   onSubmitUrl: (url: string) => Promise<IntakeReviewRecord>;
+  onSubmitXPost: (url: string, text: string, author?: string) => Promise<IntakeReviewRecord>;
   onSubmitScreenshot: (file: File, note?: string) => Promise<IntakeReviewRecord>;
   onConfirmReview: (reviewId: string, selection: EvidenceReviewSelection) => Promise<void>;
 }
@@ -31,12 +33,16 @@ export function QuickDraftModal({
   onClose,
   onOpenAiSettings,
   onSubmitUrl,
+  onSubmitXPost,
   onSubmitScreenshot,
   onConfirmReview,
 }: QuickDraftModalProps) {
   const [mode, setMode] = useState<QuickDraftMode>("screenshot");
   const [file, setFile] = useState<File>();
   const [url, setUrl] = useState("");
+  const [xUrl, setXUrl] = useState("");
+  const [xText, setXText] = useState("");
+  const [xAuthor, setXAuthor] = useState("");
   const [note, setNote] = useState("");
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -46,7 +52,7 @@ export function QuickDraftModal({
   const [includedImages, setIncludedImages] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const tabRefs = useRef<Record<QuickDraftMode, HTMLButtonElement | null>>({ screenshot: null, url: null });
+  const tabRefs = useRef<Record<QuickDraftMode, HTMLButtonElement | null>>({ screenshot: null, url: null, "x-post": null });
   const dialogRef = useDialogA11y<HTMLElement>({ open: true, onClose: busy ? undefined : onClose, initialFocusRef: closeButtonRef });
   const previewUrl = useMemo(() => file ? URL.createObjectURL(file) : undefined, [file]);
 
@@ -64,7 +70,9 @@ export function QuickDraftModal({
     try {
       const next = mode === "url"
         ? await onSubmitUrl(url.trim())
-        : file ? await onSubmitScreenshot(file, note.trim() || undefined) : undefined;
+        : mode === "x-post"
+          ? await onSubmitXPost(xUrl.trim(), xText.trim(), xAuthor.trim() || undefined)
+          : file ? await onSubmitScreenshot(file, note.trim() || undefined) : undefined;
       if (!next) return;
       setReview(next);
       setIncludedImages(next.bundle.imageCandidates.filter((image) => image.selectedByDefault).map((image) => image.id));
@@ -95,7 +103,9 @@ export function QuickDraftModal({
 
   const canSubmit = mode === "url"
     ? /^https?:\/\//i.test(url.trim())
-    : Boolean(file && provider.supportsVision);
+    : mode === "x-post"
+      ? /^https:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/]+\/status\/\d+/i.test(xUrl.trim()) && xText.trim().length >= 10
+      : Boolean(file && provider.supportsVision);
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) => {
     const nextIndex = getRovingTabTarget(quickDraftModes.length, currentIndex, event.key);
@@ -119,7 +129,7 @@ export function QuickDraftModal({
           <span className="quick-draft-icon"><ScanText size={20} /></span>
           <div>
             <h2 id="quick-draft-title">{review ? "复核提取证据" : "快速生成可编辑草稿"}</h2>
-            <p id="quick-draft-description">{review ? "确认保留的正文、被剔除内容和候选图片，再进入成稿。" : "提交截图或网页链接，先复核提取结果，再生成草稿。"}</p>
+            <p id="quick-draft-description">{review ? "确认保留的正文、被剔除内容和候选图片，再进入成稿。" : "提交截图、网页链接或手工复制的 X 原帖，先复核证据，再生成草稿。"}</p>
           </div>
           <button type="button" ref={closeButtonRef} className="modal-close" aria-label="关闭快速草稿" disabled={busy} onClick={onClose}><X size={17} /></button>
         </header>
@@ -156,11 +166,14 @@ export function QuickDraftModal({
           <button type="button" ref={(element) => { tabRefs.current.url = element; }} id="quick-tab-url" role="tab" aria-selected={mode === "url"} aria-controls="quick-panel-url" tabIndex={mode === "url" ? 0 : -1} className={mode === "url" ? "active" : ""} onKeyDown={(event) => handleTabKeyDown(event, 1)} onClick={() => setMode("url")}>
             <Link2 size={16} />链接成稿
           </button>
+          <button type="button" ref={(element) => { tabRefs.current["x-post"] = element; }} id="quick-tab-x-post" role="tab" aria-selected={mode === "x-post"} aria-controls="quick-panel-x-post" tabIndex={mode === "x-post" ? 0 : -1} className={mode === "x-post" ? "active" : ""} onKeyDown={(event) => handleTabKeyDown(event, 2)} onClick={() => setMode("x-post")}>
+            <MessageSquareText size={16} />X 原帖
+          </button>
         </div>
 
         <div className="quick-provider-state">
           <span><Check size={13} />当前引擎：{provider.name}</span>
-          <small>{mode === "screenshot" ? provider.supportsVision ? `使用 ${provider.visionModel || provider.model} 识图` : "当前引擎不支持识图" : `使用 ${provider.model} 清理并成稿`}</small>
+          <small>{mode === "screenshot" ? provider.supportsVision ? `使用 ${provider.visionModel || provider.model} 识图` : "当前引擎不支持识图" : mode === "x-post" ? "导入不调用 X API；确认后再成稿" : `使用 ${provider.model} 清理并成稿`}</small>
         </div>
 
         <div id="quick-panel-screenshot" className="quick-draft-panel" role="tabpanel" aria-labelledby="quick-tab-screenshot" hidden={mode !== "screenshot"}>
@@ -204,6 +217,22 @@ export function QuickDraftModal({
               <div className="quick-url-input"><Link2 size={16} /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/article" /></div>
             </label>
             <p>系统会识别正文区域、过滤导航与登录信息，并下载页面中与正文直接相关的候选图片。遇到登录墙或动态页面时，改用截图入口更稳定。</p>
+        </div>
+        <div id="quick-panel-x-post" className="quick-draft-panel link-panel x-post-panel" role="tabpanel" aria-labelledby="quick-tab-x-post" hidden={mode !== "x-post"}>
+          <div className="x-post-free-note"><MessageSquareText size={18} /><span><strong>免费人工接力</strong><small>不调用 X API，不保存登录 Cookie。你负责从浏览器复制公开原帖，工作台负责留证、复核和成稿。</small></span></div>
+          <label>
+            <span>X 原帖链接</span>
+            <div className="quick-url-input"><Link2 size={16} /><input value={xUrl} onChange={(event) => setXUrl(event.target.value)} placeholder="https://x.com/OpenAI/status/..." /></div>
+          </label>
+          <label>
+            <span>账号 <small>可选，会从链接自动识别</small></span>
+            <input value={xAuthor} maxLength={80} onChange={(event) => setXAuthor(event.target.value)} placeholder="@OpenAI" />
+          </label>
+          <label>
+            <span>粘贴帖子正文</span>
+            <textarea value={xText} maxLength={12000} onChange={(event) => setXText(event.target.value)} placeholder="复制原帖全文；如果是串文，请按原顺序一起粘贴。" />
+          </label>
+          <p>导入后仍会显示“账号身份与上下文待核对”。若帖子带图，请再用“截图成稿”导入原图画面，或补充官网一手链接。</p>
         </div>
         </>}
 

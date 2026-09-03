@@ -166,6 +166,7 @@ import { hydrateStoryAssets } from "./visual-desk.js";
 import {
   confirmIntakeReview,
   createLinkIntakeReview,
+  createManualXPostIntakeReview,
   createScreenshotIntakeReview,
   listIntakeReviews,
 } from "./intake-review-service.js";
@@ -182,6 +183,11 @@ import {
 } from "./storage.js";
 import { normalizeTopicIds } from "./topics.js";
 import { sourceRoleFor } from "./source-routing.js";
+import {
+  applySpendingPolicy,
+  assertMeteredProviderAllowed,
+  assertMeteredSourceAllowed,
+} from "./spending-policy.js";
 import {
   appendWorkflowNotification,
   markAllWorkflowNotificationsRead,
@@ -1149,7 +1155,14 @@ app.patch(
   "/api/settings",
   asyncRoute(async (request, response) => {
     const allowed = request.body as Partial<Settings>;
+    if (allowed.spendingPolicy !== undefined
+      && allowed.spendingPolicy !== "zero-cost"
+      && allowed.spendingPolicy !== "allow-metered") {
+      response.status(400).json({ error: "费用策略不正确" });
+      return;
+    }
     const settings = await updateState((state) => {
+      const requestedSpendingPolicy = allowed.spendingPolicy;
       const next = {
         ...state.settings,
         ...allowed,
@@ -1168,8 +1181,9 @@ app.patch(
       next.personalizationEnabled = next.personalizationEnabled !== false;
       next.notificationsMuted = next.notificationsMuted !== false;
       state.settings = next;
+      if (requestedSpendingPolicy) applySpendingPolicy(state, requestedSpendingPolicy);
       if (typeof allowed.personalizationEnabled === "boolean") reapplyPersonalizationToRuns(state);
-      return next;
+      return state.settings;
     });
     response.json(settings);
   }),
@@ -1266,6 +1280,7 @@ app.patch(
       clearApiKey?: boolean;
       active?: boolean;
     };
+    if (body.active) assertMeteredProviderAllowed(current, existing);
     let keyHint: string | undefined;
     if (typeof body.apiKey === "string" && body.apiKey.trim()) {
       keyHint = await setProviderApiKey(providerId, body.apiKey);
@@ -1332,6 +1347,8 @@ app.post(
       return;
     }
 
+    assertMeteredProviderAllowed(current, provider);
+
     const result = await probeProviderConnection(provider);
     const aiSettings = await updateState((state) => {
       const target = state.aiSettings.providers.find((entry) => entry.id === providerId);
@@ -1356,6 +1373,7 @@ app.patch(
     const aiSettings = await updateState((state) => {
       const provider = state.aiSettings.providers.find((entry) => entry.id === providerId);
       if (!provider) throw new Error("AI 厂商不存在");
+      assertMeteredProviderAllowed(state, provider);
       if (provider.kind !== "codex-cli" && !provider.apiKeyConfigured) {
         throw new Error("请先配置这个厂商的 API Key");
       }
@@ -1529,6 +1547,8 @@ app.post(
       response.status(400).json({ error: "不支持的新闻源类型" });
       return;
     }
+    const spendingState = await readState();
+    assertMeteredSourceAllowed(spendingState, { kind: body.kind, name: body.name.trim() });
     if (body.kind === "rss" && !body.url) {
       response.status(400).json({ error: "RSS 新闻源必须填写地址" });
       return;
@@ -1585,6 +1605,12 @@ app.patch(
     if (patch.enabled === undefined && patch.selected === undefined) {
       response.status(400).json({ error: "批量操作必须指定启用状态或默认采集状态" });
       return;
+    }
+    const spendingState = await readState();
+    if (patch.enabled === true || patch.selected === true) {
+      for (const source of spendingState.sources.filter((entry) => sourceIds.includes(entry.id))) {
+        assertMeteredSourceAllowed(spendingState, source);
+      }
     }
     const sources = await updateState((state) => batchUpdateSources(state, sourceIds, patch));
     response.json({ sources, updated: sources.length });
@@ -1657,6 +1683,9 @@ app.patch(
       return;
     }
     if (nextKind === "x") {
+      if (patch.enabled === true || patch.selected === true) {
+        assertMeteredSourceAllowed(currentState, { kind: nextKind, name: existing.name });
+      }
       patch.role = "official";
       patch.discoveryOnly = false;
       if (!nextHomepageUrl) patch.homepageUrl = "https://x.com/";
@@ -1682,6 +1711,7 @@ app.post(
       response.status(404).json({ error: "新闻源不存在" });
       return;
     }
+    assertMeteredSourceAllowed(current, source);
     const result = await probeSource(source);
     const updated = await updateState((state) => {
       const target = state.sources.find((entry) => entry.id === request.params.sourceId);
@@ -1791,6 +1821,12 @@ app.post(
     const sourceIds = Array.isArray(body.sourceIds)
       ? body.sourceIds.filter((id): id is string => typeof id === "string").slice(0, 50)
       : undefined;
+    if (sourceIds?.length) {
+      const spendingState = await readState();
+      for (const source of spendingState.sources.filter((entry) => sourceIds.includes(entry.id))) {
+        assertMeteredSourceAllowed(spendingState, source);
+      }
+    }
     const result = await createCollectionRun({
       dateFrom,
       dateTo,
@@ -2173,6 +2209,7 @@ app.patch(
     const aiSettings = await updateState((state) => {
       const provider = state.aiSettings.providers.find((entry) => entry.id === providerId);
       if (!provider) throw new Error("AI 厂商不存在");
+      assertMeteredProviderAllowed(state, provider);
       if (provider.kind !== "openai-compatible") {
         throw new Error("Tab 补全需要低延迟 API；本机 Codex 登录适合长任务，不用于逐字补全");
       }
@@ -2183,6 +2220,24 @@ app.patch(
       return state.aiSettings;
     });
     response.json(aiSettings);
+  }),
+);
+
+app.post(
+  "/api/intakes/x-post",
+  asyncRoute(async (request, response) => {
+    try {
+      response.status(201).json({
+        review: await createManualXPostIntakeReview({
+          url: typeof request.body?.url === "string" ? request.body.url : "",
+          text: typeof request.body?.text === "string" ? request.body.text : "",
+          author: typeof request.body?.author === "string" ? request.body.author : undefined,
+          title: typeof request.body?.title === "string" ? request.body.title : undefined,
+        }),
+      });
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
   }),
 );
 
@@ -2217,6 +2272,7 @@ app.post(
       response.json({ available: false, reason: "请先在 AI 设置中选择一个 Tab 补全模型" });
       return;
     }
+    assertMeteredProviderAllowed(state, provider);
     if (!provider.apiKeyConfigured) {
       response.json({ available: false, reason: `请先在 AI 设置中配置 ${provider.name} 的 API Key` });
       return;

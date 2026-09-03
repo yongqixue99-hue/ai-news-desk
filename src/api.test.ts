@@ -102,6 +102,33 @@ test("the completion provider can be assigned independently from long-form Agent
   }
 });
 
+test("manual X intake posts only the user-copied evidence to the free intake endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured: { input?: RequestInfo | URL; init?: RequestInit } = {};
+  globalThis.fetch = async (input, init) => {
+    captured = { input, init };
+    return Response.json({ review: { id: "intake-x" } }, { status: 201 });
+  };
+  try {
+    const result = await api.intakeXPost(
+      "https://x.com/OpenAI/status/123",
+      "Copied public post body with enough detail.",
+      "@OpenAI",
+    );
+
+    assert.equal(captured.input, "/api/intakes/x-post");
+    assert.equal(captured.init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(captured.init?.body)), {
+      url: "https://x.com/OpenAI/status/123",
+      text: "Copied public post body with enough detail.",
+      author: "@OpenAI",
+    });
+    assert.equal(result.review.id, "intake-x");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("portable archive inspection uploads the selected tar.gz as a raw dry-run request", async () => {
   const originalFetch = globalThis.fetch;
   const file = new File(["archive"], "mac-backup.tar.gz", { type: "application/gzip" });

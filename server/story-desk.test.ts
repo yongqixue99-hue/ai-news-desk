@@ -272,6 +272,65 @@ test("model releases expose a research dossier instead of pretending one headlin
   assert.deepEqual(story?.releaseDossier?.missingLabels, ["跑分与评测", "安全与模型卡", "可用图片"]);
 });
 
+test("StoryDesk quarantines historical model research from a different first-party vendor", () => {
+  const state = createDefaultState();
+  const owner = candidate("anthropic-fable-owner", {
+    sourceName: "Anthropic",
+    sourceRole: "official",
+    title: "Anthropic releases Claude Fable 5.1",
+    url: "https://www.anthropic.com/claude-fable-5-1",
+    canonicalUrl: "https://www.anthropic.com/claude-fable-5-1",
+    excerpt: "Anthropic released Claude Fable 5.1.",
+  });
+  const contaminant = candidate("openai-docs-contamination", {
+    sourceType: "model-research",
+    sourceName: "OpenAI API Docs",
+    sourceRole: "official",
+    title: "Models | OpenAI API",
+    url: "https://developers.openai.com/api/docs/models",
+    canonicalUrl: "https://developers.openai.com/api/docs/models",
+    excerpt: "OpenAI API pricing documentation compares Claude Fable 5.1 pricing and benchmarks.",
+    evidenceRelation: "research-material",
+    evidenceGroupUrl: owner.url,
+  });
+  state.runs = [run("run-fable-vendor-contamination", [owner, contaminant])];
+
+  const story = buildStories(state, "2026-08-30T02:00:00.000Z")[0];
+
+  assert.deepEqual(story?.signals.map((signal) => signal.sourceName), ["Anthropic"]);
+  assert.equal(story?.factSourceCount, 1);
+  assert.equal(story?.sourceCount, 1);
+});
+
+test("a later duplicate observation cannot move the Story publication time forward", () => {
+  const state = createDefaultState();
+  const firstObservation = candidate("fable-original-time", {
+    sourceName: "Anthropic",
+    title: "Anthropic releases Claude Fable 5.1",
+    url: "https://www.anthropic.com/claude-fable-5-1",
+    canonicalUrl: "https://www.anthropic.com/claude-fable-5-1",
+    publishedAt: "2026-09-01T18:01:14.000Z",
+    fetchedAt: "2026-09-01T18:05:00.000Z",
+  });
+  const laterObservation = candidate("fable-shared-sitemap-time", {
+    sourceName: "Anthropic",
+    title: "Anthropic releases Claude Fable 5.1",
+    url: "https://www.anthropic.com/claude-fable-5-1",
+    canonicalUrl: "https://www.anthropic.com/claude-fable-5-1",
+    publishedAt: "2026-09-03T13:43:02.000Z",
+    fetchedAt: "2026-09-03T13:47:20.000Z",
+  });
+  state.runs = [
+    run("run-fable-later-observation", [laterObservation]),
+    run("run-fable-first-observation", [firstObservation]),
+  ];
+
+  const story = buildStories(state, "2026-09-03T14:00:00.000Z")[0];
+
+  assert.equal(story?.publishedAt, "2026-09-01T18:01:14.000Z");
+  assert.equal(story?.lastSeenAt, "2026-09-03T13:47:20.000Z");
+});
+
 test("an officially announced upcoming model stays a preview with unknown fields visible", () => {
   const state = createDefaultState();
   state.runs = [run("run-astra", [candidate("openai-astra", {

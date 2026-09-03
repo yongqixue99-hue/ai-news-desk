@@ -14,6 +14,7 @@ import { interleaveBySource } from "./source-diversity.js";
 import { hasCurrentPublication } from "./publication-state.js";
 import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
 import { uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
+import { firstPartyModelVendorFor, modelResearchVendorFor } from "./model-release-research.js";
 import type { Candidate, CollectionTopicId, SourceConfig, WorkflowState } from "./types.js";
 
 interface CandidateRecord {
@@ -570,7 +571,26 @@ const releaseDossierFor = (
 };
 
 const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
-  const records = [...cluster.records].sort((left, right) => timeFor(right) - timeFor(left));
+  const allRecords = [...cluster.records].sort((left, right) => timeFor(right) - timeFor(left));
+  const storyVendor = [...allRecords]
+    .filter((record) => record.candidate.evidenceRelation !== "research-material")
+    .sort((left, right) => roleRank(right.candidate) - roleRank(left.candidate))
+    .map((record) => modelResearchVendorFor(recordTitles(record).join(" "))
+      ?? firstPartyModelVendorFor({
+        sourceName: record.candidate.sourceName,
+        url: record.candidate.canonicalUrl || record.candidate.url,
+      }))
+    .find(Boolean);
+  // Historical evidence runs remain recoverable, but a first-party document
+  // owned by another known model vendor cannot participate in this Story.
+  const records = allRecords.filter((record) => {
+    if (record.candidate.evidenceRelation !== "research-material" || !storyVendor) return true;
+    const materialVendor = firstPartyModelVendorFor({
+      sourceName: record.candidate.sourceName,
+      url: record.candidate.canonicalUrl || record.candidate.url,
+    });
+    return !materialVendor || materialVendor === storyVendor;
+  });
   const uniqueSignals = uniqueBy(records, (record) => `${record.runId}:${record.candidate.id}`);
   const factRecords = uniqueBy(
     records.filter((record) => isFactBearingCandidate(record.candidate)),
@@ -593,10 +613,19 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   ).slice(0, 24);
   const localImages = images.filter(isLocalImageFileReady);
   const publishReadyImages = localImages.filter((image) => isNeutralImagePublishReady(image, now));
-  const publishedTimes = records.map((record) => Date.parse(record.candidate.publishedAt)).filter(Number.isFinite);
+  const factualPublishedTimes = records
+    .filter((record) => isFactBearingCandidate(record.candidate))
+    .map((record) => Date.parse(record.candidate.publishedAt))
+    .filter(Number.isFinite);
+  const publishedTimes = factualPublishedTimes.length
+    ? factualPublishedTimes
+    : records.map((record) => Date.parse(record.candidate.publishedAt)).filter(Number.isFinite);
   const fetchedTimes = records.map(timeFor).filter(Number.isFinite);
   const fallbackTime = Date.parse(now);
-  const publishedAt = new Date(publishedTimes.length ? Math.max(...publishedTimes) : fallbackTime).toISOString();
+  // `publishedAt` is the event's original factual publication time. Later
+  // observations belong in `lastSeenAt`; letting them advance this timestamp
+  // silently resurrects old Stories and lets sitemap build times distort rank.
+  const publishedAt = new Date(publishedTimes.length ? Math.min(...publishedTimes) : fallbackTime).toISOString();
   const firstSeenAt = new Date(fetchedTimes.length ? Math.min(...fetchedTimes) : fallbackTime).toISOString();
   const lastSeenAt = new Date(fetchedTimes.length ? Math.max(...fetchedTimes) : fallbackTime).toISOString();
   const ageHours = Math.max(0, (Date.parse(now) - Date.parse(publishedAt)) / 3_600_000);

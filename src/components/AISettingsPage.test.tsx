@@ -8,7 +8,9 @@ import { AISettingsPage } from "./AISettingsPage.js";
 test("AI settings separates the low-cost completion engine from long-form Agent roles", () => {
   const markup = renderToStaticMarkup(createElement(AISettingsPage, {
     aiSettings: defaultAiSettings(),
+    spendingPolicy: "zero-cost" as const,
     materials: [],
+    onSaveSpendingPolicy: async () => undefined,
     onSaveProvider: async () => undefined,
     onTestProvider: async () => ({
       providerId: "deepseek",
@@ -31,6 +33,10 @@ test("AI settings separates the low-cost completion engine from long-form Agent 
 
   assert.match(markup, /补全.*停顿后预测下一句或下一段/u);
   assert.match(markup, /DeepSeek/u);
+  assert.match(markup, /X.*Gemini.*零新增支出/u);
+  assert.match(markup, /只阻止 X 自动监控和 Gemini API/u);
+  assert.match(markup, /现有 ChatGPT 登录.*不单独走 API 账单/u);
+  assert.match(markup, /Gemini API.*已锁定/u);
   assert.match(markup, /用于补全/u);
   assert.match(markup, /本机受保护存储/u);
   assert.doesNotMatch(markup, /这台 Mac/u);

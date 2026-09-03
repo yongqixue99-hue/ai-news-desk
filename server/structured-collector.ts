@@ -12,6 +12,7 @@ import type {
 
 const maximumFeedBytes = 4 * 1024 * 1024;
 const maximumItemsPerFeed = 100;
+const minimumSharedSitemapLastmodCount = 10;
 const hackerNewsTopStories = "https://hacker-news.firebaseio.com/v0/topstories.json";
 
 type CollectorFetcher = (url: string | URL, init: RequestInit) => Promise<Response>;
@@ -94,7 +95,7 @@ export const parsePortableFeed = (
   const $ = cheerio.load(xml, { xmlMode: true });
   const entries = $("item, entry").toArray().slice(0, maximumItemsPerFeed);
   if (!entries.length) {
-    const sitemapEntries = $("urlset > url").toArray()
+    const parsedSitemapEntries = $("urlset > url").toArray()
       .map((node) => {
         const entry = $(node);
         const url = absoluteHttpUrl(directChild($, entry, ["loc"]), input.feedUrl);
@@ -113,8 +114,33 @@ export const parsePortableFeed = (
           publishedAt,
         };
       })
-      .filter((entry): entry is { url: string; title: string; publishedAt: string | undefined } => Boolean(entry))
-      .sort((left, right) => Date.parse(right.publishedAt ?? "") - Date.parse(left.publishedAt ?? ""))
+      .filter((entry): entry is { url: string; title: string; publishedAt: string | undefined } => Boolean(entry));
+    const lastmodCounts = new Map<string, number>();
+    for (const entry of parsedSitemapEntries) {
+      if (!entry.publishedAt) continue;
+      lastmodCounts.set(entry.publishedAt, (lastmodCounts.get(entry.publishedAt) ?? 0) + 1);
+    }
+    const sitemapEntries = parsedSitemapEntries
+      .map((entry) => {
+        const sharedBatch = Boolean(
+          entry.publishedAt
+          && (lastmodCounts.get(entry.publishedAt) ?? 0) >= minimumSharedSitemapLastmodCount,
+        );
+        return {
+          ...entry,
+          publishedAt: sharedBatch ? undefined : entry.publishedAt,
+          lastmodStatus: sharedBatch
+            ? "shared-batch"
+            : entry.publishedAt
+              ? "declared"
+              : "missing",
+        };
+      })
+      .sort((left, right) => {
+        const rightTime = Date.parse(right.publishedAt ?? "");
+        const leftTime = Date.parse(left.publishedAt ?? "");
+        return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+      })
       .slice(0, maximumItemsPerFeed);
     return sitemapEntries.map((entry) => ({
       id: stableItemId("rss", `${input.sourceId}:${entry.url}`),
@@ -130,6 +156,7 @@ export const parsePortableFeed = (
         source_id: input.sourceId,
         source_role: input.sourceRole,
         source_format: "sitemap",
+        sitemap_lastmod_status: entry.lastmodStatus,
         category: input.category,
         collector: "portable-typescript",
       },

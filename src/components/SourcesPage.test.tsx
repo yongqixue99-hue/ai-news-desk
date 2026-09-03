@@ -5,11 +5,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createDefaultState } from "../../server/defaults.js";
 import { SourcesPage } from "./SourcesPage.js";
 
-test("sources page exposes X credentials and identifies X as an official source adapter", () => {
+test("sources page leads with a free manual X workflow and keeps paid API monitoring locked in zero-cost mode", () => {
   const state = createDefaultState();
   const markup = renderToStaticMarkup(createElement(SourcesPage, {
     sources: state.sources,
     sourcePresets: state.sourcePresets,
+    spendingPolicy: "zero-cost",
     onSave: async () => undefined,
     onAdd: async () => undefined,
     onDelete: async () => undefined,
@@ -20,8 +21,11 @@ test("sources page exposes X credentials and identifies X as an official source 
     onDeletePreset: async () => undefined,
   }));
 
-  assert.match(markup, /X 重点账号监控/u);
-  assert.match(markup, /每 5 分钟/u);
+  assert.match(markup, /X 免费监控/u);
+  assert.match(markup, /不调用 X API/u);
+  assert.match(markup, /复制重点账号/u);
+  assert.match(markup, /付费 X API/u);
+  assert.match(markup, /零成本模式下锁定/u);
   assert.match(markup, /高管个人号只作预告线索/u);
   assert.match(markup, /type="password"/u);
   assert.match(markup, /Bearer Token/u);
@@ -33,6 +37,7 @@ test("each source exposes one clear three-state collection control and an except
   const markup = renderToStaticMarkup(createElement(SourcesPage, {
     sources: state.sources,
     sourcePresets: state.sourcePresets,
+    spendingPolicy: "zero-cost",
     onSave: async () => undefined,
     onAdd: async () => undefined,
     onDelete: async () => undefined,

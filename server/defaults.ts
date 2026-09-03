@@ -25,6 +25,7 @@ import { sortCandidates } from "./scoring.js";
 import { normalizeWorkflowNotifications } from "./notifications.js";
 import { normalizeDraftPublicationState } from "./publication-state.js";
 import { normalizeDraftCatalog } from "./draft-catalog.js";
+import { applySpendingPolicy } from "./spending-policy.js";
 
 const configuredDefaultSources: SourceConfig[] = [
   {
@@ -1384,6 +1385,7 @@ const defaultDailyAiSourceIds = new Set(
 export const defaultSettings: Settings = {
   windowHours: 48,
   collectionTopics: ["ai"],
+  spendingPolicy: "zero-cost",
   personalizationEnabled: true,
   notificationsMuted: true,
   scheduleEnabled: true,
@@ -1617,8 +1619,15 @@ const normalizeProviderHealth = (
 
 export const upgradeState = (state: WorkflowState): WorkflowState => {
   const previousVersion = Number(state.version || 0);
-  state.version = 14;
+  const storedSpendingPolicy = state.settings?.spendingPolicy;
+  state.version = WORKFLOW_STATE_VERSION;
   state.settings = { ...defaultSettings, ...state.settings };
+  state.settings.spendingPolicy = storedSpendingPolicy === "zero-cost" || storedSpendingPolicy === "allow-metered"
+    ? storedSpendingPolicy
+    : state.aiSettings?.providers?.some((provider) => provider.id === "gemini" && provider.apiKeyConfigured)
+      || state.sources?.some((source) => source.kind === "x" && source.enabled && source.selected)
+      ? "allow-metered"
+      : "zero-cost";
   state.settings.wechat = {
     ...defaultSettings.wechat,
     ...(state.settings.wechat ?? {}),
@@ -1805,7 +1814,9 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   const storedProviderHealth = state.aiSettings?.latestProviderHealth ?? {};
   state.aiSettings = {
     activeProviderId: state.aiSettings?.activeProviderId || "codex-cli",
-    completionProviderId: state.aiSettings?.completionProviderId || "deepseek",
+    completionProviderId: typeof state.aiSettings?.completionProviderId === "string"
+      ? state.aiSettings.completionProviderId
+      : "deepseek",
     analysisProviderId: state.aiSettings?.analysisProviderId || state.aiSettings?.activeProviderId || "codex-cli",
     optimizationProviderId: state.aiSettings?.optimizationProviderId || state.aiSettings?.activeProviderId || "codex-cli",
     writingReviewMode: ["auto", "minimal", "voice", "off"].includes(state.aiSettings?.writingReviewMode)
@@ -1847,9 +1858,9 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   if (!state.aiSettings.providers.some((provider) => provider.id === state.aiSettings.activeProviderId)) {
     state.aiSettings.activeProviderId = "codex-cli";
   }
-  if (!state.aiSettings.providers.some((provider) =>
+  if (state.aiSettings.completionProviderId && !state.aiSettings.providers.some((provider) =>
     provider.id === state.aiSettings.completionProviderId && provider.kind === "openai-compatible")) {
-    state.aiSettings.completionProviderId = "deepseek";
+    state.aiSettings.completionProviderId = "";
   }
   if (!state.aiSettings.providers.some((provider) => provider.id === state.aiSettings.analysisProviderId)) {
     state.aiSettings.analysisProviderId = "codex-cli";
@@ -1857,6 +1868,7 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   if (!state.aiSettings.providers.some((provider) => provider.id === state.aiSettings.optimizationProviderId)) {
     state.aiSettings.optimizationProviderId = "codex-cli";
   }
+  if (state.settings.spendingPolicy === "zero-cost") applySpendingPolicy(state, "zero-cost");
   for (const run of state.runs) {
     run.topicIds = normalizeTopicIds(run.topicIds ?? ["ai"]);
     run.keywords = run.keywords?.trim() || undefined;

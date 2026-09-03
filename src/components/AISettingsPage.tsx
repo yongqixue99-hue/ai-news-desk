@@ -40,6 +40,7 @@ import type {
   ArticleSkillScope,
   ImageMaterial,
   ProviderHealthResult,
+  Settings,
 } from "../types";
 
 const skillScopeLabels = {
@@ -55,7 +56,9 @@ const skillScopesForLabel = (skill: ArticleSkillConfig): ArticleSkillScope[] => 
 
 interface AISettingsPageProps {
   aiSettings: AiSettings;
+  spendingPolicy: Settings["spendingPolicy"];
   materials: ImageMaterial[];
+  onSaveSpendingPolicy: (policy: Settings["spendingPolicy"]) => Promise<void>;
   onSaveProvider: (
     providerId: string,
     patch: Partial<AiProviderConfig> & { apiKey?: string; clearApiKey?: boolean; active?: boolean },
@@ -138,7 +141,9 @@ function ProviderBrandIcon({ provider }: { provider: AiProviderConfig }) {
 
 export function AISettingsPage({
   aiSettings,
+  spendingPolicy,
   materials,
+  onSaveSpendingPolicy,
   onSaveProvider,
   onTestProvider,
   onSaveAgentRole,
@@ -167,6 +172,7 @@ export function AISettingsPage({
   const [roleBusy, setRoleBusy] = useState<ArticleAgentRole>();
   const [completionBusy, setCompletionBusy] = useState(false);
   const [writingModeBusy, setWritingModeBusy] = useState(false);
+  const [spendingBusy, setSpendingBusy] = useState(false);
   const [materialComposerOpen, setMaterialComposerOpen] = useState(false);
   const [materialMode, setMaterialMode] = useState<"file" | "url">("file");
   const [materialFile, setMaterialFile] = useState<File>();
@@ -177,6 +183,16 @@ export function AISettingsPage({
   const [materialCategory, setMaterialCategory] = useState<MaterialCategory>("all");
   const materialFileInput = useRef<HTMLInputElement>(null);
   const providerModelInputRef = useRef<HTMLInputElement>(null);
+
+  const saveSpendingPolicy = async (policy: Settings["spendingPolicy"]) => {
+    if (spendingBusy || policy === spendingPolicy) return;
+    setSpendingBusy(true);
+    try {
+      await onSaveSpendingPolicy(policy);
+    } finally {
+      setSpendingBusy(false);
+    }
+  };
 
   const filteredMaterials = useMemo(() => {
     const query = materialSearch.trim().toLowerCase();
@@ -356,6 +372,25 @@ export function AISettingsPage({
         </div>
       </header>
 
+      <section className={`spending-policy-panel policy-${spendingPolicy}`} aria-labelledby="spending-policy-heading">
+        <span className="spending-policy-icon"><ShieldCheck size={20} /></span>
+        <div className="spending-policy-copy">
+          <h2 id="spending-policy-heading">{spendingPolicy === "zero-cost" ? "X / Gemini 零新增支出" : "允许 X / Gemini API"}</h2>
+          <p>{spendingPolicy === "zero-cost"
+            ? "只阻止 X 自动监控和 Gemini API；DeepSeek、通义、OpenAI API 及其他 Provider 保持原配置，不在这里强行限制。"
+            : "只有你主动选择并配置的 X 或 Gemini 接口才会运行；开启此项本身不会自动启用来源或模型。"}</p>
+          <small>Gemini 可继续使用网页协作；已经保存的 Token 和密钥不会被删除。</small>
+        </div>
+        <div className="spending-policy-actions" role="group" aria-label="费用策略">
+          <button type="button" className={spendingPolicy === "zero-cost" ? "active" : ""} disabled={spendingBusy || spendingPolicy === "zero-cost"} onClick={() => void saveSpendingPolicy("zero-cost")}>
+            <LockKeyhole size={14} />{spendingPolicy === "zero-cost" ? "X / Gemini 已锁定" : "锁定 X / Gemini"}
+          </button>
+          <button type="button" className={spendingPolicy === "allow-metered" ? "active metered" : "metered"} disabled={spendingBusy || spendingPolicy === "allow-metered"} onClick={() => void saveSpendingPolicy("allow-metered")}>
+            允许 X / Gemini API
+          </button>
+        </div>
+      </section>
+
       <section className="ai-role-overview" aria-label="AI 工作角色">
         {[
           { id: "draft", label: "成稿", description: "生成快讯与正文", provider: activeProvider, icon: <Sparkles size={17} /> },
@@ -364,16 +399,19 @@ export function AISettingsPage({
           { id: "optimization", label: "优化", description: "诊断问题、提出改稿", provider: optimizationProvider, icon: <WandSparkles size={17} /> },
         ].map((slot) => {
           const health = slot.provider ? aiSettings.latestProviderHealth[slot.provider.id] : undefined;
+          const completionDisabled = slot.id === "completion" && !slot.provider;
           const presentation = slot.provider
             ? providerHealthPresentation(slot.provider, health)
-            : { tone: "neutral" as const, label: "尚未选择", detail: "请先选择模型。", stale: false };
+            : completionDisabled
+              ? { tone: "neutral" as const, label: "不会调用 API", detail: "自动 API 补全已关闭。", stale: false }
+              : { tone: "neutral" as const, label: "尚未选择", detail: "请先选择模型。", stale: false };
           return (
             <article className="ai-role-card" key={slot.id}>
               <span className="ai-role-icon">{slot.icon}</span>
               <div className="ai-role-copy">
                 <span>{slot.label}<small>{slot.description}</small></span>
-                <strong>{slot.provider?.name || "尚未选择"}</strong>
-                <small>{slot.id === "completion"
+                <strong>{completionDisabled ? "自动 API 补全已关闭" : slot.provider?.name || "尚未选择"}</strong>
+                <small>{completionDisabled ? "仍可正常手写、粘贴或使用网页协作" : slot.id === "completion"
                   ? slot.provider?.inlineCompletionModel || slot.provider?.model || "未填写模型"
                   : slot.provider?.model || "未填写模型"}</small>
               </div>
@@ -400,12 +438,16 @@ export function AISettingsPage({
             const testing = providerTestBusy === provider.id;
             const latestHealth = aiSettings.latestProviderHealth[provider.id];
             const healthView = providerHealthPresentation(provider, latestHealth);
+            const meteredLocked = spendingPolicy === "zero-cost" && (provider.id === "gemini" || /gemini/iu.test(provider.name));
             return (
-              <article className={active ? "provider-row active" : "provider-row"} key={provider.id}>
+              <article className={`${active ? "provider-row active" : "provider-row"}${meteredLocked ? " metered-locked" : ""}`} key={provider.id}>
                 <span className={`provider-logo provider-logo-${provider.id}`}><ProviderBrandIcon provider={provider} /></span>
                 <div className="provider-copy">
                   <div><strong>{provider.name}</strong>{active ? <span className="active-pill"><Check size={11} />正在成稿</span> : null}{completion ? <span className="active-pill"><Zap size={11} />{provider.apiKeyConfigured ? "正在补全" : "补全预设 · 待配置"}</span> : null}</div>
                   <p>{provider.description}</p>
+                  <small className={provider.kind === "codex-cli" ? "provider-cost-label included" : "provider-cost-label metered"}>
+                    {provider.kind === "codex-cli" ? "现有 ChatGPT 登录 · 不单独走 API 账单" : meteredLocked ? "Gemini API · 已锁定" : "按量接口 · 仅在主动启用后调用"}
+                  </small>
                   <div className="provider-capabilities">
                     <span>{provider.model || "未填写模型"}</span>
                     <span>文本成稿</span>
@@ -436,7 +478,7 @@ export function AISettingsPage({
                     <button
                       type="button"
                       className={completion ? "selected" : ""}
-                      disabled={completionBusy || provider.kind !== "openai-compatible" || !provider.apiKeyConfigured}
+                      disabled={completionBusy || meteredLocked || provider.kind !== "openai-compatible" || !provider.apiKeyConfigured}
                       title={provider.kind === "openai-compatible" ? "用这个低延迟 API 预测下一句或下一段" : "本机 Codex 适合长任务，不用于逐字补全"}
                       onClick={() => void assignCompletionProvider(provider)}
                     >
@@ -446,7 +488,7 @@ export function AISettingsPage({
                     <button
                       type="button"
                       className={aiSettings.analysisProviderId === provider.id ? "selected" : ""}
-                      disabled={Boolean(roleBusy) || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured)}
+                      disabled={Boolean(roleBusy) || meteredLocked || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured)}
                       title="用这个模型解释原文、核对草稿并回答追问"
                       onClick={() => void assignAgentRole("analysis", provider)}
                     >
@@ -456,7 +498,7 @@ export function AISettingsPage({
                     <button
                       type="button"
                       className={aiSettings.optimizationProviderId === provider.id ? "selected" : ""}
-                      disabled={Boolean(roleBusy) || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured)}
+                      disabled={Boolean(roleBusy) || meteredLocked || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured)}
                       title="用这个模型检查问题并提出一版可应用的优化稿"
                       onClick={() => void assignAgentRole("optimization", provider)}
                     >
@@ -469,7 +511,7 @@ export function AISettingsPage({
                   <button
                     type="button"
                     className="secondary-button compact provider-test-button"
-                    disabled={Boolean(providerTestBusy)}
+                    disabled={Boolean(providerTestBusy) || meteredLocked}
                     title="优先检查模型列表；不生成草稿"
                     onClick={() => void testProvider(provider)}
                   >
@@ -488,7 +530,7 @@ export function AISettingsPage({
                   <button
                     type="button"
                     className={active ? "provider-enable active" : "provider-enable"}
-                    disabled={active || activating || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured)}
+                    disabled={active || activating || meteredLocked || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured)}
                     onClick={() => void activateProvider(provider)}
                   >
                     {activating ? <LoaderCircle className="spin" size={14} /> : active ? <Check size={14} /> : null}

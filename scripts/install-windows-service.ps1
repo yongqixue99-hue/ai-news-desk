@@ -129,7 +129,7 @@ Assert-File $distEntryPath "production web entry (run npm run build first)"
 Assert-File $serviceEntryPath "Windows service entry"
 Assert-File $serverEntryPath "server entry"
 
-$nodeCommand = Get-Command node.exe -CommandType Application -ErrorAction Stop
+$nodeCommand = @(Get-Command node.exe -CommandType Application -ErrorAction Stop)[0]
 $nodePath = $nodeCommand.Source
 Assert-File $nodePath "Node.js executable"
 $nodeVersionText = (& $nodePath --version).Trim().TrimStart("v")

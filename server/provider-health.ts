@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { resolveCodexExecutable } from "./codex-executable.js";
 import { fetchRemote, readResponseBuffer, validateRemoteUrl } from "./remote-url.js";
 import { getProviderApiKey } from "./secrets.js";
 import type {
@@ -133,7 +134,8 @@ const codexHealth = async (
   dependencies: ProviderHealthDependencies,
   startedAt: number,
 ) => {
-  const version = await dependencies.runCommand("codex", ["--version"], codexProbeTimeoutMs);
+  const codexCommand = resolveCodexExecutable();
+  const version = await dependencies.runCommand(codexCommand, ["--version"], codexProbeTimeoutMs);
   if (version.timedOut) {
     return resultFor(provider, startedAt, dependencies, "error", "timeout", "Codex CLI 响应超时；请在终端运行 codex --version 检查安装。");
   }
@@ -141,7 +143,7 @@ const codexHealth = async (
     return resultFor(provider, startedAt, dependencies, "error", "not-configured", "未找到可用的 Codex CLI；请安装或更新 @openai/codex，并确认 codex 在 PATH 中。");
   }
 
-  const normalLogin = await dependencies.runCommand("codex", ["login", "status"], codexProbeTimeoutMs);
+  const normalLogin = await dependencies.runCommand(codexCommand, ["login", "status"], codexProbeTimeoutMs);
   let commandPrefix: string[] = [];
   let configWarning = false;
   if (!commandOk(normalLogin)) {
@@ -149,7 +151,7 @@ const codexHealth = async (
     // config.toml before it can read the saved ChatGPT login. This override is
     // diagnostic only and does not start a model request.
     const isolatedLogin = await dependencies.runCommand(
-      "codex",
+      codexCommand,
       ["-c", "service_tier=fast", "-c", "model_reasoning_effort=xhigh", "login", "status"],
       codexProbeTimeoutMs,
     );
@@ -170,7 +172,7 @@ const codexHealth = async (
   }
 
   const execHelp = await dependencies.runCommand(
-    "codex",
+    codexCommand,
     [...commandPrefix, "exec", "--help"],
     codexProbeTimeoutMs,
   );

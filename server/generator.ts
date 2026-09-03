@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { legacyDraftBodyHtml } from "./article-html.js";
+import { resolveCodexExecutable } from "./codex-executable.js";
 import { planEditorialImagePlacements, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import {
   appendAiError,
@@ -1342,7 +1343,7 @@ export const selectTopAndGenerate = async (runId: string, count: number) => {
 export const codexStatus = async () => {
   const outputPath = path.join(workflowJobsRoot, "codex-status.txt");
   return new Promise<{ ok: boolean; detail: string }>((resolve) => {
-    const child = spawn("codex", ["-c", "service_tier=fast", "-c", "model_reasoning_effort=xhigh", "login", "status"], {
+    const child = spawn(resolveCodexExecutable(), ["-c", "service_tier=fast", "-c", "model_reasoning_effort=xhigh", "login", "status"], {
       cwd: workspacePath(),
       stdio: ["ignore", "pipe", "pipe"],
     });
