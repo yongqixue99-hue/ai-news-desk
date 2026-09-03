@@ -1,4 +1,6 @@
 const XIAOHEIHE_MATCHES = ["https://xiaoheihe.cn/*", "https://*.xiaoheihe.cn/*"];
+const WORKBENCH_ORIGIN = "http://127.0.0.1:4317";
+const X_POST_URL = /^https:\/\/(?:www\.)?(?:x|twitter)\.com\/([^/]+)\/status\/(\d+)/i;
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -21,6 +23,28 @@ async function findOrOpenEditor(editorUrl) {
     await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
   }
   return waitForTab(tab.id);
+}
+
+async function captureActiveXPost() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tabUrl = String(tab?.url || "");
+  const tabMatch = X_POST_URL.exec(tabUrl);
+  if (!tab?.id || !tabMatch) throw new Error("请先打开一条单独的 X 原帖，再点击收录");
+
+  const capture = {
+    url: `https://x.com/${tabMatch[1]}/status/${tabMatch[2]}`,
+    text: "",
+    author: `@${tabMatch[1]}`.slice(0, 80),
+    capturedAt: new Date().toISOString(),
+  };
+
+  const captureId = crypto.randomUUID();
+  await chrome.storage.session.set({ [`xCapture:${captureId}`]: capture });
+  await chrome.tabs.create({
+    url: `${WORKBENCH_ORIGIN}/?xCapture=${encodeURIComponent(captureId)}#workbench`,
+    active: true,
+  });
+  return { ok: true, detail: "原帖链接已收录，正在用官方 oEmbed 提取并进入复核" };
 }
 
 async function sendJobToPage(tabId, job) {
@@ -222,6 +246,45 @@ async function uploadImagePostInPage(payload) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "AI_NEWS_CAPTURE_ACTIVE_X_POST") {
+    if (sender.id !== chrome.runtime.id) {
+      sendResponse({ ok: false, error: "拒绝非本扩展发起的收录请求" });
+      return undefined;
+    }
+    captureActiveXPost()
+      .then(sendResponse)
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
+  if (message?.type === "AI_NEWS_GET_X_CAPTURE") {
+    if (!sender.url?.startsWith(`${WORKBENCH_ORIGIN}/`)) {
+      sendResponse({ ok: false, error: "收录数据只能交给本地工作台" });
+      return undefined;
+    }
+    const captureId = String(message.captureId || "");
+    if (!/^[0-9a-f-]{36}$/i.test(captureId)) {
+      sendResponse({ ok: false, error: "收录编号无效" });
+      return undefined;
+    }
+    chrome.storage.session.get(`xCapture:${captureId}`)
+      .then((items) => sendResponse({ ok: true, capture: items[`xCapture:${captureId}`] }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
+  if (message?.type === "AI_NEWS_DELETE_X_CAPTURE") {
+    if (!sender.url?.startsWith(`${WORKBENCH_ORIGIN}/`)) {
+      sendResponse({ ok: false, error: "收录数据只能由本地工作台删除" });
+      return undefined;
+    }
+    const captureId = String(message.captureId || "");
+    chrome.storage.session.remove(`xCapture:${captureId}`)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
   if (message?.type === "AI_NEWS_UPLOAD_XIAOHEIHE_IMAGE_POST") {
     if (!sender.tab?.id || !/^https:\/\/(?:[^/]+\.)?xiaoheihe\.cn\//i.test(sender.url || "")) {
       sendResponse({ ok: false, detail: "图文图片任务不是由小黑盒编辑页发起" });

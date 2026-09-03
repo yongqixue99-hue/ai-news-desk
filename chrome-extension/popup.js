@@ -2,6 +2,17 @@ const statusDot = document.querySelector("#status-dot");
 const statusTitle = document.querySelector("#status-title");
 const statusDetail = document.querySelector("#status-detail");
 const version = chrome.runtime.getManifest().version;
+const versionLabel = document.querySelector("#extension-version");
+const capturePanel = document.querySelector("#x-capture");
+const captureButton = document.querySelector("#capture-x-post");
+const captureResult = document.querySelector("#capture-result");
+
+versionLabel.textContent = `常用 Chrome 模式 · v${version}`;
+
+async function refreshCaptureAction() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  capturePanel.hidden = !/^https:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/]+\/status\/\d+/i.test(String(tab?.url || ""));
+}
 
 async function refreshStatus() {
   try {
@@ -24,4 +35,23 @@ document.querySelector("#open-xiaoheihe").addEventListener("click", () => {
   chrome.tabs.create({ url: "https://xiaoheihe.cn/community/user/post_list" });
 });
 
+captureButton.addEventListener("click", async () => {
+  captureButton.disabled = true;
+  captureButton.textContent = "正在收录…";
+  captureResult.classList.remove("error");
+  captureResult.textContent = "正在传送当前链接并请求官方 oEmbed";
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "AI_NEWS_CAPTURE_ACTIVE_X_POST" });
+    if (!result?.ok) throw new Error(result?.error || "收录失败");
+    captureResult.textContent = result.detail || "已收录";
+    captureButton.textContent = "已收录，正在打开工作台";
+  } catch (error) {
+    captureResult.classList.add("error");
+    captureResult.textContent = error instanceof Error ? error.message : String(error);
+    captureButton.disabled = false;
+    captureButton.textContent = "重试收录";
+  }
+});
+
 void refreshStatus();
+void refreshCaptureAction();

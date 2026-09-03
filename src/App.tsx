@@ -61,6 +61,7 @@ function App() {
   const [health, setHealth] = useState<HealthState>();
   const [shell, setShell] = useState<ShellView>({ notifications: [], notificationsMuted: false, activeRunCount: 0 });
   const [pendingQuickDraft, setPendingQuickDraft] = useState<{ runId: string; draftId: string }>();
+  const [externalIntakeReview, setExternalIntakeReview] = useState<IntakeReviewRecord>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>({ status: "idle" });
 
   const refresh = useCallback(async () => {
@@ -116,6 +117,33 @@ function App() {
   useEffect(() => {
     void refreshShell();
   }, [refreshShell]);
+
+  useEffect(() => {
+    const reviewId = new URLSearchParams(window.location.search).get("intakeReview");
+    if (!reviewId || externalIntakeReview?.id === reviewId) return;
+    let active = true;
+    navigate("workbench");
+    void api.intakeReviews()
+      .then((reviews) => {
+        if (!active) return;
+        const review = reviews.find((entry) => entry.id === reviewId && entry.status === "pending");
+        if (!review) throw new Error("这条浏览器收录记录不存在或已经处理");
+        setExternalIntakeReview(review);
+        setNotice({ kind: "success", message: "X 原帖已导入；官方 oEmbed 或手工正文都只作为待复核证据，请核对账号与上下文。" });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setNotice({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      });
+    return () => { active = false; };
+  }, [externalIntakeReview?.id, navigate]);
+
+  const consumeExternalIntakeReview = () => {
+    setExternalIntakeReview(undefined);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("intakeReview");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  };
 
   useEffect(() => {
     if (page === "today" || (state && editorialSystem)) return;
@@ -1098,7 +1126,7 @@ function App() {
     setActionBusy(true);
     try {
       const result = await api.intakeXPost(url, text, author);
-      setNotice({ kind: "success", message: "X 原帖已按人工证据导入；请核对账号、原帖链接和上下文后再生成草稿。" });
+      setNotice({ kind: "success", message: "X 原帖已导入；官方 oEmbed 或手工正文都只作为待复核证据，请核对账号、原帖链接和上下文。" });
       return result.review;
     } catch (error) {
       reportError(error);
@@ -1295,6 +1323,8 @@ function App() {
           onQuickDraftScreenshot={quickDraftFromScreenshot}
           onConfirmQuickDraftReview={confirmQuickDraftReview}
           onOpenAiSettings={() => navigate("ai-settings")}
+          initialIntakeReview={externalIntakeReview}
+          onInitialIntakeReviewConsumed={consumeExternalIntakeReview}
           onOpenDrafts={() => {
             setActiveDraftId(state.drafts.find((draft) => draft.runId === activeRun?.id)?.id ?? state.drafts[0]?.id);
             navigate("drafts");

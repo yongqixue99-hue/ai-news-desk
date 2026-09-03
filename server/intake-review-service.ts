@@ -16,7 +16,7 @@ import { skillsForArticleTask } from "./skill-registry.js";
 import { retainWorkflowRuns } from "./run-retention.js";
 import {
   buildManualXPostEvidence,
-  normalizeManualXPostInput,
+  resolveXPostInput,
   type ManualXPostInput,
 } from "./manual-x-intake.js";
 import { readState, updateState, workflowMediaRoot } from "./storage.js";
@@ -69,7 +69,7 @@ export const createLinkIntakeReview = async (url: string) => {
 
 export const createManualXPostIntakeReview = async (input: ManualXPostInput) => {
   const state = await readState();
-  const normalized = normalizeManualXPostInput(input);
+  const normalized = await resolveXPostInput(input);
   const timestamp = now();
   const record: IntakeReviewRecord = {
     id: `intake_review_${randomUUID().slice(0, 12)}`,
@@ -78,7 +78,9 @@ export const createManualXPostIntakeReview = async (input: ManualXPostInput) => 
     status: "pending",
     bundle: buildManualXPostEvidence(normalized, timestamp),
     providerId: state.aiSettings.activeProviderId,
-    userNote: "X 原帖由用户手动复制；账号身份、时间和上下文需在证据复核时确认。",
+    userNote: normalized.acquisition === "official-oembed"
+      ? "X 原帖由官方 oEmbed 按 URL 读取；账号身份、时间、媒体和上下文需在证据复核时确认。"
+      : "X 原帖由用户手动复制；账号身份、时间和上下文需在证据复核时确认。",
   };
   await updateState((current) => {
     current.intakeReviews.unshift(record);
@@ -155,18 +157,17 @@ export const createScreenshotIntakeReview = async (
 
 const candidateFor = (record: IntakeReviewRecord, text: string, images: SourceImage[]): Candidate => {
   const sourceUrl = record.bundle.source.canonicalUrl || record.bundle.source.publicPath || record.bundle.source.requestedUrl || "intake-review";
-  const isManualXPost = /^https:\/\/x\.com\/[^/]+\/status\/\d+/iu.test(sourceUrl)
-    && record.bundle.warnings.some((warning) => warning.includes("用户复制粘贴"));
+  const isXPost = /^https:\/\/x\.com\/[^/]+\/status\/\d+/iu.test(sourceUrl);
   return {
     id: `candidate_${record.id}`, rawId: record.id, sourceType: "user-intake",
-    sourceName: isManualXPost ? "X 原帖（身份待核对）" : record.bundle.source.kind === "url" ? new URL(sourceUrl).hostname.replace(/^www\./, "") : "截图导入",
-    sourceRole: isManualXPost ? "discovery" : undefined,
+    sourceName: isXPost ? "X 原帖（身份待核对）" : record.bundle.source.kind === "url" ? new URL(sourceUrl).hostname.replace(/^www\./, "") : "截图导入",
+    sourceRole: isXPost ? "discovery" : undefined,
     title: record.bundle.title, url: sourceUrl, canonicalUrl: sourceUrl,
     excerpt: text.slice(0, 360), publishedAt: record.bundle.capturedAt, fetchedAt: now(),
     score: 15, scoreBreakdown: { consequence: 4, novelty: 3, evidence: 3, relevance: 2, timeliness: 2, confirmation: 1, penalty: 0 },
     heatScore: 0, heatBreakdown: { engagement: 0, sourceReach: 0, crossSource: 0, freshness: 0 },
     recommendationScore: 60, clusterSize: 1, relatedSources: [record.bundle.source.label],
-    evidence: isManualXPost ? "用户复制并确认的 X 原帖；账号身份与上下文仍需核对" : "用户已确认导入证据", imageCount: images.length, images, selected: true, status: "candidate",
+    evidence: isXPost ? "用户确认导入的 X 原帖；账号身份与上下文仍需核对" : "用户已确认导入证据", imageCount: images.length, images, selected: true, status: "candidate",
   };
 };
 

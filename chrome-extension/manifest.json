@@ -1,14 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "AI 新闻工作台 · 小黑盒填入助手",
-  "version": "0.1.18",
-  "description": "把本地 AI 新闻工作台中的文章或图文草稿填入常用 Chrome 里的小黑盒编辑器；不会点击最终发布。",
+  "name": "AI 新闻工作台 · 浏览器助手",
+  "version": "0.1.20",
+  "description": "把当前 X 原帖链接一键收进本地新闻台，并将草稿填入小黑盒编辑器；不会点击最终发布。",
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["scripting"],
+  "permissions": ["activeTab", "scripting", "storage"],
   "action": {
-    "default_title": "小黑盒填入助手",
+    "default_title": "AI 新闻工作台助手",
     "default_popup": "popup.html"
   },
   "host_permissions": [

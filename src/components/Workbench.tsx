@@ -85,6 +85,8 @@ interface WorkbenchProps {
   onQuickDraftScreenshot: (file: File, note?: string) => Promise<IntakeReviewRecord>;
   onConfirmQuickDraftReview: (reviewId: string, selection: EvidenceReviewSelection) => Promise<void>;
   onOpenAiSettings: () => void;
+  initialIntakeReview?: IntakeReviewRecord;
+  onInitialIntakeReviewConsumed?: () => void;
 }
 
 type CandidateSortMode = "recommended" | "heat" | "value" | "latest";
@@ -191,6 +193,8 @@ export function Workbench({
   onQuickDraftScreenshot,
   onConfirmQuickDraftReview,
   onOpenAiSettings,
+  initialIntakeReview,
+  onInitialIntakeReviewConsumed,
 }: WorkbenchProps) {
   const [dateFrom, setDateFrom] = useState(() => relativeInputDate(-1));
   const [dateTo, setDateTo] = useState(() => relativeInputDate(0));
@@ -205,6 +209,15 @@ export function Workbench({
   const [keyboardCursor, setKeyboardCursor] = useState(0);
   const keywordInputRef = useRef<HTMLInputElement>(null);
   const candidates = (run?.candidates ?? []).filter((candidate) => !isCommunityCandidate(candidate));
+
+  useEffect(() => {
+    if (initialIntakeReview?.status === "pending") setQuickDraftOpen(true);
+  }, [initialIntakeReview?.id, initialIntakeReview?.status]);
+
+  const closeQuickDraft = () => {
+    setQuickDraftOpen(false);
+    if (initialIntakeReview) onInitialIntakeReviewConsumed?.();
+  };
   const sortedCandidates = useMemo(() => [...candidates].sort((left, right) => {
     if (candidateSort === "heat") return right.heatScore - left.heatScore;
     if (candidateSort === "value") return right.score - left.score;
@@ -967,8 +980,9 @@ export function Workbench({
       {quickDraftOpen ? (
         <QuickDraftModal
           provider={activeProvider}
-          onClose={() => setQuickDraftOpen(false)}
-          onOpenAiSettings={() => { setQuickDraftOpen(false); onOpenAiSettings(); }}
+          initialReview={initialIntakeReview}
+          onClose={closeQuickDraft}
+          onOpenAiSettings={() => { closeQuickDraft(); onOpenAiSettings(); }}
           onSubmitUrl={onQuickDraftUrl}
           onSubmitXPost={onQuickDraftXPost}
           onSubmitScreenshot={onQuickDraftScreenshot}

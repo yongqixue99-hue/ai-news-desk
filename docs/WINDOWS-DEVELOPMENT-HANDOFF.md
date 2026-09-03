@@ -468,3 +468,16 @@ git push -u origin codex/windows-next
 费用保护打开时，服务端会同时阻止 UI 和显式接口绕过：X 自动来源不能启用、测试或手工指定采集；Gemini 不能被激活、测试、分配角色或调用。关闭保护只解除限制，不会自动启用来源或发起付费请求，也不会删除已有凭据。
 
 Windows 计划任务在本轮重启并复验。另修复了机器上同时存在项目 Node 与 Codex 内置 Node 时，校验脚本把多个 `node.exe` 路径拼接后误报失败的问题。最终基线：`npm test` 590/590、编辑质量黄金集 22/22、`npm run build` 通过；计划任务、4317 监听进程和健康接口均通过。构建仍提示 `DraftWorkspace` 压缩前约 584 KB，属于后续按需拆包的非阻断性能事项。
+
+## 15. 2026-09-04 MultiPost 调研、分发台与 X 单条免费导入
+
+本轮审计了 `leaperone/MultiPost-Extension` 的固定提交与 Apache-2.0 边界。结论是吸收“统一内容包、平台注册表、独立适配器、按平台展示状态”的结构，不把该扩展整体引入运行时：它使用大范围网页权限、DOM/私有接口、远程任务与可选自动发布，这些都不符合本项目的本地优先、最小权限和人工最终发布边界。详细证据与 X 官方 API 配置见 `docs/research/2026-09-04-multipost-and-x-api-setup.md`。
+
+已经落地：
+
+1. 草稿发布侧栏改为“一稿多投 / 多平台分发台”。同一正文只编辑一份；微信公众号和小黑盒分别显示“可准备、需连接、已送达、正文已改需更新”，并沿用现有正式草稿箱/编辑器交付。知乎、小红书和 X 线程只显示为未接入路线，不伪装成可用；任何渠道最终发布仍由用户完成。
+2. X 免费人工接力不再要求复制正文。用户在单条原帖页点击浏览器助手后，扩展只凭 `activeTab` 读取当前 URL，规范化后交给本地工作台；服务端使用 X 官方无需认证的 oEmbed 读取公开正文，10 秒超时，失败时提示手工粘贴。
+3. 删除了 X 页面 content script 与 X/Twitter 常驻 host permission。扩展不读取 X DOM、Cookie 或后台时间线，版本提升为 `0.1.20`；用户需要在 `chrome://extensions` 对已加载扩展点击一次“重新加载”。
+4. oEmbed 只解决已知单条 URL 的导入，不是监控。免费持续发现仍用 X 私人 List；真正无人值守监控仍需 X 官方付费 API。新闻源页现已内置 Developer Console、Bearer Token、credits、spending limit、关闭自动充值、DPAPI 保存与单源测试的五步说明。
+
+验证结果：X 官方 oEmbed 实网请求返回 HTTP 200；定向测试 12/12 通过；完整 `npm test` 595/595、编辑质量黄金集 22/22、`npm run build` 通过。Windows 计划任务已用项目脚本更新并重启，4317 页面与健康接口均为 200；Codex、Horizon 正常。Publisher 仍显示未连接，直到用户重新加载 `chrome-extension/` 并刷新工作台。构建提示 `DraftWorkspace` 压缩前约 586 KB，仍是后续按需拆包的非阻断性能事项。

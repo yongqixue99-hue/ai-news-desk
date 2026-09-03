@@ -4,13 +4,18 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="popup.css">
-    <title>小黑盒填入助手</title>
+    <title>AI 新闻工作台 · 浏览器助手</title>
   </head>
   <body>
-    <header><span>稿</span><div><strong>小黑盒填入助手</strong><small>常用 Chrome 模式 · v0.1.17</small></div></header>
+    <header><span>稿</span><div><strong>AI 新闻工作台助手</strong><small id="extension-version">常用 Chrome 模式</small></div></header>
     <main>
       <div class="status"><i id="status-dot"></i><div><strong id="status-title">正在检查工作台</strong><small id="status-detail">请保持本地工作台运行</small></div></div>
-      <p>只负责把草稿填进编辑器，不会点击最终发布。</p>
+      <section id="x-capture" class="x-capture" hidden>
+        <div><strong>当前是 X 原帖</strong><small>只传当前帖子链接，正文由 X 官方 oEmbed 免费读取。</small></div>
+        <button id="capture-x-post">一键收进新闻台</button>
+        <small id="capture-result" role="status"></small>
+      </section>
+      <p>收录内容会先进入证据复核；分发只送草稿箱或编辑器，不会点击最终发布。</p>
       <button id="open-workbench">打开 AI 新闻工作台</button>
       <button id="open-xiaoheihe" class="secondary">打开小黑盒</button>
     </main>

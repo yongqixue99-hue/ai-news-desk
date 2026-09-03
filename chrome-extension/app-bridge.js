@@ -7,6 +7,23 @@ let busy = false;
 
 const workbenchFetch = (path, options = {}) => fetch(`${WORKBENCH_ORIGIN}${path}`, options);
 
+async function importPendingXCapture() {
+  const captureId = new URL(window.location.href).searchParams.get("xCapture");
+  if (!captureId) return false;
+  const stored = await chrome.runtime.sendMessage({ type: "AI_NEWS_GET_X_CAPTURE", captureId });
+  if (!stored?.ok || !stored.capture) throw new Error(stored?.error || "浏览器助手没有找到待导入的 X 原帖");
+  const response = await workbenchFetch("/api/intakes/x-post", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(stored.capture),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.review?.id) throw new Error(payload.error || `X 原帖导入失败：${response.status}`);
+  await chrome.runtime.sendMessage({ type: "AI_NEWS_DELETE_X_CAPTURE", captureId });
+  window.location.replace(`${WORKBENCH_ORIGIN}/?intakeReview=${encodeURIComponent(payload.review.id)}#workbench`);
+  return true;
+}
+
 async function ensurePairingToken() {
   if (pairingToken) return pairingToken;
   const response = await workbenchFetch("/api/publisher/extension/bootstrap", { cache: "no-store" });
@@ -83,7 +100,12 @@ async function bridgeTick() {
   }
 }
 
-void bridgeTick();
+void importPendingXCapture()
+  .then((redirecting) => { if (!redirecting) void bridgeTick(); })
+  .catch((error) => {
+    console.warn("[AI 新闻工作台] X 原帖收录失败：", error);
+    void bridgeTick();
+  });
 setInterval(bridgeTick, 1500);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) void bridgeTick();

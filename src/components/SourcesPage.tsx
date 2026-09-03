@@ -328,13 +328,13 @@ export function SourcesPage({
         <div className="x-free-watch-copy">
           <span className="x-free-badge">0 元方案</span>
           <strong id="x-free-watch-heading">X 免费监控（人工接力）</strong>
-          <span>用 X 自带的私人列表集中看重点账号；发现新闻后复制原帖链接与正文，到“新闻工作台 → 截图／链接成稿 → X 原帖”导入。</span>
-          <small>不调用 X API、不抓取登录态、不产生接口费用。公司官号可作一手线索；个人号预告与跑分截图仍要回查官网或独立来源。</small>
+          <span>用 X 自带的私人列表集中看重点账号；打开重要原帖后，可点“AI 新闻工作台助手 → 一键收进新闻台”，未安装助手时仍可把链接贴到“截图／链接成稿 → X 原帖”。</span>
+          <small>助手只传当前标签页链接，正文由 X 官方 oEmbed 免费读取；不调用计费 X API、不抓取 Cookie、不在后台扫描时间线。公司官号可作一手线索；个人号预告与跑分截图仍要回查官网或独立来源。</small>
         </div>
         <ol className="x-free-watch-steps">
           <li><b>1</b><span>在 X 新建私人列表</span></li>
           <li><b>2</b><span>添加这 {xWatchHandles.length || 23} 个重点账号</span></li>
-          <li><b>3</b><span>看到重要原帖就复制进工作台</span></li>
+          <li><b>3</b><span>点浏览器助手一键收录并复核</span></li>
         </ol>
         <div className="x-free-watch-actions">
           <a href="https://x.com/i/lists" target="_blank" rel="noreferrer"><ExternalLink size={14} />打开 X 列表</a>
@@ -344,6 +344,24 @@ export function SourcesPage({
 
       <details className="x-paid-monitor-panel">
         <summary>付费 X API 自动监控 <small>{zeroCost ? "零成本模式下锁定" : "按 X 官方用量计费"}</small></summary>
+        <section className="x-api-setup-guide" aria-labelledby="x-api-setup-heading">
+          <header>
+            <div>
+              <span>官方按量付费</span>
+              <strong id="x-api-setup-heading">X API 开通与费用控制</strong>
+            </div>
+            <a href="https://console.x.com/" target="_blank" rel="noreferrer">打开 Developer Console<ExternalLink size={13} /></a>
+          </header>
+          <p>官方当前按返回资源计费：每读取 1 条 Post 为 $0.005，每读取 1 个用户资料为 $0.010；没有真正免费的自动监控额度。</p>
+          <ol>
+            <li><b>1</b><span><strong>先决定是否付费</strong><small>坚持 0 元就继续用上方私人列表；要自动监控，先到 <a href="#ai-settings">AI 设置</a>解除 X / Gemini API 锁定。</small></span></li>
+            <li><b>2</b><span><strong>创建 X App</strong><small>登录 console.x.com，接受 Developer Agreement，点击 New App，填写名称、用途和说明。</small></span></li>
+            <li><b>3</b><span><strong>只复制 Bearer Token</strong><small>进入 App 的 Keys and tokens，生成并保存 Bearer Token；读取公开账号不需要把账号密码交给工作台。</small></span></li>
+            <li><b>4</b><span><strong>先锁死预算</strong><small>在 Billing 购买少量 credits，设置很低的 Spending limit，并关闭自动充值，避免意外费用。</small></span></li>
+            <li><b>5</b><span><strong>回到这里保存并测试</strong><small>粘贴 Token，点击“保存并启用 X 官方源”，再对 X 来源执行一次单源测试。</small></span></li>
+          </ol>
+          <footer>Token 只写入当前 Windows 用户的 DPAPI 安全存储，不进入项目文件、日志或 GitHub。</footer>
+        </section>
         <section className="x-credential-panel" aria-labelledby="x-credential-heading">
           <div className="x-credential-copy">
             <strong id="x-credential-heading">X 重点账号自动监控</strong>

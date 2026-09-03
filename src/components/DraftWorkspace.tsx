@@ -54,6 +54,7 @@ import { draftStatusLabel, manualDraftStatuses } from "../draft-lifecycle-view";
 import { buildDraftQualityView } from "../draft-quality-view";
 import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
 import { buildExternalWritingPrompt } from "../external-writing-bridge";
+import { buildDistributionTargets } from "../distribution-view";
 import { getRovingTabTarget } from "../hooks/rovingTabs";
 import type {
   ArticleDraft,
@@ -1094,6 +1095,12 @@ export function DraftWorkspace({
         ? { title: "版本历史", subtitle: "自动保存与随时恢复" }
         : { title: "发布设置", subtitle: "确认后填入平台编辑器" };
   const publisherReady = Boolean(publisherStatus?.ok);
+  const distributionTargets = buildDistributionTargets({
+    draft: editing,
+    dirty,
+    publisherReady,
+    wechatConfigured: Boolean(wechatSettings.appId && wechatSettings.appSecretConfigured),
+  });
   const draftQuality = buildDraftQualityView(editing.qualityWarnings);
   const extensionPublisher = publisherStatus?.mode !== "cdp";
   const publishGuidance = !publisherReady
@@ -1670,12 +1677,30 @@ export function DraftWorkspace({
               {utilityTab === "publish" ? (
                 <>
                   <section className="utility-section">
-                    <h3 className="utility-section-title">发布平台</h3>
-                    <div className="platform-options">
-                      <button className={publishPlatform === "xiaoheihe" ? "active" : ""} onClick={() => setPublishPlatform("xiaoheihe")}><span>小黑盒</span><small>填入编辑器</small>{publishPlatform === "xiaoheihe" ? <CheckCircle2 size={17} /> : null}</button>
-                      <button className={publishPlatform === "wechat" ? "active" : ""} onClick={() => setPublishPlatform("wechat")}><span>微信公众号</span><small>同步草稿箱</small>{publishPlatform === "wechat" ? <CheckCircle2 size={17} /> : null}</button>
-                      <button disabled><span>小红书</span><small>即将支持</small></button>
+                    <div className="distribution-heading">
+                      <span>一稿多投</span>
+                      <h3 className="utility-section-title">多平台分发台</h3>
+                      <p>正文只编辑一份；各平台分别做格式、图片和权限检查，再送到草稿箱或编辑器。</p>
                     </div>
+                    <div className="distribution-flow" aria-label="多平台分发边界">
+                      <span>当前正文</span><i>→</i><span>平台适配</span><i>→</i><span>草稿／编辑器</span><i>→</i><strong>你手动发布</strong>
+                    </div>
+                    <div className="platform-options">
+                      {distributionTargets.map((target) => (
+                        <button
+                          key={target.id}
+                          className={publishPlatform === target.id ? `active status-${target.status}` : `status-${target.status}`}
+                          aria-pressed={publishPlatform === target.id}
+                          onClick={() => setPublishPlatform(target.id)}
+                        >
+                          <span>{target.label}</span>
+                          <small>{target.operation} · 最终发布由你确认</small>
+                          <em>{target.statusLabel}</em>
+                          {publishPlatform === target.id ? <CheckCircle2 size={17} /> : null}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="distribution-roadmap"><span>下一批适配</span><b>知乎文章</b><b>小红书图文</b><b>X 短帖／线程</b><small>尚未接入，不冒充可用</small></div>
                     {publishPlatform === "xiaoheihe" ? (
                       <div className={publisherReady ? "publisher-connection ready" : "publisher-connection"}>
                         <span><i />{extensionPublisher ? "常用 Chrome 填入助手" : "CDP 备用浏览器"}</span>

@@ -22,7 +22,8 @@ test("sources page leads with a free manual X workflow and keeps paid API monito
   }));
 
   assert.match(markup, /X 免费监控/u);
-  assert.match(markup, /不调用 X API/u);
+  assert.match(markup, /不调用计费 X API/u);
+  assert.match(markup, /官方 oEmbed 免费读取/u);
   assert.match(markup, /复制重点账号/u);
   assert.match(markup, /付费 X API/u);
   assert.match(markup, /零成本模式下锁定/u);
@@ -30,6 +31,12 @@ test("sources page leads with a free manual X workflow and keeps paid API monito
   assert.match(markup, /type="password"/u);
   assert.match(markup, /Bearer Token/u);
   assert.match(markup, /X 官方/u);
+  assert.match(markup, /console\.x\.com/u);
+  assert.match(markup, /每读取 1 条 Post.*\$0\.005/u);
+  assert.match(markup, /解除 X \/ Gemini API 锁定/u);
+  assert.match(markup, /Keys and tokens/u);
+  assert.match(markup, /关闭自动充值/u);
+  assert.match(markup, /DPAPI/u);
 });
 
 test("each source exposes one clear three-state collection control and an exception-first health summary", () => {

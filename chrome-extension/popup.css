@@ -10,4 +10,12 @@ main { padding: 15px 16px 16px; }
 .status i.ok { background: #159455; box-shadow: 0 0 0 4px rgba(21, 148, 85, .1); }
 main p { margin: 12px 1px; color: #70737a; font-size: 11px; }
 button { width: 100%; height: 36px; border: 1px solid #ef332c; border-radius: 7px; background: #ef332c; color: #fff; cursor: pointer; font-weight: 600; }
+button:disabled { opacity: .6; cursor: wait; }
 button.secondary { margin-top: 7px; border-color: #dedfe3; background: #fff; color: #4d5057; }
+.x-capture { display: grid; gap: 9px; margin-top: 11px; padding: 11px; border: 1px solid #f0cdc9; border-radius: 8px; background: #fff8f7; }
+.x-capture[hidden] { display: none; }
+.x-capture > div { display: flex; flex-direction: column; gap: 2px; }
+.x-capture > div strong { font-size: 12px; }
+.x-capture > div small, #capture-result { color: #777a81; font-size: 10px; }
+#capture-result:empty { display: none; }
+#capture-result.error { color: #b33a35; }

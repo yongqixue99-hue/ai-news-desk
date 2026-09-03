@@ -149,7 +149,11 @@ npm run start
 
 ## X 官方账号来源
 
-1. 在 [X Developer Console](https://developer.x.com/) 创建可读取公开帖子的应用，取得 API v2 Bearer Token；X 的开发者访问和搜索接口可能按当前套餐或用量计费。
+零新增支出的方案是：在 X 建私人 List；打开重要原帖后，用下文的浏览器助手一键送入证据复核。它不后台轮询，因此不能冒充全自动监控。
+
+需要无人值守监控时：
+
+1. 在 [X Developer Console](https://console.x.com/) 创建只读应用，取得 API v2 App-only Bearer Token。X 当前为预付 credits 的按返回资源计费；开通时应关闭自动充值并设置低 spending limit，实际单价以控制台为准。
 2. 打开“新闻源”，在“X 官方账号采集”中粘贴 Bearer Token，点击“保存并启用 X 官方源”。Token 在 Windows 使用当前用户 DPAPI、在 macOS 使用钥匙串，不写入 `.workflow/`、日志或导出备份。
 3. 默认观察白名单包含 23 个经审阅账号，覆盖 OpenAI、Anthropic、Google、DeepSeek、Qwen、xAI、Meta、Mistral、Cohere、Microsoft、NVIDIA、Hugging Face、Perplexity、核心负责人和 Artificial Analysis；完整 handle 以“新闻源”页当前配置为准，来源默认停用。可以编辑或新增 X 来源，用逗号填写其他官方账号；账号必须由用户明确加入白名单，平台的认证标记不会自动把陌生账号升级为官方来源。
 4. 点击来源行的“测试”会请求 X API recent search；正式采集只保留白名单账号自己的公开原帖，排除回复和转推，并用 `since_id` 断点续采。限流或单个 X 来源失败不会阻断 RSS 和其他来源。
@@ -214,9 +218,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows-service.ps1
 
 卸载只停止服务并把 LaunchAgent 配置移到废纸篓，不删除新闻、草稿或图片。
 
-## 小黑盒填入助手
+## 浏览器助手与多平台分发
 
-默认使用你日常登录的 Chrome：在 `chrome://extensions` 加载项目内的 `chrome-extension/` 后，草稿页会通过本地桥接把内容送进当前小黑盒编辑器。CDP 隔离浏览器只保留为开发调试备用。两种方式遇到验证码、登录失效、编辑器改版或找不到控件都会停止，不绕过限制，也不自动发布。
+项目内的 `chrome-extension/` 现在是统一的“AI 新闻工作台浏览器助手”：
+
+- 在单条 X 原帖页面点扩展图标，再点“一键收进新闻台”，无需手工复制链接和正文；助手只把当前标签页的规范链接交给工作台，正文由 X 官方免费 oEmbed 接口读取，收录结果仍须经过证据复核。助手不注入 X 页面、不读取 Cookie，也不后台扫描时间线。
+- 草稿页可通过本地桥接把同一正文填入当前小黑盒编辑器。CDP 隔离浏览器只保留为开发调试备用。
+
+扩展长期域名权限只包括本地工作台和小黑盒；X 仅在用户点击扩展时借助 `activeTab` 读取当前 URL。遇到页面未加载、验证码、登录失效、编辑器改版或找不到控件都会停止，不绕过限制，也不自动发布。
+
+草稿“发布”侧栏已经按“一份正文 → 平台适配 → 草稿箱／编辑器 → 用户手动发布”展示微信与小黑盒的独立状态和回执。知乎文章、小红书图文与 X 短帖／线程是下一批候选适配器，尚未接入时不会显示为可用。
 
 ## 本地数据
 
