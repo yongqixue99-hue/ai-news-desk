@@ -2775,6 +2775,14 @@ a.source-homepage-link:active {
 .today-header p { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
 .today-header-actions { display: flex; align-items: center; gap: 10px; padding-top: 24px; }
 .today-updated { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.today-news-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.today-news-search-field { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1px solid #b9b9b4; background: #fff; }
+.today-news-search-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent); }
+.today-news-search-field svg { flex: 0 0 auto; color: var(--accent); }
+.today-news-search-field input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; }
+.today-news-search-field input::placeholder { color: #92928b; }
+.today-news-search > button { min-width: 160px; justify-content: center; }
+.today-news-search > p { grid-column: 1 / -1; margin: -2px 0 0 2px; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .today-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
 .today-metrics > div { min-height: 70px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 0 18px; border-right: 1px solid var(--line-soft); }
 .today-metrics > div:first-child { padding-left: 0; }
@@ -3123,6 +3131,9 @@ a.source-homepage-link:active {
   .today-page { padding: 18px 12px 90px; }
   .today-header { min-height: 0; }
   .today-header h1 { font-size: 34px; }
+  .today-news-search { grid-template-columns: 1fr; }
+  .today-news-search > button { width: 100%; }
+  .today-news-search > p { grid-column: 1; }
   .today-section-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
   .today-section-heading > p, .today-section-heading > small { max-width: none; text-align: left; }
   .today-story-open { grid-template-columns: 1fr 20px; gap: 12px; }

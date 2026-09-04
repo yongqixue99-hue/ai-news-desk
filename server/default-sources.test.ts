@@ -64,6 +64,13 @@ test("Gemini product and API changes have a dedicated first-party discovery sour
   assert.ok(source.routes?.some((route) => route.query?.includes("site:ai.google.dev/gemini-api/docs/changelog")));
 });
 
+test("OpenAI collection does not rely on the newsroom RSS alone for model launches", () => {
+  const source = defaultSources.find((entry) => entry.id === "openai-official");
+  assert.ok(source);
+  assert.ok(source.routes?.some((route) => route.url === "https://openai.com/sitemap.xml/release/"));
+  assert.ok(source.routes?.some((route) => route.query?.includes("site:openai.com/index")));
+});
+
 test("scheduled reading covers the same 48-hour window promised by Today", () => {
   const fresh = createDefaultState();
   assert.equal(fresh.settings.windowHours, 48);

@@ -485,6 +485,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(filters),
     }),
+  searchNews: (query: string) =>
+    request<RunRequestResult>("/api/stories/search", {
+      method: "POST",
+      body: JSON.stringify({ query }),
+    }),
   cancelRun: (runId: string) =>
     request<WorkflowRun>(`/api/runs/${runId}/cancel`, { method: "POST", body: "{}" }),
   retryRun: (runId: string) =>

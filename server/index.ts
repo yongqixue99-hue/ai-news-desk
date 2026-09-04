@@ -183,6 +183,7 @@ import {
 } from "./storage.js";
 import { normalizeTopicIds } from "./topics.js";
 import { sourceRoleFor } from "./source-routing.js";
+import { buildFocusedNewsSearchRequest } from "./source-desk.js";
 import {
   applySpendingPolicy,
   assertMeteredProviderAllowed,
@@ -1789,6 +1790,37 @@ app.delete(
       : request.params.presetId;
     const removed = await updateState((state) => deleteSourcePreset(state, presetId));
     response.status(removed ? 204 : 404).end();
+  }),
+);
+
+app.post(
+  "/api/stories/search",
+  asyncRoute(async (request, response) => {
+    const body = (request.body ?? {}) as { query?: unknown };
+    const query = typeof body.query === "string" ? body.query.trim() : "";
+    if (!query) {
+      response.status(400).json({ error: "请输入要搜索的模型、公司或事件" });
+      return;
+    }
+    if (query.length > 120) {
+      response.status(400).json({ error: "搜索词最多 120 个字符" });
+      return;
+    }
+    const state = await readState();
+    const collection = buildFocusedNewsSearchRequest(
+      state.sources,
+      query,
+      normalizeTopicIds(state.settings.collectionTopics),
+    );
+    if (!collection.sourceIds?.length) {
+      response.status(409).json({ error: "当前没有已启用的官网或新闻来源，请先在来源页启用至少一个来源" });
+      return;
+    }
+    for (const source of state.sources.filter((entry) => collection.sourceIds?.includes(entry.id))) {
+      assertMeteredSourceAllowed(state, source);
+    }
+    const result = await createCollectionRun(collection);
+    response.status(result.created ? 202 : 200).json({ ...result, reused: !result.created });
   }),
 );
 

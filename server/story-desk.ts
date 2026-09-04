@@ -393,6 +393,8 @@ const explanationFor = (
 
 const modelReleaseTerms = /(?:\b(?:claude|fable|mythos|gpt(?:-[\w.]+)?|astra|gemini|llama|qwen|deepseek|grok|mistral|kimi|glm|ernie|minimax)\b|\bmodel\b|模型)/iu;
 const releaseEventTerms = /(?:\b(?:release(?:d|s)?|launch(?:ed|es)?|introduc(?:e|ed|es|ing)|announce(?:d|s)?|available|preview|coming soon|on the way|preparing)\b|发布|推出|上线|预告|即将|模型)/iu;
+const launchHeadlineTerms = /(?:\b(?:new generation|release(?:d|s)?|launch(?:ed|es)?|introduc(?:e|ed|es|ing)|announce(?:d|s)?)\b|正式发布|发布|推出|上线)/iu;
+const supportingDocumentTerms = /(?:\b(?:safety|system card|pricing|case study|apolog(?:y|ize[sd]?)|reviewed|cut manual fixes)\b|安全|模型卡|定价|致歉|案例)/iu;
 
 const dossierTextFor = (records: CandidateRecord[]) => records.flatMap(({ candidate }) => [
   candidate.title,
@@ -607,6 +609,29 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   const bestBriefing = [...records].sort((left, right) =>
     briefingRank(right.candidate) - briefingRank(left.candidate)
       || roleRank(right.candidate) - roleRank(left.candidate))[0]!.candidate.briefing;
+  const firstPartyLaunch = storyVendor
+    ? [...records]
+      .filter((record) => {
+        const titles = recordTitles(record).join(" ");
+        return record.candidate.sourceRole === "official"
+          && firstPartyModelVendorFor({
+            sourceName: record.candidate.sourceName,
+            url: record.candidate.canonicalUrl || record.candidate.url,
+          }) === storyVendor
+          && modelReleaseTerms.test(titles)
+          && launchHeadlineTerms.test(titles);
+      })
+      .sort((left, right) => {
+        const headlineScore = (record: CandidateRecord) => {
+          const titles = recordTitles(record).join(" ");
+          return (supportingDocumentTerms.test(titles) ? 0 : 10)
+            + briefingRank(record.candidate)
+            + record.candidate.recommendationScore / 100;
+        };
+        return headlineScore(right) - headlineScore(left);
+      })[0]
+    : undefined;
+  const headlinePrimary = firstPartyLaunch ?? primary;
   const bestInsight = records.find((record) => record.candidate.communityInsight)?.candidate.communityInsight;
   const images = uniqueEligibleEditorialImages(
     uniqueBy(records.flatMap((record) => record.candidate.images), (image) => normalizedUrl(image.url) || image.id),
@@ -635,7 +660,9 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     || record.candidate.status === "drafted"
     || record.candidate.userFeedback === "interested"
     || record.candidate.userFeedback === "published");
-  const title = bestBriefing?.titleZh || primary.candidate.briefing?.titleZh || primary.candidate.title;
+  const title = headlinePrimary.candidate.briefing?.titleZh
+    || (headlinePrimary === primary ? bestBriefing?.titleZh : undefined)
+    || headlinePrimary.candidate.title;
   const assignment = assignStory({
     title,
     ageHours,
@@ -679,7 +706,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   return {
     id,
     title,
-    originalTitle: primary.candidate.title,
+    originalTitle: headlinePrimary.candidate.title,
     summary: bestBriefing?.summaryZh || primary.candidate.excerpt.slice(0, 240) || "等待补充来源摘要",
     whyImportant: assignment.audienceValue,
     communitySummary: bestInsight?.summaryZh,
@@ -740,10 +767,29 @@ const diagnosticsFor = (sources: SourceConfig[]) => sources
     consecutiveFailures: source.consecutiveFailures ?? 0,
   }));
 
+const standardTodayWindowHours = 48;
+const confirmedModelLaunchCatchupHours = 7 * 24;
+
+const isWithinTodayWindow = (story: StoryView) => {
+  if (story.ageHours <= standardTodayWindowHours) return true;
+  const officialFacet = story.releaseDossier?.facets.find((facet) => facet.id === "official");
+  const hasKnownFirstPartyOwner = story.signals.some((signal) => signal.factBearing
+    && signal.sourceRole === "official"
+    && Boolean(firstPartyModelVendorFor({
+      sourceName: signal.sourceName,
+      url: signal.url,
+    })));
+  return story.ageHours <= confirmedModelLaunchCatchupHours
+    && story.releaseDossier?.releaseStatus === "released"
+    && officialFacet?.status === "ready"
+    && hasKnownFirstPartyOwner
+    && story.evidenceStrength !== "weak";
+};
+
 export const buildTodayView = (state: WorkflowState, now = new Date().toISOString()): TodayView => {
   const recommendationTarget = 8;
   const stories = buildStories(state, now);
-  const active = stories.filter((story) => story.ageHours <= 48 && !story.ignored && !story.published);
+  const active = stories.filter((story) => isWithinTodayWindow(story) && !story.ignored && !story.published);
   const ready = interleaveBySource(
     active.filter((story) => story.assignment.canDraft && !story.drafted),
     (story) => story.signals.find((signal) => !signal.isCommunity)?.sourceName
@@ -752,7 +798,8 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
   );
   const watching = active.filter((story) => story.assignment.mode === "watch").slice(0, 6);
   const backlog = interleaveBySource(
-    stories.filter((story) => story.ageHours > 48
+    stories.filter((story) => !isWithinTodayWindow(story)
+      && story.ageHours > standardTodayWindowHours
       && story.ageHours <= 7 * 24
       && !story.ignored
       && !story.published
@@ -770,7 +817,7 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
   const diagnosticStories = stories.filter((story) => story.ageHours <= 7 * 24);
   const dropCounts = diagnosticStories.reduce((counts, story) => {
     if (story.ignored || story.published) counts["ignored-or-published"] += 1;
-    else if (story.ageHours > 48) counts["outside-window"] += 1;
+    else if (!isWithinTodayWindow(story)) counts["outside-window"] += 1;
     else if (story.drafted) counts["already-drafted"] += 1;
     else if (!story.assignment.canDraft) counts["evidence-blocked"] += 1;
     return counts;
@@ -781,7 +828,7 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
     "ignored-or-published": 0,
   });
   const recommendationDropReasons = [
-    { code: "outside-window" as const, label: "超过 48 小时时效窗口", count: dropCounts["outside-window"] },
+    { code: "outside-window" as const, label: "超过常规 48 小时或模型发布 7 天窗口", count: dropCounts["outside-window"] },
     { code: "already-drafted" as const, label: "已经进入成稿流程", count: dropCounts["already-drafted"] },
     { code: "evidence-blocked" as const, label: "证据不足，暂留观察", count: dropCounts["evidence-blocked"] },
     { code: "ignored-or-published" as const, label: "已忽略或已发布", count: dropCounts["ignored-or-published"] },

@@ -40,6 +40,18 @@ const configuredDefaultSources: SourceConfig[] = [
       homepageUrl: "https://openai.com/news/",
       url: "https://openai.com/news/rss.xml",
       category: "ai-official",
+    }, {
+      topicId: "ai",
+      label: "Official release sitemap",
+      homepageUrl: "https://openai.com/news/",
+      url: "https://openai.com/sitemap.xml/release/",
+      category: "ai-official",
+    }, {
+      topicId: "ai",
+      label: "Official site search",
+      homepageUrl: "https://openai.com/news/",
+      query: "site:openai.com/index (OpenAI OR GPT)",
+      category: "ai-official",
     }],
     enabled: true,
     selected: true,
@@ -99,7 +111,7 @@ const configuredDefaultSources: SourceConfig[] = [
     selected: true,
     category: "ai-official",
     discoveryOnly: false,
-    note: "官方网站 · News",
+    note: "一级信源 · News RSS、发布 sitemap 与站内定向搜索互相补漏",
   },
   {
     id: "gemini-official",

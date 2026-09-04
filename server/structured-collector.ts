@@ -13,6 +13,7 @@ import type {
 const maximumFeedBytes = 4 * 1024 * 1024;
 const maximumItemsPerFeed = 100;
 const minimumSharedSitemapLastmodCount = 10;
+const sitemapSourceOrderReserve = Math.floor(maximumItemsPerFeed / 2);
 const hackerNewsTopStories = "https://hacker-news.firebaseio.com/v0/topstories.json";
 
 type CollectorFetcher = (url: string | URL, init: RequestInit) => Promise<Response>;
@@ -120,7 +121,7 @@ export const parsePortableFeed = (
       if (!entry.publishedAt) continue;
       lastmodCounts.set(entry.publishedAt, (lastmodCounts.get(entry.publishedAt) ?? 0) + 1);
     }
-    const sitemapEntries = parsedSitemapEntries
+    const normalizedSitemapEntries = parsedSitemapEntries
       .map((entry) => {
         const sharedBatch = Boolean(
           entry.publishedAt
@@ -135,13 +136,30 @@ export const parsePortableFeed = (
               ? "declared"
               : "missing",
         };
-      })
+      });
+    const newestDeclaredEntries = normalizedSitemapEntries
+      .filter((entry) => Boolean(entry.publishedAt))
       .sort((left, right) => {
         const rightTime = Date.parse(right.publishedAt ?? "");
         const leftTime = Date.parse(left.publishedAt ?? "");
         return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
-      })
-      .slice(0, maximumItemsPerFeed);
+      });
+    // Some publishers rebuild a large leading section of their sitemap with
+    // one shared lastmod. That value is not a publication date, but the source
+    // order is still an important discovery signal. Reserve half the bounded
+    // result for leading URLs, then fill from trustworthy declared dates.
+    const sitemapEntries: typeof normalizedSitemapEntries = [];
+    const seenUrls = new Set<string>();
+    for (const entry of [
+      ...normalizedSitemapEntries.slice(0, sitemapSourceOrderReserve),
+      ...newestDeclaredEntries,
+      ...normalizedSitemapEntries,
+    ]) {
+      if (seenUrls.has(entry.url)) continue;
+      seenUrls.add(entry.url);
+      sitemapEntries.push(entry);
+      if (sitemapEntries.length >= maximumItemsPerFeed) break;
+    }
     return sitemapEntries.map((entry) => ({
       id: stableItemId("rss", `${input.sourceId}:${entry.url}`),
       source_type: "rss",

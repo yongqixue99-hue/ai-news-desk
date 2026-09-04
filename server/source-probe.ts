@@ -60,7 +60,7 @@ const probeTargetFor = (source: SourceConfig) => {
 };
 
 const countFeedItems = (content: string) =>
-  (content.match(/<(?:item|entry)\b/gi) ?? []).length;
+  (content.match(/<(?:item|entry|url)\b/gi) ?? []).length;
 
 const countJsonItems = (content: string) => {
   try {
@@ -185,6 +185,7 @@ export const probeSource = async (
       };
     }
     const content = (await readResponseBuffer(response, MAXIMUM_PROBE_BYTES)).toString("utf8");
+    const isSitemap = target.format === "feed" && /<urlset\b/iu.test(content);
     const itemCount = target.format === "feed"
       ? countFeedItems(content)
       : target.format === "json"
@@ -198,7 +199,9 @@ export const probeSource = async (
         successfulAt: previousSuccess,
         consecutiveFailures: previousFailures + 1,
         itemCount: 0,
-        detail: target.format === "feed" ? "RSS 可访问，但没有发现条目" : "来源可访问，但响应内容为空",
+        detail: target.format === "feed"
+          ? isSitemap ? "Sitemap 可访问，但没有发现网址条目" : "RSS 可访问，但没有发现条目"
+          : "来源可访问，但响应内容为空",
         targetUrl,
         httpStatus: response.status,
       };
@@ -211,7 +214,9 @@ export const probeSource = async (
       consecutiveFailures: 0,
       itemCount,
       detail: target.format === "feed"
-        ? `RSS 可访问，读取到 ${itemCount} 个条目`
+        ? isSitemap
+          ? `Sitemap 可访问，读取到 ${itemCount} 个网址条目`
+          : `RSS 可访问，读取到 ${itemCount} 个条目`
         : target.format === "json"
           ? `接口可访问，读取到 ${itemCount} 条记录`
           : "官网可访问",

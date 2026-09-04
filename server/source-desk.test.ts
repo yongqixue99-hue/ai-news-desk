@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSourceDesk } from "./source-desk.js";
+import { buildFocusedNewsSearchRequest, createSourceDesk } from "./source-desk.js";
 import type { RawHorizonItem, SourceConfig } from "./types.js";
 
 const source = (id: string, kind: SourceConfig["kind"]): SourceConfig => ({
@@ -83,4 +83,26 @@ test("one adapter failure is isolated while evidence from another adapter surviv
   assert.equal(batch.items.length, 1);
   assert.match(batch.failures.rss ?? "", /unavailable/u);
   assert.equal(batch.failures.github, undefined);
+});
+
+test("focused news search covers seven Hong Kong calendar days without X or community sources", () => {
+  const official = { ...source("official", "rss"), role: "official" as const };
+  const verification = { ...source("verification", "rss"), role: "verification" as const };
+  const discovery = { ...source("discovery", "rss"), role: "discovery" as const };
+  const community = { ...source("community", "hackernews"), role: "community" as const };
+  const xOfficial = { ...source("x-official", "x"), role: "official" as const };
+  const disabled = { ...source("disabled", "rss"), role: "official" as const, enabled: false };
+
+  assert.deepEqual(buildFocusedNewsSearchRequest(
+    [official, verification, discovery, community, xOfficial, disabled],
+    "  GPT-6 Astra  ",
+    ["ai"],
+    new Date("2026-09-04T12:00:00.000Z"),
+  ), {
+    sourceIds: ["official", "verification", "discovery"],
+    topicIds: ["ai"],
+    dateFrom: "2026-08-29",
+    dateTo: "2026-09-04",
+    keywords: "GPT-6 Astra",
+  });
 });

@@ -107,6 +107,10 @@ test("production build opens the primary Windows browser routes", { timeout: 60_
     ] as const) {
       await page.goto(`${origin}/#${route}`, { waitUntil: "networkidle" });
       await page.getByRole("heading", { name: heading, exact: true }).waitFor();
+      if (route === "today") {
+        await page.getByLabel("搜索想写的新闻").waitFor();
+        await page.getByRole("button", { name: "搜索最近 7 天", exact: true }).waitFor();
+      }
     }
     assert.deepEqual(pageErrors, []);
   } finally {

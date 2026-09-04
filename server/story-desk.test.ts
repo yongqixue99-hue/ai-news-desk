@@ -221,6 +221,49 @@ test("StoryDesk merges a versioned model release across platform and community t
   assert.equal(stories[0]?.signals.length, 3);
 });
 
+test("a model launch Story keeps the first-party launch headline above later rollout commentary", () => {
+  const state = createDefaultState();
+  state.runs = [run("run-gpt6-headline", [
+    candidate("openai-gpt6", {
+      sourceName: "OpenAI",
+      sourceRole: "official",
+      title: "GPT-6 Astra",
+      url: "https://openai.com/index/gpt-6-astra/",
+      canonicalUrl: "https://openai.com/index/gpt-6-astra/",
+      publishedAt: "2026-09-03T18:00:00.000Z",
+      briefing: {
+        titleZh: "OpenAI 发布 GPT-6 Astra",
+        summaryZh: "OpenAI 正式发布 GPT-6 Astra。",
+        basis: "title",
+        generatedAt: "2026-09-03T18:05:00.000Z",
+        providerId: "test",
+      },
+    }),
+    candidate("verge-gpt6-rollout", {
+      sourceName: "The Verge",
+      sourceRole: "verification",
+      title: "Sam Altman apologizes for messy GPT-6 Astra rollout",
+      url: "https://www.theverge.com/gpt-6-astra-rollout",
+      canonicalUrl: "https://www.theverge.com/gpt-6-astra-rollout",
+      publishedAt: "2026-09-04T11:00:00.000Z",
+      briefing: {
+        titleZh: "Sam Altman 为 GPT-6 Astra 推送混乱致歉",
+        summaryZh: "The Verge 报道 GPT-6 Astra 推送后的用户访问问题。",
+        basis: "full-source",
+        generatedAt: "2026-09-04T11:05:00.000Z",
+        providerId: "test",
+      },
+    }),
+  ])];
+
+  const stories = buildStories(state, "2026-09-04T12:00:00.000Z");
+  assert.equal(stories.length, 1);
+  const story = stories[0];
+
+  assert.equal(story?.title, "OpenAI 发布 GPT-6 Astra");
+  assert.equal(story?.originalTitle, "GPT-6 Astra");
+});
+
 test("model releases expose a research dossier instead of pretending one headline is complete", () => {
   const state = createDefaultState();
   state.runs = [run("run-fable-dossier", [
@@ -403,6 +446,33 @@ test("today excludes unhandled stories after the 48-hour editorial window", () =
   assert.deepEqual(today.backlog.map((story) => story.originalTitle), ["Acme old model announcement"]);
 });
 
+test("today keeps a confirmed first-party model launch visible for a seven-day catch-up window", () => {
+  const state = createDefaultState();
+  state.runs = [run("run-fable-catch-up", [candidate("fable-catch-up", {
+    sourceName: "Anthropic",
+    sourceRole: "official",
+    title: "Anthropic released Claude Fable 5.1",
+    url: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+    canonicalUrl: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+    excerpt: "Anthropic officially released Claude Fable 5.1 and made it available through the Claude API.",
+    publishedAt: "2026-09-01T18:00:00.000Z",
+    briefing: {
+      titleZh: "Anthropic 发布 Claude Fable 5.1",
+      summaryZh: "Anthropic 正式发布 Claude Fable 5.1，并开放 Claude API。",
+      basis: "full-source",
+      generatedAt: "2026-09-01T18:10:00.000Z",
+      providerId: "test",
+    },
+  })])];
+
+  const today = buildTodayView(state, "2026-09-04T12:00:00.000Z");
+  const visible = [...today.mustReads, ...today.secondary];
+
+  assert.equal(visible[0]?.originalTitle, "Anthropic released Claude Fable 5.1");
+  assert.equal(visible[0]?.releaseDossier?.releaseStatus, "released");
+  assert.equal(today.backlog.length, 0);
+});
+
 test("StoryDesk counts only existing local files and requires both platforms for publication readiness", () => {
   const state = createDefaultState();
   const sourceImage = (id: string, overrides: Partial<Candidate["images"][number]> = {}) => ({
@@ -554,7 +624,7 @@ test("today explains recommendation shortages without promoting evidence-blocked
   assert.equal(today.funnel.visibleRecommendationCount, 6);
   assert.equal(today.funnel.recommendationShortageCount, 2);
   assert.deepEqual(today.funnel.recommendationDropReasons, [
-    { code: "outside-window", label: "超过 48 小时时效窗口", count: 1 },
+    { code: "outside-window", label: "超过常规 48 小时或模型发布 7 天窗口", count: 1 },
     { code: "already-drafted", label: "已经进入成稿流程", count: 1 },
     { code: "evidence-blocked", label: "证据不足，暂留观察", count: 1 },
   ]);

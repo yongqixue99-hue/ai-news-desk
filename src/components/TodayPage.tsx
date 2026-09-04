@@ -15,6 +15,7 @@ import {
   Pencil,
   RefreshCw,
   RotateCcw,
+  Search,
   ShieldCheck,
   Sparkles,
   TrendingUp,
@@ -574,9 +575,10 @@ interface TodayPageProps {
   onNavigate: (page: AppPage) => void;
   onNotice: (kind: "success" | "info" | "error", message: string) => void;
   onOpenDraft?: (draftId: string) => Promise<void> | void;
+  onSearch: (query: string) => Promise<void>;
 }
 
-export function TodayPage({ onNavigate, onNotice, onOpenDraft }: TodayPageProps) {
+export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: TodayPageProps) {
   const [today, setToday] = useState<TodayView>();
   const [detail, setDetail] = useState<StoryDetailResult>();
   const [loading, setLoading] = useState(true);
@@ -584,6 +586,8 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft }: TodayPageProps)
   const [error, setError] = useState<string>();
   const [explanationLoading, setExplanationLoading] = useState(false);
   const [explanationError, setExplanationError] = useState<string>();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searching, setSearching] = useState(false);
   const [activeStoryJob, setActiveStoryJob] = useState<ProductJob>();
   const explanationRequestRef = useRef(0);
   const activeStoryJobRef = useRef<ProductJob | undefined>(undefined);
@@ -915,6 +919,18 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft }: TodayPageProps)
     { label: "强证据", value: coverage?.strongEvidenceCount ?? 0, icon: ShieldCheck },
   ], [coverage]);
 
+  const submitSearch = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!query || searching) return;
+    setSearching(true);
+    try {
+      await onSearch(query);
+    } finally {
+      setSearching(false);
+    }
+  };
+
   return (
     <div className="page today-page">
       <header className="today-header">
@@ -928,6 +944,24 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft }: TodayPageProps)
           <button type="button" className="secondary-button" disabled={loading} onClick={() => void loadToday()}><RefreshCw className={loading ? "spin" : ""} size={16} />重新整理</button>
         </div>
       </header>
+
+      <form className="today-news-search" onSubmit={submitSearch}>
+        <div className="today-news-search-field">
+          <Search size={19} aria-hidden="true" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            maxLength={120}
+            aria-label="搜索想写的新闻"
+            placeholder="搜索模型、公司或事件，例如 GPT-6 Astra"
+          />
+        </div>
+        <button type="submit" className="primary-button" disabled={!searchQuery.trim() || searching}>
+          {searching ? <><RefreshCw className="spin" size={16} />搜索中</> : <><Search size={16} />搜索最近 7 天</>}
+        </button>
+        <p>实时读取已启用的官网与新闻来源；X 和社区帖子不参与这次事实搜索。</p>
+      </form>
 
       <section className="today-metrics" aria-label="今日覆盖概览">
         {metrics.map(({ label, value, icon: Icon }) => <div key={label}><Icon size={17} /><span>{label}</span><strong>{value}</strong></div>)}

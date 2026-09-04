@@ -133,6 +133,44 @@ test("portable collector does not treat a shared sitemap batch timestamp as each
   assert.equal(release?.metadata?.sitemap_lastmod_status, "declared");
 });
 
+test("portable collector keeps leading shared-batch sitemap pages inside the bounded discovery set", () => {
+  const sharedLastmod = "2026-09-04T12:30:45.046Z";
+  const leadingBatch = Array.from({ length: 20 }, (_, index) => `
+    <url>
+      <loc>${index === 10
+        ? "https://www.anthropic.com/claude-fable-and-mythos-5-1"
+        : `https://www.anthropic.com/shared-page-${index + 1}`}</loc>
+      <lastmod>${sharedLastmod}</lastmod>
+    </url>
+  `).join("");
+  const individuallyDated = Array.from({ length: 120 }, (_, index) => `
+    <url>
+      <loc>https://www.anthropic.com/dated-page-${index + 1}</loc>
+      <lastmod>2026-08-${String(31 - (index % 28)).padStart(2, "0")}T12:00:00Z</lastmod>
+    </url>
+  `).join("");
+
+  const items = parsePortableFeed(`
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      ${leadingBatch}
+      ${individuallyDated}
+    </urlset>
+  `, {
+    feedUrl: "https://www.anthropic.com/sitemap.xml",
+    feedName: "Anthropic",
+    sourceId: "anthropic-official",
+    sourceRole: "official",
+    category: "ai-official",
+    fetchedAt: "2026-09-04T13:00:00.000Z",
+  });
+
+  const launch = items.find((item) => item.url.endsWith("/claude-fable-and-mythos-5-1"));
+  assert.equal(items.length, 100);
+  assert.ok(launch, "a newly listed first-party launch must not be pushed out by older declared dates");
+  assert.equal(launch.published_at, undefined);
+  assert.equal(launch.metadata?.sitemap_lastmod_status, "shared-batch");
+});
+
 test("one unavailable portable source is reported without discarding a healthy source", async () => {
   const unavailable = { ...source, id: "unavailable", name: "Unavailable", url: "https://unavailable.example/feed" };
   const result = await collectPortableStructuredSources([source, unavailable], {

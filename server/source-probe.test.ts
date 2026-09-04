@@ -58,6 +58,21 @@ test("an empty RSS feed is a warning and increments the failure streak", async (
   assert.match(result.detail, /没有发现条目/);
 });
 
+test("a publisher sitemap is counted as a healthy feed instead of an empty RSS warning", async () => {
+  const result = await probeSource(rssSource({
+    url: "https://example.com/sitemap.xml",
+  }), {
+    fetcher: async () => new Response(
+      "<urlset><url><loc>https://example.com/news/one</loc></url><url><loc>https://example.com/news/two</loc></url></urlset>",
+      { status: 200, headers: { "content-type": "application/xml" } },
+    ),
+  });
+
+  assert.equal(result.status, "healthy");
+  assert.equal(result.itemCount, 2);
+  assert.equal(result.detail, "Sitemap 可访问，读取到 2 个网址条目");
+});
+
 test("a valid publisher feed larger than 512 KB is inspected within the bounded feed allowance", async () => {
   const largeDescription = "x".repeat(600 * 1024);
   const result = await probeSource(rssSource(), {

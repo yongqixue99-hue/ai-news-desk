@@ -5,6 +5,7 @@ import type {
   RawHorizonItem,
   SourceConfig,
 } from "./types.js";
+import { sourceRoleFor, sourceSupportsTopics } from "./source-routing.js";
 import type { XAccountObservation } from "./x-official.js";
 
 export interface SignalBatch {
@@ -53,6 +54,41 @@ interface SourceDeskDependencies {
 
 const isCommunityAdapter = (source: SourceConfig) =>
   source.kind === "zhihu" || source.kind === "last30days" || source.kind === "github";
+
+const hongKongDate = (value: Date) => {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
+
+/**
+ * Build the narrow, predictable collection request used by the Today search.
+ * It deliberately excludes community and X adapters: this path is for factual
+ * source discovery, while community discussion remains an explicit later step.
+ */
+export const buildFocusedNewsSearchRequest = (
+  sources: SourceConfig[],
+  query: string,
+  topicIds: CollectionTopicId[] = ["ai"],
+  now = new Date(),
+): CollectionRequest => ({
+  sourceIds: sources
+    .filter((source) => source.enabled
+      && source.kind !== "x"
+      && sourceRoleFor(source) !== "community"
+      && sourceSupportsTopics(source, topicIds))
+    .slice(0, 50)
+    .map((source) => source.id),
+  topicIds,
+  dateFrom: hongKongDate(new Date(now.getTime() - 6 * 86_400_000)),
+  dateTo: hongKongDate(now),
+  keywords: query.trim(),
+});
 
 /**
  * SourceDesk is the stable collection boundary. Callers do not need to know

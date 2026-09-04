@@ -274,6 +274,29 @@ function App() {
     onPreview?: (preview: { text?: string; providerName?: string; model?: string }) => void,
   ) => api.completeDraftInline(draftId, input, signal, onPreview), []);
 
+  const reportError = (error: unknown) =>
+    setNotice({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+
+  const searchNews = async (query: string) => {
+    setActionBusy(true);
+    try {
+      const result = await api.searchNews(query);
+      setActiveRunId(result.run.id);
+      setNotice({
+        kind: result.reused ? "info" : "success",
+        message: result.reused
+          ? "已有搜索采集正在运行，已切换到该记录。"
+          : `正在从最近 7 天的官网和新闻源搜索“${query.trim()}”。`,
+      });
+      navigate("workbench");
+      await refresh();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   if ((!state || !editorialSystem) && page === "today") {
     return (
       <AppShell
@@ -292,6 +315,7 @@ function App() {
           onNavigate={navigate}
           onNotice={(kind, message) => setNotice({ kind, message })}
           onOpenDraft={openDraftById}
+          onSearch={searchNews}
         />
       </AppShell>
     );
@@ -300,9 +324,6 @@ function App() {
   if (!state || !editorialSystem) {
     return <BootstrapStatusPage state={bootstrapState} onRetry={() => void bootstrap()} />;
   }
-
-  const reportError = (error: unknown) =>
-    setNotice({ kind: "error", message: error instanceof Error ? error.message : String(error) });
 
   const saveSettings = async (patch: Partial<Settings>) => {
     setState((current) => current ? { ...current, settings: { ...current.settings, ...patch } } : current);
@@ -1294,6 +1315,7 @@ function App() {
           onNavigate={navigate}
           onNotice={(kind, message) => setNotice({ kind, message })}
           onOpenDraft={openDraftById}
+          onSearch={searchNews}
         />
       ) : null}
       {page === "workbench" ? (
