@@ -47,7 +47,7 @@ import {
   switchDraftSafely,
 } from "../draft-stability";
 import { RichArticleEditor, type RichArticleEditorHandle } from "./RichArticleEditor";
-import { WeChatDraftPanel } from "./WeChatDraftPanel";
+import { WeChatDraftPanel, type WeChatDraftMetadata } from "./WeChatDraftPanel";
 import { DraftEvidencePanel } from "./DraftEvidencePanel";
 import { buildDraftEvidenceView } from "../../server/draft-evidence-view.js";
 import { draftStatusLabel, manualDraftStatuses } from "../draft-lifecycle-view";
@@ -55,6 +55,10 @@ import { buildDraftQualityView } from "../draft-quality-view";
 import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
 import { buildExternalWritingPrompt } from "../external-writing-bridge";
 import { buildDistributionTargets } from "../distribution-view";
+import {
+  prepareDistributionTargets,
+  type DistributionPreparationResult,
+} from "../distribution-preparation";
 import { getRovingTabTarget } from "../hooks/rovingTabs";
 import type {
   ArticleDraft,
@@ -202,6 +206,15 @@ const editableDraft = (draft: ArticleDraft | undefined) => {
   return next;
 };
 
+const wechatMetadataFor = (
+  draft: ArticleDraft | undefined,
+  settings: WeChatChannelSettings,
+): WeChatDraftMetadata => ({
+  author: settings.defaultAuthor,
+  digest: Array.from(draft?.take.trim() ?? "").slice(0, 120).join(""),
+  contentSourceUrl: draft?.provenance.originalUrl || "",
+});
+
 export function DraftWorkspace({
   drafts,
   materials,
@@ -246,6 +259,11 @@ export function DraftWorkspace({
   const [draftLibraryOpen, setDraftLibraryOpen] = useState(false);
   const [utilityTab, setUtilityTab] = useState<UtilityTab | null>(null);
   const [publishPlatform, setPublishPlatform] = useState<PublishPlatform>("wechat");
+  const [wechatMetadata, setWechatMetadata] = useState<WeChatDraftMetadata>(() =>
+    wechatMetadataFor(selected, wechatSettings));
+  const [distributionBusy, setDistributionBusy] = useState(false);
+  const [distributionResult, setDistributionResult] = useState<DistributionPreparationResult>();
+  const [distributionError, setDistributionError] = useState("");
   const [draftSearch, setDraftSearch] = useState("");
   const [topicInput, setTopicInput] = useState("");
   const [imageUrl, setImageUrl] = useState("");
@@ -307,6 +325,10 @@ export function DraftWorkspace({
     const next = editableDraft(recovered ?? selected);
     editingRef.current = next;
     setEditing(next);
+    setWechatMetadata(wechatMetadataFor(next, wechatSettings));
+    setDistributionBusy(false);
+    setDistributionResult(undefined);
+    setDistributionError("");
     setFillResult(selected?.fillResult);
     setPreflight(selected?.fillResult?.preflight);
     setPreflightError("");
@@ -576,6 +598,14 @@ export function DraftWorkspace({
     dirtyRef.current = true;
     setDirty(true);
     setSaveError("");
+    setDistributionResult(undefined);
+    setDistributionError("");
+  };
+
+  const updateWechatMetadata = (metadata: WeChatDraftMetadata) => {
+    setWechatMetadata(metadata);
+    setDistributionResult(undefined);
+    setDistributionError("");
   };
 
   const selectDraft = async (draftId: string) => {
@@ -759,27 +789,38 @@ export function DraftWorkspace({
     }
   };
 
-  const fill = async () => {
-    const latestPreflight = await checkPublisher(true);
-    if (!latestPreflight?.canQueueFill) return;
+  const prepareXiaoheihe = async (saveFirst: boolean) => {
+    const latestPreflight = await checkPublisher(saveFirst);
+    if (!latestPreflight) throw new Error("小黑盒发布前检查未完成，请查看连接状态后重试");
+    if (!latestPreflight.canQueueFill) throw new Error(latestPreflight.summary);
     const result = await onFill(editing.id);
+    if (!result) throw new Error("小黑盒填入未完成，请查看页面顶部提示");
     setFillResult(result);
     if (result?.preflight) setPreflight(result.preflight);
-    if (result) {
-      setEditing((current) => {
-        if (!current) return current;
-        const next = {
-          ...current,
-          fillResult: result,
-          publisherReceipt: result.receipt,
-          status: result.ok ? "filled" as const : "editing" as const,
-          publicationConfirmations: result.ok
-            ? withoutPlatformPublicationConfirmation(current, "xiaoheihe")
-            : current.publicationConfirmations,
-        };
-        editingRef.current = next;
-        return next;
-      });
+    setEditing((current) => {
+      if (!current) return current;
+      const next = {
+        ...current,
+        fillResult: result,
+        publisherReceipt: result.receipt,
+        status: result.ok ? "filled" as const : "editing" as const,
+        publicationConfirmations: result.ok
+          ? withoutPlatformPublicationConfirmation(current, "xiaoheihe")
+          : current.publicationConfirmations,
+      };
+      editingRef.current = next;
+      return next;
+    });
+    if (!result.ok) throw new Error(result.warning || result.receipt?.summary || "小黑盒只完成了部分填入");
+    return result;
+  };
+
+  const fill = async () => {
+    setPreflightError("");
+    try {
+      await prepareXiaoheihe(true);
+    } catch (error) {
+      setPreflightError(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -801,6 +842,50 @@ export function DraftWorkspace({
       });
     }
     return receipt;
+  };
+
+  const prepareAllPlatforms = async () => {
+    setDistributionBusy(true);
+    setDistributionResult(undefined);
+    setDistributionError("");
+    try {
+      const result = await prepareDistributionTargets({
+        save: async () => {
+          const saved = await save("manual");
+          if (!saved) throw new Error("当前正文尚未保存，已停止平台准备");
+        },
+        targets: [
+          {
+            id: "wechat",
+            available: Boolean(wechatSettings.appId && wechatSettings.appSecretConfigured),
+            unavailableReason: "微信公众号尚未连接；可先进入公众号设置完成 AppID 与 AppSecret 配置",
+            prepare: async () => {
+              const receipt = await syncWeChat(wechatMetadata);
+              if (!receipt) throw new Error("公众号草稿同步未完成，请查看页面顶部提示");
+              return receipt.operation === "created"
+                ? "已新建公众号草稿"
+                : receipt.operation === "updated"
+                  ? "已更新原公众号草稿"
+                  : "公众号草稿已经是当前版本";
+            },
+          },
+          {
+            id: "xiaoheihe",
+            available: Boolean(publisherStatus?.ok),
+            unavailableReason: "小黑盒填入助手尚未连接；请重新加载 Chrome 扩展并刷新工作台",
+            prepare: async () => {
+              await prepareXiaoheihe(false);
+              return "已填入小黑盒编辑器";
+            },
+          },
+        ],
+      });
+      setDistributionResult(result);
+    } catch (error) {
+      setDistributionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDistributionBusy(false);
+    }
   };
 
   const confirmPublication = async (platform: PublishPlatform) => {
@@ -1685,6 +1770,46 @@ export function DraftWorkspace({
                     <div className="distribution-flow" aria-label="多平台分发边界">
                       <span>当前正文</span><i>→</i><span>平台适配</span><i>→</i><span>草稿／编辑器</span><i>→</i><strong>你手动发布</strong>
                     </div>
+                    <div className="distribution-batch-card">
+                      <div className="distribution-batch-copy">
+                        <span><CheckCircle2 size={13} />安全半自动</span>
+                        <strong>一键准备全部已接入平台</strong>
+                        <small>先保存当前正文，再同步公众号草稿箱、填入小黑盒编辑器；单个平台失败不会中断其他平台。</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="primary-button full"
+                        disabled={distributionBusy || saving || busy}
+                        onClick={() => void prepareAllPlatforms()}
+                      >
+                        {distributionBusy ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}
+                        {distributionBusy ? "正在逐个平台准备…" : "一键准备全部平台"}
+                      </button>
+                      <p><ShieldAlert size={12} />固定停在各平台的最终发布按钮之前，不会代替你公开发布。</p>
+                    </div>
+                    {distributionResult ? (
+                      <section className={`distribution-batch-result ${distributionResult.outcome}`}>
+                        <strong>{distributionResult.outcome === "prepared"
+                          ? "全部已准备，等待你到平台确认发布"
+                          : distributionResult.outcome === "partial"
+                            ? "部分平台已准备，其余平台可单独处理"
+                            : "本次没有平台准备完成"}</strong>
+                        <div>
+                          {distributionResult.targets.map((item) => {
+                            const target = distributionTargets.find((entry) => entry.id === item.id);
+                            return (
+                              <span className={item.status} key={item.id}>
+                                {item.status === "prepared" ? <CheckCircle2 size={13} /> : <Info size={13} />}
+                                <span><b>{target?.label ?? item.id}</b><small>{item.detail}</small></span>
+                                <em>{item.status === "prepared" ? "已准备" : item.status === "skipped" ? "未连接" : "未完成"}</em>
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <small><ShieldAlert size={11} />最终发布调用：0 次</small>
+                      </section>
+                    ) : null}
+                    {distributionError ? <p className="preflight-error distribution-batch-error">{distributionError}</p> : null}
                     <div className="platform-options">
                       {distributionTargets.map((target) => (
                         <button
@@ -1884,10 +2009,12 @@ export function DraftWorkspace({
                     <WeChatDraftPanel
                       draft={editing}
                       settings={wechatSettings}
+                      metadata={wechatMetadata}
                       dirty={dirty}
                       saving={saving}
                       busy={busy}
                       copiedFormatted={copiedRich}
+                      onMetadataChange={updateWechatMetadata}
                       onSaveDraft={() => save("manual")}
                       onSync={syncWeChat}
                       onCopyFormatted={copyFormatted}

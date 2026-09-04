@@ -5,6 +5,74 @@ export interface DeliveryRequest {
   channel: DeliveryChannel;
 }
 
+export type DeliveryPreparationStatus = "prepared" | "failed" | "skipped";
+
+export interface DeliveryPreparationResult {
+  outcome: "prepared" | "partial" | "failed";
+  finalPublishAttempted: false;
+  targets: Array<{
+    id: DeliveryChannel;
+    status: DeliveryPreparationStatus;
+    detail: string;
+  }>;
+}
+
+export interface DeliveryPreparationTarget {
+  id: DeliveryChannel;
+  available: boolean;
+  unavailableReason?: string;
+  prepare: () => Promise<string>;
+}
+
+interface PrepareDeliveryTargetsInput {
+  save: () => Promise<unknown>;
+  targets: DeliveryPreparationTarget[];
+}
+
+/**
+ * Saves one mutable article snapshot, then prepares every available channel
+ * independently. The interface deliberately has no final-publish callback.
+ */
+export const prepareDeliveryTargets = async ({
+  save,
+  targets,
+}: PrepareDeliveryTargetsInput): Promise<DeliveryPreparationResult> => {
+  await save();
+  const prepared = await Promise.all(targets.map(async (target) => {
+    if (!target.available) {
+      return {
+        id: target.id,
+        status: "skipped" as const,
+        detail: target.unavailableReason || "平台尚未连接",
+      };
+    }
+    try {
+      return {
+        id: target.id,
+        status: "prepared" as const,
+        detail: await target.prepare(),
+      };
+    } catch (error) {
+      return {
+        id: target.id,
+        status: "failed" as const,
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }));
+  const preparedCount = prepared.filter((target) => target.status === "prepared").length;
+
+  return {
+    outcome: preparedCount === prepared.length
+      ? "prepared"
+      : preparedCount === 0
+        ? "failed"
+        : "partial",
+    finalPublishAttempted: false,
+    targets: prepared,
+  };
+};
+
 /**
  * DeliveryDesk is the channel-neutral delivery boundary. It serializes a
  * draft/channel pair so retries can update the same remote draft instead of

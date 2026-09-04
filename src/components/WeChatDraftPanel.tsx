@@ -8,10 +8,12 @@ import type { ArticleDraft, WeChatChannelSettings, WeChatDraftSyncReceipt } from
 interface WeChatDraftPanelProps {
   draft: ArticleDraft;
   settings: WeChatChannelSettings;
+  metadata?: WeChatDraftMetadata;
   dirty: boolean;
   saving: boolean;
   busy: boolean;
   copiedFormatted: boolean;
+  onMetadataChange?: (metadata: WeChatDraftMetadata) => void;
   onSaveDraft: () => Promise<unknown>;
   onSync: (input: { author?: string; digest?: string; contentSourceUrl?: string }) => Promise<WeChatDraftSyncReceipt | undefined>;
   onCopyFormatted: () => Promise<void>;
@@ -19,8 +21,18 @@ interface WeChatDraftPanelProps {
   onOpenSettings: () => void;
 }
 
+export interface WeChatDraftMetadata {
+  author: string;
+  digest: string;
+  contentSourceUrl: string;
+}
+
 const characterCount = (value: string) => Array.from(value.trim()).length;
-const shortenedDigest = (value: string) => Array.from(value.trim()).slice(0, 120).join("");
+const metadataFor = (draft: ArticleDraft, settings: WeChatChannelSettings): WeChatDraftMetadata => ({
+  author: settings.defaultAuthor,
+  digest: Array.from(draft.take.trim()).slice(0, 120).join(""),
+  contentSourceUrl: draft.provenance.originalUrl || "",
+});
 const formatSyncTime = (value: string) => new Intl.DateTimeFormat("zh-CN", {
   month: "2-digit",
   day: "2-digit",
@@ -29,22 +41,22 @@ const formatSyncTime = (value: string) => new Intl.DateTimeFormat("zh-CN", {
   hour12: false,
 }).format(new Date(value));
 
-export function WeChatDraftPanel({ draft, settings, dirty, saving, busy, copiedFormatted, onSaveDraft, onSync, onCopyFormatted, onConfirmPublished, onOpenSettings }: WeChatDraftPanelProps) {
-  const [author, setAuthor] = useState(settings.defaultAuthor);
-  const [digest, setDigest] = useState(() => shortenedDigest(draft.take));
-  const [contentSourceUrl, setContentSourceUrl] = useState(draft.provenance.originalUrl || "");
+export function WeChatDraftPanel({ draft, settings, metadata: controlledMetadata, dirty, saving, busy, copiedFormatted, onMetadataChange, onSaveDraft, onSync, onCopyFormatted, onConfirmPublished, onOpenSettings }: WeChatDraftPanelProps) {
+  const [localMetadata, setLocalMetadata] = useState(() => metadataFor(draft, settings));
+  const metadata = controlledMetadata ?? localMetadata;
+  const updateMetadata = onMetadataChange ?? setLocalMetadata;
+  const controlled = controlledMetadata !== undefined;
+  const { author, digest, contentSourceUrl } = metadata;
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [confirmingPublished, setConfirmingPublished] = useState(false);
   const [receipt, setReceipt] = useState(draft.wechatDraft);
 
   useEffect(() => {
-    setAuthor(settings.defaultAuthor);
-    setDigest(shortenedDigest(draft.take));
-    setContentSourceUrl(draft.provenance.originalUrl || "");
+    if (!controlled) setLocalMetadata(metadataFor(draft, settings));
     setReceipt(draft.wechatDraft);
     setSyncError("");
-  }, [draft.id, settings.defaultAuthor]);
+  }, [controlled, draft.id, settings.defaultAuthor]);
   useEffect(() => setReceipt(draft.wechatDraft), [draft.wechatDraft]);
 
   const insertedImages = useMemo(() => {
@@ -133,9 +145,9 @@ export function WeChatDraftPanel({ draft, settings, dirty, saving, busy, copiedF
 
       <section className="utility-section wechat-metadata-section">
         <h3>公众号信息</h3>
-        <label><span>作者 <small>{characterCount(author)}/16</small></span><input value={author} maxLength={16} onChange={(event) => setAuthor(event.target.value)} placeholder="可留空" /></label>
-        <label><span>摘要 <small>{characterCount(digest)}/120</small></span><textarea value={digest} maxLength={120} onChange={(event) => setDigest(event.target.value)} placeholder="默认取文章观点，可在同步前调整" /></label>
-        <label><span>原文链接 <small>可留空</small></span><input value={contentSourceUrl} onChange={(event) => setContentSourceUrl(event.target.value)} placeholder="https://…" /></label>
+        <label><span>作者 <small>{characterCount(author)}/16</small></span><input value={author} maxLength={16} onChange={(event) => updateMetadata({ ...metadata, author: event.target.value })} placeholder="可留空" /></label>
+        <label><span>摘要 <small>{characterCount(digest)}/120</small></span><textarea value={digest} maxLength={120} onChange={(event) => updateMetadata({ ...metadata, digest: event.target.value })} placeholder="默认取文章观点，可在同步前调整" /></label>
+        <label><span>原文链接 <small>可留空</small></span><input value={contentSourceUrl} onChange={(event) => updateMetadata({ ...metadata, contentSourceUrl: event.target.value })} placeholder="https://…" /></label>
       </section>
 
       <section className="utility-section">

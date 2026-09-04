@@ -479,5 +479,6 @@ Windows 计划任务在本轮重启并复验。另修复了机器上同时存在
 2. X 免费人工接力不再要求复制正文。用户在单条原帖页点击浏览器助手后，扩展只凭 `activeTab` 读取当前 URL，规范化后交给本地工作台；服务端使用 X 官方无需认证的 oEmbed 读取公开正文，10 秒超时，失败时提示手工粘贴。
 3. 删除了 X 页面 content script 与 X/Twitter 常驻 host permission。扩展不读取 X DOM、Cookie 或后台时间线，版本提升为 `0.1.20`；用户需要在 `chrome://extensions` 对已加载扩展点击一次“重新加载”。
 4. oEmbed 只解决已知单条 URL 的导入，不是监控。免费持续发现仍用 X 私人 List；真正无人值守监控仍需 X 官方付费 API。新闻源页现已内置 Developer Console、Bearer Token、credits、spending limit、关闭自动充值、DPAPI 保存与单源测试的五步说明。
+5. 多平台分发台新增“一键准备全部平台”：统一保存一次当前文章，随后分别同步微信公众号草稿箱、填入小黑盒编辑器；平台未连接会跳过，单个平台失败会留下独立结果且不取消其他平台。公众号作者、摘要和原文链接由单平台面板与批量动作共享，避免批量同步丢掉用户刚改的元数据。该编排器只暴露 prepare 操作，结果固定记录 `finalPublishAttempted: false`，不接入群发或最终发布接口。
 
-验证结果：X 官方 oEmbed 实网请求返回 HTTP 200；定向测试 12/12 通过；完整 `npm test` 595/595、编辑质量黄金集 22/22、`npm run build` 通过。Windows 计划任务已用项目脚本更新并重启，4317 页面与健康接口均为 200；Codex、Horizon 正常。Publisher 仍显示未连接，直到用户重新加载 `chrome-extension/` 并刷新工作台。构建提示 `DraftWorkspace` 压缩前约 586 KB，仍是后续按需拆包的非阻断性能事项。
+验证结果：X 官方 oEmbed 实网请求返回 HTTP 200；原 X／分发定向测试 12/12 通过；本轮完整 `npm test` 598/598、编辑质量黄金集 22/22、`npm run build` 通过。多平台批量准备已在 1440×1000 与 390×844 两种视口完成浏览器检查；Windows 计划任务此前已用项目脚本更新并重启，本轮 4317 页面与健康接口仍均为 200，Codex、Horizon 正常。Publisher 仍显示未连接，直到用户重新加载 `chrome-extension/` 并刷新工作台。构建提示 `DraftWorkspace` 压缩前约 590 KB，仍是后续按需拆包的非阻断性能事项。
