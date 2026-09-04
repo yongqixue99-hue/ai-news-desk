@@ -35,6 +35,46 @@ const throwIfAborted = (signal?: AbortSignal) => {
   if (signal?.aborted) throw abortError();
 };
 
+export interface CodexExecRequestInput {
+  model: string;
+  reasoningEffort: "low" | "medium" | "high" | "xhigh";
+  schemaPath: string;
+  outputPath: string;
+  prompt: string;
+  imagePath?: string;
+}
+
+export interface CodexExecRequest {
+  args: string[];
+  stdin: string;
+}
+
+export const buildCodexExecRequest = (input: CodexExecRequestInput): CodexExecRequest => {
+  if (!input.prompt.trim()) throw new Error("Codex 提示词不能为空");
+  return {
+    args: [
+      "-c",
+      `model="${assertModelName(input.model)}"`,
+      "-c",
+      "service_tier=fast",
+      "-c",
+      `model_reasoning_effort=${input.reasoningEffort}`,
+      "exec",
+      "--ephemeral",
+      "-s",
+      "workspace-write",
+      "-C",
+      process.cwd(),
+      "--output-schema",
+      input.schemaPath,
+      "--output-last-message",
+      input.outputPath,
+      ...(input.imagePath ? ["--image", input.imagePath] : []),
+    ],
+    stdin: input.prompt,
+  };
+};
+
 const runCodex = (
   provider: AiProviderConfig,
   prompt: string,
@@ -49,33 +89,21 @@ const runCodex = (
     reject(abortError());
     return;
   }
-  const model = assertModelName(provider.model);
+  const request = buildCodexExecRequest({
+    model: provider.model,
+    reasoningEffort,
+    schemaPath,
+    outputPath,
+    prompt,
+    imagePath,
+  });
   const child = spawn(
     resolveCodexExecutable(),
-    [
-      "-c",
-      `model="${model}"`,
-      "-c",
-      "service_tier=fast",
-      "-c",
-      `model_reasoning_effort=${reasoningEffort}`,
-      "exec",
-      "--ephemeral",
-      "-s",
-      "workspace-write",
-      "-C",
-      process.cwd(),
-      "--output-schema",
-      schemaPath,
-      "--output-last-message",
-      outputPath,
-      ...(imagePath ? ["--image", imagePath] : []),
-      prompt,
-    ],
+    request.args,
     {
       cwd: process.cwd(),
       env: { ...process.env, NO_COLOR: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     },
   );
   let stderr = "";
@@ -99,6 +127,8 @@ const runCodex = (
     stderr += String(chunk);
     if (stderr.length > 20_000) stderr = stderr.slice(-20_000);
   });
+  child.stdin.on("error", (error) => finish(() => reject(error)));
+  child.stdin.end(request.stdin);
   signal?.addEventListener("abort", onAbort, { once: true });
   child.stdout.resume();
   child.on("error", (error) => finish(() => reject(error)));

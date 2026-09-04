@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildCodexExecRequest,
   runGenerationProviderObserved,
   runInlineCompletionProvider,
   streamInlineCompletionProvider,
@@ -28,6 +29,26 @@ const input = {
   outputPath: "unused.output.json",
   apiKey: "test-key",
 };
+
+test("Codex vision requests pipe a non-empty prompt instead of letting --image consume it", () => {
+  const request = buildCodexExecRequest({
+    model: "gpt-5.6-sol",
+    reasoningEffort: "xhigh",
+    schemaPath: "C:\\tmp\\screenshot.schema.json",
+    outputPath: "C:\\tmp\\screenshot.output.json",
+    imagePath: "C:\\tmp\\token-chart.png",
+    prompt: "请提取图片里的表格和结论",
+  });
+
+  assert.deepEqual(request.args.slice(-4), [
+    "--output-last-message",
+    "C:\\tmp\\screenshot.output.json",
+    "--image",
+    "C:\\tmp\\token-chart.png",
+  ]);
+  assert.equal(request.stdin, "请提取图片里的表格和结论");
+  assert.ok(request.stdin.trim().length > 0);
+});
 
 test("provider request stops before transport when its signal is cancelled", async () => {
   const controller = new AbortController();
