@@ -29,13 +29,21 @@ const quoteQueryTerm = (value: string) => {
   return cleaned.includes(" ") ? `"${cleaned}"` : cleaned;
 };
 
+const modelVersionAliases = (value: string) => {
+  const cleaned = value.normalize("NFKC").replace(/\s+/g, " ").trim();
+  const match = /^([a-z]+)[\s_-]*(\d+(?:\.\d+)*)$/iu.exec(cleaned);
+  if (!match) return [quoteQueryTerm(cleaned)].filter(Boolean);
+  const [, family, version] = match;
+  return [family + version, `"${family}-${version}"`, `"${family} ${version}"`];
+};
+
 export const buildDiscoveryQuery = (
   baseQuery: string,
   filters: Pick<CollectionRequest, "dateFrom" | "dateTo" | "keywords"> = {},
 ) => {
   const terms = keywordTerms(filters.keywords);
   const keywordQuery = terms.length
-    ? `(${terms.map(quoteQueryTerm).filter(Boolean).join(" OR ")})`
+    ? `(${[...new Set(terms.flatMap(modelVersionAliases))].join(" OR ")})`
     : "";
   return [
     baseQuery,

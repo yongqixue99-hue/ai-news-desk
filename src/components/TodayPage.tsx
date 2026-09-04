@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { api, type ProductJob, type StoryDetailResult } from "../api";
 import { useDialogA11y } from "../hooks/useDialogA11y";
+import { beginStarterDraft, starterDraftActionCopy } from "../starter-draft";
 import type {
   AppPage,
   AssignmentMode,
@@ -88,6 +89,12 @@ const terminalJobStatuses = new Set<ProductJob["status"]>(["complete", "failed",
 const packageIdFromJob = (job: ProductJob) => {
   if (!job.result || typeof job.result !== "object") return undefined;
   const value = (job.result as { packageId?: unknown }).packageId;
+  return typeof value === "string" ? value : undefined;
+};
+
+const draftIdFromJob = (job: ProductJob) => {
+  if (!job.result || typeof job.result !== "object") return undefined;
+  const value = (job.result as { draftId?: unknown }).draftId;
   return typeof value === "string" ? value : undefined;
 };
 
@@ -204,7 +211,7 @@ const StoryRow = ({ story, rank, featured = false, busy = false, processing = fa
         {story.selected ? <><Check size={14} />已加入待写</> : "加入待写"}
       </button>
       <button type="button" className="primary-button" disabled={busy || processing || !story.assignment.canDraft || story.drafted} onClick={() => onQuickDraft(story)}>
-        {story.drafted ? "已有草稿" : <><Pencil size={14} />采用并开始写</>}
+        {story.drafted ? "已有草稿" : <><Sparkles size={14} />{starterDraftActionCopy.primary}</>}
       </button>
     </div>
   </article>
@@ -480,13 +487,13 @@ const StoryDrawer = ({
               ) : null}
               {contentPackage.status === "ready" ? (
                 <div className="package-draft-action">
-                  <div><strong>素材边界已经冻结</strong><span>先由你写；事实、角度、来源和图片会一起带进编辑器。</span></div>
+                  <div><strong>素材边界已经冻结</strong><span>系统先按证据生成一版基础稿；你可以直接在编辑器里重写、删改，让它更像你。</span></div>
                   <div className="package-draft-buttons">
-                    <button type="button" className="primary-button" disabled={busy || processing} onClick={() => onStartWriting(contentPackage)}>
-                      {busy ? <RefreshCw className="spin" size={16} /> : <Pencil size={16} />}开始写作
+                    <button type="button" className="primary-button" disabled={busy || processing} onClick={() => onGenerateDraft(contentPackage)}>
+                      {busy ? <RefreshCw className="spin" size={16} /> : <Sparkles size={16} />}{starterDraftActionCopy.primary}
                     </button>
-                    <button type="button" className="secondary-button" disabled={busy || processing} onClick={() => onGenerateDraft(contentPackage)}>
-                      <Sparkles size={16} />AI 生成整稿
+                    <button type="button" className="secondary-button" disabled={busy || processing} onClick={() => onStartWriting(contentPackage)}>
+                      <Pencil size={16} />{starterDraftActionCopy.blank}
                     </button>
                   </div>
                 </div>
@@ -562,7 +569,7 @@ const StoryDrawer = ({
               <button type="button" className="secondary-button" disabled={busy} onClick={() => onQueue(!story.selected)}>
                 {story.selected ? <><Check size={15} />移出待写</> : <><FileStack size={15} />加入待写</>}
               </button>
-              <button type="button" className="primary-button" disabled={busy || processing || !story.assignment.canDraft} onClick={() => onQuickWrite(mode)}><Pencil size={15} />采用并开始写作</button>
+              <button type="button" className="primary-button" disabled={busy || processing || !story.assignment.canDraft} onClick={() => onQuickWrite(mode)}><Sparkles size={15} />{starterDraftActionCopy.primary}</button>
             </>
           )}
         </footer>
@@ -593,7 +600,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
   const activeStoryJobRef = useRef<ProductJob | undefined>(undefined);
   const handledJobIdsRef = useRef(new Set<string>());
   const storyJobIntentsRef = useRef(new Map<string, {
-    kind: "package" | "evidence" | "quick-write";
+    kind: "package" | "evidence" | "quick-write" | "draft";
     storyId: string;
   }>());
 
@@ -790,20 +797,21 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
   };
 
   const generateDraftFromPackage = async (contentPackage: ContentPackage) => {
-      const queued = await api.createDraftFromPackage(contentPackage.id);
-      if (!queued.draft && !["complete", "failed", "cancelled"].includes(queued.job.status)) {
-        onNotice("info", "成稿任务已进入后台；你可以继续选题，任务中心会持续显示进度。");
-        setDetail(undefined);
-        await loadToday(true);
-        return;
-      }
-      if (queued.job.status !== "complete") throw new Error(queued.job.error || "成稿任务没有完成，请在任务中心重试");
-      const result = (queued.job.result ?? {}) as { reused?: boolean; imageCount?: number };
-      onNotice("success", result.reused || queued.reused
-        ? "这份素材包已经生成过草稿，已为你打开。"
-        : `图文草稿已生成，并带入 ${result.imageCount ?? queued.draft?.images.length ?? 0} 张来源图片。`);
+    const launch = await beginStarterDraft(contentPackage.id, api.createDraftFromPackage);
+    if (launch.kind === "queued") {
+      storyJobIntentsRef.current.set(launch.job.id, { kind: "draft", storyId: contentPackage.storyId });
+      setActiveStoryJob(launch.job);
+      onNotice("info", "正在根据已核验素材生成基础稿；完成后会自动打开编辑器。");
       setDetail(undefined);
-      onNavigate("drafts");
+      await loadToday(true);
+      return;
+    }
+    onNotice("success", launch.reused
+      ? "这份基础稿已经生成过，已为你重新打开。"
+      : `基础稿已生成，并带入 ${launch.draft.images.length} 张来源图片；现在可以直接删改。`);
+    setDetail(undefined);
+    if (onOpenDraft) await onOpenDraft(launch.draft.id);
+    else onNavigate("drafts");
   };
 
   const generateDraft = async (contentPackage: ContentPackage) => {
@@ -824,8 +832,8 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
       onNotice(
         "success",
         result.reused
-          ? "已重新打开这份人工草稿；原来的修改都还在。"
-          : `写作台已准备好，并带入 ${result.draft.factClaims?.length ?? 0} 条事实和 ${result.draft.images.length} 张来源图片。`,
+          ? "已重新打开这份空白草稿；原来的修改都还在。"
+          : `已从空白开始，并带入 ${result.draft.factClaims?.length ?? 0} 条事实和 ${result.draft.images.length} 张来源图片。`,
       );
       setDetail(undefined);
       if (onOpenDraft) await onOpenDraft(result.draft.id);
@@ -863,7 +871,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
         await loadToday(true);
         return;
       }
-      await startWritingFromPackage(queued.contentPackage);
+      await generateDraftFromPackage(queued.contentPackage);
     } catch (draftError) {
       onNotice("error", draftError instanceof Error ? draftError.message : String(draftError));
     } finally {
@@ -881,7 +889,17 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
       try {
         if (job.status !== "complete") throw new Error(job.error || "后台任务没有完成，请在任务中心重试");
         if (!intent) return;
-        if (intent.kind === "evidence") {
+        if (intent.kind === "draft") {
+          const draftId = draftIdFromJob(job);
+          if (!draftId) throw new Error("基础稿任务完成，但没有返回草稿 ID");
+          const result = (job.result ?? {}) as { reused?: boolean; imageCount?: number };
+          onNotice("success", result.reused
+            ? "这份基础稿已经生成过，已为你重新打开。"
+            : `基础稿已生成，并带入 ${result.imageCount ?? 0} 张来源图片；现在可以直接删改。`);
+          setDetail(undefined);
+          if (onOpenDraft) await onOpenDraft(draftId);
+          else onNavigate("drafts");
+        } else if (intent.kind === "evidence") {
           const refreshed = await api.story(intent.storyId);
           setDetail((current) => current?.story.id === intent.storyId ? refreshed : current);
           onNotice(refreshed.story.evidenceStrength === "strong" ? "success" : "info", refreshed.story.evidenceStrength === "strong"
@@ -892,7 +910,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
           if (!packageId) throw new Error("素材包任务完成，但没有返回素材包 ID");
           const contentPackage = await api.contentPackage(packageId);
           if (intent.kind === "quick-write" && contentPackage.status === "ready") {
-            await startWritingFromPackage(contentPackage);
+            await generateDraftFromPackage(contentPackage);
           } else {
             setDetail((current) => current?.story.id === intent.storyId ? { ...current, contentPackage } : current);
             onNotice(contentPackage.status === "ready" ? "success" : "info", contentPackage.status === "ready"

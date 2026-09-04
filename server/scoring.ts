@@ -89,6 +89,11 @@ const keywordMatches = (text: string, keyword: string) => {
   return pattern.test(text);
 };
 
+const normalizeSearchSeparators = (value: string) => value
+  .normalize("NFKC")
+  .toLocaleLowerCase()
+  .replace(/(?<=\p{L})[\s_-]+(?=\p{N})/gu, "");
+
 export const topicRelevance = (text: string, topicIds: CollectionTopicId[]) => {
   const definitions = topicDefinitionsFor(normalizeTopicIds(topicIds));
   const matchedTopics = definitions.filter((topic) =>
@@ -291,8 +296,8 @@ export const rawItemMatchesSearch = (
   if (rawItemTimeRejectionReason(item, filters, options)) return false;
   const terms = keywordTerms(filters.keywords);
   if (!terms.length) return true;
-  const searchable = `${item.title} ${item.content ?? ""}`.toLocaleLowerCase();
-  return terms.some((term) => searchable.includes(term.toLocaleLowerCase()));
+  const searchable = normalizeSearchSeparators(`${item.title} ${item.content ?? ""}`);
+  return terms.some((term) => keywordMatches(searchable, normalizeSearchSeparators(term)));
 };
 
 export const rawItemToCandidate = (

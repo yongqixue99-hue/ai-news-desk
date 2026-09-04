@@ -146,6 +146,19 @@ test("manual date and keyword filters are applied before editorial scoring", () 
   assert.equal(rawItemMatchesSearch(matching, { keywords: "Nintendo" }), false);
 });
 
+test("manual search treats compact, hyphenated, and spaced model versions as the same term", () => {
+  const release = item({
+    title: "OpenAI launches GPT-6 Astra",
+    content: "The model is rolling out to paid users.",
+  });
+
+  const options = { windowHours: 24 };
+  assert.equal(rawItemMatchesSearch(release, { keywords: "GPT6" }, options), true);
+  assert.equal(rawItemMatchesSearch(release, { keywords: "GPT 6" }, options), true);
+  assert.equal(rawItemMatchesSearch(release, { keywords: "GPT-6" }, options), true);
+  assert.equal(rawItemMatchesSearch(release, { keywords: "GPT60" }, options), false);
+});
+
 test("automatic collection rejects stale, future, and undated records outside its configured window", () => {
   const currentTime = Date.parse("2026-08-31T12:00:00.000Z");
   const options = { windowHours: 24, now: currentTime };

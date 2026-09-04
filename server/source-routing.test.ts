@@ -2,12 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultSources } from "./defaults.js";
 import {
+  buildDiscoveryQuery,
   eligibleSourcesForTopics,
   dynamicTopicQuery,
   routedFeedsForSource,
   sourceRoleFor,
   sourceSupportsTopics,
 } from "./source-routing.js";
+
+test("model-version discovery expands compact search terms without requiring exact punctuation", () => {
+  const compact = buildDiscoveryQuery("artificial intelligence", { keywords: "GPT6" });
+  const hyphenated = buildDiscoveryQuery("artificial intelligence", { keywords: "GPT-6" });
+
+  for (const query of [compact, hyphenated]) {
+    assert.match(query, /GPT6/u);
+    assert.match(query, /"GPT-6"/u);
+    assert.match(query, /"GPT 6"/u);
+  }
+});
 
 test("comprehensive discovery queries cover both English and Chinese terms", () => {
   const query = dynamicTopicQuery(["ai"]);
