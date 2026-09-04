@@ -224,7 +224,7 @@ test("owned rights do not silently grant a platform authorization", () => {
   });
 
   assert.equal(result.status, "blocked");
-  assert.match(result.blockers.join(" "), /未获准用于 xiaoheihe/);
+  assert.match(result.blockers.join(" "), /尚未记录你确认可用于 xiaoheihe/);
 });
 
 test("an exact fingerprint duplicate is reported rather than copied again", () => {

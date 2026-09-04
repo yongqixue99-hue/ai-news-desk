@@ -300,13 +300,19 @@ export const evaluatePublisherPreflight = (
       label: "登录状态",
       status: input.runtime.loggedIn === true ? "pass" : input.runtime.loggedIn === false ? "blocked" : "unknown",
       required: true,
-      detail: input.runtime.loggedIn === true ? "已确认登录" : input.runtime.loggedIn === false ? "尚未登录" : "等待页面探针确认",
+      detail: input.runtime.loggedIn === true
+        ? "已确认登录"
+        : input.runtime.loggedIn === false
+          ? "尚未登录"
+          : "尚未探测；填入时自动确认登录状态",
       issueCode: input.runtime.loggedIn === true
         ? undefined
         : input.runtime.loggedIn === false
           ? "PREFLIGHT_LOGIN_REQUIRED"
           : "PREFLIGHT_LOGIN_UNKNOWN",
-      action: "在常用 Chrome 中登录小黑盒，并保持文章编辑器页面打开。",
+      action: input.runtime.loggedIn === false
+        ? "在常用 Chrome 中登录小黑盒后重试。"
+        : "若填入时跳转登录页，在常用 Chrome 完成登录后重试。",
     },
     {
       id: "editor",
@@ -317,13 +323,15 @@ export const evaluatePublisherPreflight = (
         ? `${isImagePost ? "图文" : "文章"}编辑器已就绪`
         : input.runtime.editorReady === false
           ? `当前不在${isImagePost ? "图文" : "文章"}编辑器`
-          : "等待页面探针确认",
+          : `尚未探测；填入时自动打开并确认${isImagePost ? "图文" : "文章"}编辑器`,
       issueCode: input.runtime.editorReady === true
         ? undefined
         : input.runtime.editorReady === false
           ? "PREFLIGHT_EDITOR_NOT_READY"
           : "PREFLIGHT_EDITOR_UNKNOWN",
-      action: `打开小黑盒“${isImagePost ? "发布图文" : "发布文章"}”编辑器后重新检查。`,
+      action: input.runtime.editorReady === false
+        ? `打开小黑盒“${isImagePost ? "发布图文" : "发布文章"}”编辑器后重试。`
+        : "填入助手会自动打开对应编辑器，无需提前处理。",
     },
     {
       id: "title",
@@ -474,7 +482,7 @@ export const evaluatePublisherPreflight = (
     summary: publishReady
       ? "已通过填入前检查，可以安全填入编辑器"
       : queueBlocking.length === 0
-        ? "草稿已准备好，仍需页面探针确认登录和编辑器状态"
+        ? "草稿已准备好；登录和编辑器将在填入时自动确认"
         : `有 ${queueBlocking.length} 项阻止填入，请先处理`,
     finalPublish: {
       manualOnly: true,

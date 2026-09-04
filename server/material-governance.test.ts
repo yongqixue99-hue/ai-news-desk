@@ -57,6 +57,10 @@ test("unknown, expired and platform-mismatched rights block publication", () => 
   assert.equal(expired.effectiveRights, "expired");
   assert.match(expired.blockers.join(" "), /到期/);
   assert.match(wrongPlatform.blockers.join(" "), /小黑盒|xiaoheihe/i);
+  assert.equal(
+    wrongPlatform.blockers.at(-1),
+    "已选用这张图片，但尚未记录你确认可用于 xiaoheihe。",
+  );
 });
 
 test("licensed material requires traceable authorization evidence and a valid expiry", () => {

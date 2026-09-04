@@ -220,7 +220,7 @@ export const evaluateMaterialPublishEligibility = (
   }
   if (!platformId) blockers.push("没有指定目标发布平台。");
   if (!allowedPlatforms.includes("*") && !allowedPlatforms.includes(platformId)) {
-    blockers.push(`素材未获准用于 ${platform || "当前平台"}。`);
+    blockers.push(`已选用这张图片，但尚未记录你确认可用于 ${platform || "当前平台"}。`);
   }
 
   return {

@@ -515,3 +515,5 @@ Windows 计划任务在本轮重启并复验。另修复了机器上同时存在
 当前 Tab Provider 仍为 DeepSeek `deepseek-v4-flash`，已真实补全成功。Gemini Key 已配置，候选补全模型为 `gemini-3.5-flash-lite`，但“X / Gemini 零新增支出”策略会阻止 Gemini API 测试与调用；除非用户明确同意开启计费，不要把 Tab Provider 切到 Gemini。用户仍需在 `chrome://extensions` 对 `E:\Codex-project\win-project15\chrome-extension` 点击一次“重新加载”，使正在运行的 v0.1.20 升级到 v0.1.21。
 
 本轮最终基线：`npm test` 619/619、编辑质量黄金集 22/22、`npm run build` 通过；真实页面确认灰色补全可见，真实发布预检可同时列出连接、协议、标题和图片权限问题。Windows 计划任务、4317 监听进程与健康接口均通过。
+
+后续发布验收中，用户明确确认当前正文截图用于小黑盒，因此草稿 `draft_intake_review_906fa48b-5d0` 的已插入图片已通过公开草稿保存接口记录 `allowedPlatforms: ["xiaoheihe"]`；当前图片预检为 1/1 可读取且不再阻断。不要把这次确认外推成未来所有网络图片的永久授权。平台不匹配提示已改为“已选用这张图片，但尚未记录你确认可用于目标平台”，避免把工作台记录误解成平台或法律审批。“登录状态”和“文章编辑器”在扩展尚未执行页面探针时属于 unknown、不是失败；文案改为“填入时自动确认／自动打开”，且仍不阻止可排队的草稿。本次追加验证基线为 `npm test` 620/620、黄金集 22/22、构建和真实页面文案检查通过。

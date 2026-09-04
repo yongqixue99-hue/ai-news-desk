@@ -206,6 +206,29 @@ test("an image post can intentionally omit topics without inventing tags", () =>
   assert.match(result.warnings.find((warning) => warning.capability === "topics")?.message || "", /不会自动生成标签/);
 });
 
+test("an unprobed login and editor are described as fill-time checks, not user failures", () => {
+  const result = evaluatePublisherPreflight({
+    runtime: {
+      mode: "chrome-extension",
+      connected: true,
+      protocolVersion: "0.1.21",
+    },
+    draft: {
+      id: "draft-unprobed-browser",
+      title: "小黑盒填入探针说明",
+      bodyHtml: "<p>这是一段满足长度要求的正文，浏览器登录与编辑器将在真正填入时由扩展自动核验。</p>",
+      community: "盒友杂谈",
+      topics: ["AI"],
+      images: [],
+    },
+  });
+
+  assert.equal(result.canQueueFill, true);
+  assert.equal(result.capabilities.find((item) => item.id === "login")?.detail, "尚未探测；填入时自动确认登录状态");
+  assert.equal(result.capabilities.find((item) => item.id === "editor")?.detail, "尚未探测；填入时自动打开并确认文章编辑器");
+  assert.equal(result.warnings.some((warning) => /等待页面探针/.test(warning.message)), false);
+});
+
 test("an image post is blocked unless it has exactly one inserted image", () => {
   const result = evaluatePublisherPreflight({
     minimumProtocolVersion: "0.1.17",
