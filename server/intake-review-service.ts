@@ -12,6 +12,7 @@ import {
 import { extractPage } from "./extractor.js";
 import { generateCandidateDraft } from "./generator.js";
 import { analyzeScreenshotEvidence } from "./intake.js";
+import { buildIntakeContentPackage } from "./intake-content-package.js";
 import { skillsForArticleTask } from "./skill-registry.js";
 import { retainWorkflowRuns } from "./run-retention.js";
 import {
@@ -19,7 +20,8 @@ import {
   resolveXPostInput,
   type ManualXPostInput,
 } from "./manual-x-intake.js";
-import { readState, updateState, workflowMediaRoot } from "./storage.js";
+import { getLocalDatabase, readState, updateState, workflowMediaRoot } from "./storage.js";
+import type { ContentPackage } from "./product-types.js";
 import type {
   AiProviderConfig,
   ArticleSkillConfig,
@@ -207,6 +209,10 @@ const claimReviewGeneration = async (reviewId: string, selection: EvidenceReview
 
 const executeReviewGeneration = async (claim: Awaited<ReturnType<typeof claimReviewGeneration>>) => {
   const normalized = normalizeEvidenceSelection(claim.record.bundle, claim.record.selection ?? {});
+  const database = await getLocalDatabase();
+  const builtContentPackage = buildIntakeContentPackage(claim.record);
+  const contentPackage = database.getContentPackage<ContentPackage>(builtContentPackage.id)
+    ?? database.saveContentPackage(builtContentPackage);
   const images: SourceImage[] = normalized.images.map((image) => ({
     id: image.id,
     url: image.publicPath || image.url || claim.record.bundle.source.publicPath || "",
@@ -235,6 +241,7 @@ const executeReviewGeneration = async (claim: Awaited<ReturnType<typeof claimRev
       claim.record.draftId,
       { extractedText: normalized.text, canonicalUrl: candidate.canonicalUrl, images, skipExtraction: true },
     );
+    draft.provenance.contentPackageId = contentPackage.id;
     draft.intake = {
       type: claim.record.bundle.source.kind === "url" ? "link" : "screenshot",
       extractedText: normalized.text,
@@ -269,3 +276,36 @@ export const confirmIntakeReview = async (reviewId: string, selection: EvidenceR
 };
 
 export const listIntakeReviews = async () => (await readState()).intakeReviews;
+
+/**
+ * Older intake drafts were created without the immutable ContentPackage link
+ * required by inline completion. Repair only that metadata link from the
+ * original confirmed review; never derive facts from the user's edited draft.
+ */
+export const ensureIntakeContentPackageForDraft = async (draftId: string) => {
+  const state = await readState();
+  const draft = state.drafts.find((entry) => entry.id === draftId);
+  if (!draft) return undefined;
+
+  const database = await getLocalDatabase();
+  if (draft.provenance.contentPackageId) {
+    const existing = database.getContentPackage<ContentPackage>(draft.provenance.contentPackageId);
+    if (existing) return existing;
+  }
+
+  const review = state.intakeReviews.find((entry) =>
+    entry.draftId === draftId
+    && entry.status === "confirmed"
+    && entry.selection,
+  );
+  if (!review) return undefined;
+
+  const built = buildIntakeContentPackage(review);
+  const contentPackage = database.getContentPackage<ContentPackage>(built.id)
+    ?? database.saveContentPackage(built);
+  await updateState((current) => {
+    const target = current.drafts.find((entry) => entry.id === draftId);
+    if (target) target.provenance.contentPackageId = contentPackage.id;
+  });
+  return contentPackage;
+};

@@ -1,11 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  appendEditorialReadiness,
   completePublisherAttempt,
   createPublisherAttempt,
   publisherRuntimeFromStatus,
   evaluatePublisherPreflight,
 } from "./publisher-preflight.js";
+
+test("editorial blockers are added without hiding transport or title failures", () => {
+  const preflight = evaluatePublisherPreflight({
+    runtime: { mode: "chrome-extension", connected: false },
+    draft: {
+      id: "draft-multiple-blockers",
+      title: "这是一个明确超过小黑盒三十字标题限制并且不应该被摘要漏掉的测试标题",
+      bodyHtml: "<p>这是一段长度足够的正文，用来证明版权问题加入后，连接和标题错误仍会被完整保留。</p>",
+      community: "盒友杂谈",
+      topics: ["AI"],
+      images: [],
+    },
+  });
+
+  appendEditorialReadiness(preflight, {
+    ready: false,
+    blockers: ["图片：截图还没有获得小黑盒平台使用许可"],
+    warnings: [],
+  });
+
+  assert.equal(preflight.canQueueFill, false);
+  assert.equal(preflight.blocking.some((issue) => issue.code === "PREFLIGHT_TRANSPORT_DISCONNECTED"), true);
+  assert.equal(preflight.blocking.some((issue) => issue.code === "PREFLIGHT_TITLE_TOO_LONG"), true);
+  assert.equal(preflight.blocking.some((issue) => issue.code === "PREFLIGHT_EDITORIAL_READINESS"), true);
+  assert.match(preflight.summary, new RegExp(`有 ${preflight.blocking.length} 项阻止填入`));
+});
 
 test("a connected, live Xiaoheihe editor with a complete draft is ready to fill", () => {
   const result = evaluatePublisherPreflight({

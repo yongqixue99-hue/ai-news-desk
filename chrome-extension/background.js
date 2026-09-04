@@ -1,5 +1,8 @@
+import { createPublisherBridgeClient } from "./publisher-bridge.js";
+
 const XIAOHEIHE_MATCHES = ["https://xiaoheihe.cn/*", "https://*.xiaoheihe.cn/*"];
 const WORKBENCH_ORIGIN = "http://127.0.0.1:4317";
+const PUBLISHER_ALARM = "ai-news-publisher-bridge";
 const X_POST_URL = /^https:\/\/(?:www\.)?(?:x|twitter)\.com\/([^/]+)\/status\/(\d+)/i;
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -363,3 +366,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }));
   return true;
 });
+
+const publisherBridge = createPublisherBridgeClient({
+  origin: WORKBENCH_ORIGIN,
+  clientId: chrome.runtime.id,
+  version: chrome.runtime.getManifest().version,
+  runJob: async (job) => {
+    const editorUrl = String(job?.editorUrl || "");
+    if (!/^https:\/\/(?:[^/]+\.)?xiaoheihe\.cn\//i.test(editorUrl)) {
+      throw new Error("编辑器地址不是小黑盒官网");
+    }
+    const tab = await findOrOpenEditor(editorUrl);
+    return sendJobToPage(tab.id, job);
+  },
+});
+
+const runPublisherBridge = () => {
+  void publisherBridge.tick().catch((error) => {
+    console.warn("[AI 新闻工作台] 后台填入助手暂时无法连接：", error);
+  });
+};
+
+const ensurePublisherAlarm = () => {
+  chrome.alarms.create(PUBLISHER_ALARM, { periodInMinutes: 0.5 });
+};
+
+chrome.runtime.onInstalled.addListener(() => {
+  ensurePublisherAlarm();
+  runPublisherBridge();
+});
+chrome.runtime.onStartup.addListener(() => {
+  ensurePublisherAlarm();
+  runPublisherBridge();
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === PUBLISHER_ALARM) runPublisherBridge();
+});
+
+ensurePublisherAlarm();
+runPublisherBridge();

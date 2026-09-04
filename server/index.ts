@@ -99,6 +99,7 @@ import {
 } from "./published-materials.js";
 import { extensionPublisherBridge } from "./publisher-extension.js";
 import {
+  appendEditorialReadiness,
   completePublisherAttempt,
   createPublisherAttempt,
   evaluatePublisherPreflight,
@@ -168,6 +169,7 @@ import {
   createLinkIntakeReview,
   createManualXPostIntakeReview,
   createScreenshotIntakeReview,
+  ensureIntakeContentPackageForDraft,
   listIntakeReviews,
 } from "./intake-review-service.js";
 import {
@@ -362,31 +364,7 @@ const publisherPreflightFor = async (
     ...draft,
     images: draft.images.filter((placement) => inserted.has(placement.id)),
   }, "xiaoheihe");
-  for (const blocker of readiness.blockers) {
-    preflight.blocking.push({
-      code: "PREFLIGHT_EDITORIAL_READINESS",
-      capability: blocker.startsWith("图片：") ? "images" : "body",
-      severity: "blocking",
-      message: blocker,
-      action: blocker.startsWith("图片：")
-        ? "到图片面板补齐版权来源、授权状态和平台许可。"
-        : "到资料面板核验事实或降低结论强度。",
-    });
-  }
-  for (const warning of readiness.warnings) {
-    preflight.warnings.push({
-      code: "PREFLIGHT_EDITORIAL_WARNING",
-      capability: "images",
-      severity: "warning",
-      message: warning,
-    });
-  }
-  if (!readiness.ready) {
-    preflight.canQueueFill = false;
-    preflight.publishReady = false;
-    preflight.summary = `有 ${readiness.blockers.length} 项事实或版权问题阻止填入`;
-  }
-  return preflight;
+  return appendEditorialReadiness(preflight, readiness);
 };
 
 app.get(
@@ -2292,7 +2270,7 @@ app.post(
     const packageId = draft.provenance.contentPackageId;
     const contentPackage = packageId
       ? (await getLocalDatabase()).getContentPackage<ContentPackage>(packageId)
-      : undefined;
+      : await ensureIntakeContentPackageForDraft(draft.id);
     if (!contentPackage || contentPackage.status !== "ready") {
       response.json({ available: false, reason: "当前草稿没有可用于安全补全的素材包" });
       return;

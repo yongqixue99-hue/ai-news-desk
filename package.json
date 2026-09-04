@@ -12,7 +12,7 @@
     "dev": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
-    "test": "node --test --import tsx server/**/*.test.ts src/**/*.test.ts src/**/*.test.tsx",
+    "test": "node --test --import tsx server/**/*.test.ts src/**/*.test.ts src/**/*.test.tsx chrome-extension/**/*.test.ts",
     "test:e2e": "node --test --test-force-exit --import tsx tests/e2e/*.test.ts",
     "eval:editorial": "tsx server/editorial-golden-cli.ts"
   },

@@ -55,6 +55,7 @@ import { buildDraftQualityView } from "../draft-quality-view";
 import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
 import { buildExternalWritingPrompt } from "../external-writing-bridge";
 import { buildDistributionTargets } from "../distribution-view";
+import { publisherBlockingGuidance } from "../publisher-guidance";
 import {
   prepareDistributionTargets,
   type DistributionPreparationResult,
@@ -598,6 +599,7 @@ export function DraftWorkspace({
     dirtyRef.current = true;
     setDirty(true);
     setSaveError("");
+    setPreflight(undefined);
     setDistributionResult(undefined);
     setDistributionError("");
   };
@@ -871,8 +873,9 @@ export function DraftWorkspace({
           },
           {
             id: "xiaoheihe",
-            available: Boolean(publisherStatus?.ok),
-            unavailableReason: "小黑盒填入助手尚未连接；请重新加载 Chrome 扩展并刷新工作台",
+            // Preflight is the authoritative check and can name every blocker.
+            // Do not skip it merely because the last heartbeat was stale.
+            available: true,
             prepare: async () => {
               await prepareXiaoheihe(false);
               return "已填入小黑盒编辑器";
@@ -1188,7 +1191,8 @@ export function DraftWorkspace({
   });
   const draftQuality = buildDraftQualityView(editing.qualityWarnings);
   const extensionPublisher = publisherStatus?.mode !== "cdp";
-  const publishGuidance = !publisherReady
+  const exactBlockingGuidance = publisherBlockingGuidance(preflight);
+  const publishGuidance = exactBlockingGuidance ?? (!publisherReady
     ? extensionPublisher
       ? "暂不能填入：请先在常用 Chrome 加载填入助手，并刷新工作台。"
       : "暂不能填入：请先启动 CDP 备用浏览器。"
@@ -1198,7 +1202,7 @@ export function DraftWorkspace({
       ? `可以填入，但发布前还有 ${evidenceView.factUncertainties.length} 项事实需要确认。`
       : uncheckedImageCount
         ? `可以填入，但发布前还有 ${uncheckedImageCount} 张图片需要确认转载权限。`
-        : "检查已通过；只填入编辑器，不会自动发布。";
+        : "检查已通过；只填入编辑器，不会自动发布。");
   const passedReadinessCount = readiness.filter((item) => item.ok).length;
   const nextAction = evidenceView.factDecisionCount
     ? {

@@ -104,6 +104,53 @@ export interface PublisherPreflightResult {
   };
 }
 
+export interface EditorialReadinessSnapshot {
+  ready: boolean;
+  blockers: string[];
+  warnings: string[];
+}
+
+/** Keep platform/runtime failures visible when editorial checks add blockers. */
+export const appendEditorialReadiness = (
+  preflight: PublisherPreflightResult,
+  readiness: EditorialReadinessSnapshot,
+) => {
+  for (const blocker of readiness.blockers) {
+    const capability: PublisherCapabilityId = blocker.startsWith("图片：") ? "images" : "body";
+    const action = capability === "images"
+      ? "到图片面板补齐版权来源、授权状态和平台许可。"
+      : "到资料面板核验事实或降低结论强度。";
+    preflight.blocking.push({
+      code: "PREFLIGHT_EDITORIAL_READINESS",
+      capability,
+      severity: "blocking",
+      message: blocker,
+      action,
+    });
+    const capabilityRow = preflight.capabilities.find((entry) => entry.id === capability);
+    if (capabilityRow) {
+      capabilityRow.status = "blocked";
+      capabilityRow.detail = blocker;
+      capabilityRow.issueCode = "PREFLIGHT_EDITORIAL_READINESS";
+      capabilityRow.action = action;
+    }
+  }
+  for (const warning of readiness.warnings) {
+    preflight.warnings.push({
+      code: "PREFLIGHT_EDITORIAL_WARNING",
+      capability: "images",
+      severity: "warning",
+      message: warning,
+    });
+  }
+  if (!readiness.ready) {
+    preflight.canQueueFill = false;
+    preflight.publishReady = false;
+    preflight.summary = `有 ${preflight.blocking.length} 项阻止填入，请逐项处理`;
+  }
+  return preflight;
+};
+
 export interface PublisherAttemptOptions {
   attemptId?: string;
   startedAt?: string;
