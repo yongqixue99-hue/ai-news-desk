@@ -32,10 +32,16 @@ export const resolveCodexExecutable = (
   const platform = environment.platform ?? process.platform;
   if (platform !== "win32") return "codex";
 
+  const localAppData = Object.hasOwn(environment, "localAppData")
+    ? environment.localAppData
+    : process.env.LOCALAPPDATA;
+  const userProfile = Object.hasOwn(environment, "userProfile")
+    ? environment.userProfile
+    : process.env.USERPROFILE;
   const localRoots = [
-    environment.localAppData ?? process.env.LOCALAPPDATA,
-    (environment.userProfile ?? process.env.USERPROFILE)
-      ? path.join(environment.userProfile ?? process.env.USERPROFILE!, "AppData", "Local")
+    localAppData,
+    userProfile
+      ? path.join(userProfile, "AppData", "Local")
       : undefined,
   ].filter((entry): entry is string => Boolean(entry?.trim()));
   const seen = new Set<string>();
