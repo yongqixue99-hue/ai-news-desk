@@ -3,6 +3,7 @@ import test from "node:test";
 import path from "node:path";
 import {
   ExtensionPublisherBridge,
+  MINIMUM_EXTENSION_VERSION,
   fillViaChromeExtension,
   prepareJob,
   type ExtensionPublisherJob,
@@ -33,6 +34,10 @@ test("extension image jobs carry the native Xiaoheihe description", () => {
     caption: "广告示意图",
   } satisfies ExtensionPublisherJob["images"][number];
   assert.equal(image.caption, "广告示意图");
+});
+
+test("the app rejects extension versions from before reliable article routing", () => {
+  assert.equal(MINIMUM_EXTENSION_VERSION, "0.1.22");
 });
 
 test("preparing an extension job rejects an inserted image whose local file is missing", async () => {

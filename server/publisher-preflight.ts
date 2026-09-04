@@ -545,9 +545,9 @@ export const completePublisherAttempt = (
     "community",
     "topics",
   ];
-  const fillSteps = requiredFillIds.map((id) => reportStepFor(report.steps, id));
-  const fillSucceeded = fillSteps.every((step) => step?.ok === true)
-    && report.steps.every((step) => step.ok);
+  const editorWriteSucceeded = reportStepFor(report.steps, "title")?.ok === true
+    && reportStepFor(report.steps, "body")?.ok === true
+    && !report.steps.some((step) => !step.ok && /登录|编辑器|页面操作/.test(step.name));
   const checks = attempt.preflight.capabilities.map<PublisherReceiptCheck>((capability) => {
     const reported = reportStepFor(report.steps, capability.id);
     if (reported) {
@@ -575,15 +575,15 @@ export const completePublisherAttempt = (
         detail: `扩展没有返回${reportLabel[capability.id] || capability.label}核验结果`,
       };
     }
-    if ((capability.id === "login" || capability.id === "editor") && fillSucceeded) {
+    if ((capability.id === "login" || capability.id === "editor") && editorWriteSucceeded) {
       return {
         id: capability.id,
         label: capability.label,
         ok: true,
         source: "fill-inference",
         detail: capability.id === "login"
-          ? "编辑器接受了完整填入，可确认当前会话已登录"
-          : "标题、正文和发布设置均已写入，可确认文章编辑器可用",
+          ? "编辑器已接受标题和正文，可确认当前会话已登录"
+          : "标题和正文均已写入，可确认文章编辑器可用",
       };
     }
     if (capability.id === "captions") {

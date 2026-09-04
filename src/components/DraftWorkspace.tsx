@@ -55,7 +55,7 @@ import { buildDraftQualityView } from "../draft-quality-view";
 import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
 import { buildExternalWritingPrompt } from "../external-writing-bridge";
 import { buildDistributionTargets } from "../distribution-view";
-import { publisherBlockingGuidance } from "../publisher-guidance";
+import { publisherBlockingGuidance, publisherFillButtonLabel } from "../publisher-guidance";
 import {
   prepareDistributionTargets,
   type DistributionPreparationResult,
@@ -2056,7 +2056,7 @@ export function DraftWorkspace({
                   disabled={busy || preflightBusy || !publisherReady || preflight?.canQueueFill === false}
                 >
                   {busy || preflightBusy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
-                  {loginRequired ? "登录后重新填入" : "填入小黑盒编辑器"}
+                  {publisherFillButtonLabel({ preflightBusy, busy, loginRequired })}
                 </button>
                 <p
                   className={!publisherReady || loginRequired ? "publish-guidance blocked" : evidenceView.factUncertainties.length || uncheckedImageCount ? "publish-guidance warning" : "publish-guidance"}

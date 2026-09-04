@@ -378,3 +378,40 @@ test("a browser page failure is preserved even when individual field reports loo
     true,
   );
 });
+
+test("successful editor writes confirm login and editor even when a later image step fails", () => {
+  const preflight = evaluatePublisherPreflight({
+    runtime: {
+      mode: "chrome-extension",
+      connected: true,
+      protocolVersion: "0.1.21",
+    },
+    draft: {
+      id: "draft-partial-page-proof",
+      title: "编辑器实际填入状态测试",
+      bodyHtml: "<p>标题和正文已经被页面接受，因此登录状态和文章编辑器不应继续显示为尚未确认。</p>",
+      community: "盒友杂谈",
+      topics: ["AI"],
+      images: [{ id: "image", available: true, caption: "测试图片" }],
+    },
+  });
+  const receipt = completePublisherAttempt(createPublisherAttempt(preflight), {
+    steps: [
+      { name: "标题", ok: true, detail: "标题已填入并验证" },
+      { name: "正文", ok: true, detail: "正文已填入并验证" },
+      { name: "配图", ok: false, detail: "图片模块未加载" },
+      { name: "分区", ok: true, detail: "已选择盒友杂谈" },
+      { name: "话题", ok: true, detail: "已选择 AI" },
+    ],
+  });
+
+  assert.deepEqual(
+    receipt.checks
+      .filter((check) => check.id === "login" || check.id === "editor")
+      .map((check) => ({ id: check.id, ok: check.ok, source: check.source })),
+    [
+      { id: "login", ok: true, source: "fill-inference" },
+      { id: "editor", ok: true, source: "fill-inference" },
+    ],
+  );
+});

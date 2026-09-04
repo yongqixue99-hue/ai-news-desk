@@ -1,6 +1,53 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPublisherBridgeClient } from "./publisher-bridge.js";
+import {
+  createPublisherBridgeClient,
+  planEditorTab,
+  startPublisherBridgePolling,
+  XIAOHEIHE_PAGE_SCRIPTS,
+} from "./publisher-bridge.js";
+
+test("an article fill returns an existing Xiaoheihe tab to the configured creator entry", () => {
+  assert.deepEqual(planEditorTab([
+    {
+      id: 17,
+      active: true,
+      windowId: 3,
+      url: "https://xiaoheihe.cn/creator/editor/draft/image_text/local-1",
+    },
+  ], "https://xiaoheihe.cn/community/user/post_list"), {
+    type: "navigate",
+    tabId: 17,
+    windowId: 3,
+    url: "https://xiaoheihe.cn/community/user/post_list",
+  });
+});
+
+test("fallback injection loads the image-integrity module before the page runner", () => {
+  assert.deepEqual(XIAOHEIHE_PAGE_SCRIPTS, [
+    "xiaoheihe-dom.js",
+    "xiaoheihe-image-post-dom.js",
+    "xiaoheihe-publisher-job.js",
+    "xiaoheihe.js",
+  ]);
+});
+
+test("the background bridge polls within two seconds while the service worker is awake", () => {
+  const intervals: number[] = [];
+  let runs = 0;
+  const timer = startPublisherBridgePolling(
+    () => { runs += 1; },
+    (callback, milliseconds) => {
+      intervals.push(milliseconds);
+      callback();
+      return 123;
+    },
+  );
+
+  assert.equal(timer, 123);
+  assert.equal(runs, 2);
+  assert.deepEqual(intervals, [1_500]);
+});
 
 test("the background publisher bridge repairs pairing after the local service restarts", async () => {
   const calls: Array<{ path: string; token: string }> = [];

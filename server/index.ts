@@ -97,7 +97,7 @@ import {
   inspectDraftImageFile,
   publicPublishedImagePromotionStatus,
 } from "./published-materials.js";
-import { extensionPublisherBridge } from "./publisher-extension.js";
+import { extensionPublisherBridge, MINIMUM_EXTENSION_VERSION } from "./publisher-extension.js";
 import {
   appendEditorialReadiness,
   completePublisherAttempt,
@@ -355,7 +355,7 @@ const publisherPreflightFor = async (
       topics: draft.topics,
       images: inspectedImages,
     },
-    minimumProtocolVersion: "0.1.18",
+    minimumProtocolVersion: MINIMUM_EXTENSION_VERSION,
   });
   // Only media actually referenced by the article can block delivery. Drafts
   // may keep unused source images as a research tray, and those should not

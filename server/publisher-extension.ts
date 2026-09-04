@@ -21,6 +21,7 @@ import type {
 } from "./types.js";
 
 const extensionInstallPath = workspacePath("chrome-extension");
+export const MINIMUM_EXTENSION_VERSION = "0.1.22";
 // Chrome throttles timers in background tabs. Keep the helper connected across
 // that normal throttling interval while still expiring a genuinely closed tab.
 const connectedWindowMs = 45_000;

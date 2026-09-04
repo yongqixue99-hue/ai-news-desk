@@ -9,3 +9,19 @@ export const publisherBlockingGuidance = (preflight?: PublisherPreflightResult) 
     .filter(Boolean))];
   return messages.length ? `暂不能填入：${messages.join("；")}。` : undefined;
 };
+
+export const publisherFillButtonLabel = ({
+  preflightBusy,
+  busy,
+  loginRequired,
+}: {
+  preflightBusy: boolean;
+  busy: boolean;
+  loginRequired: boolean;
+}) => preflightBusy
+  ? "正在检查填入条件…"
+  : busy
+    ? "正在打开小黑盒并填入…"
+    : loginRequired
+      ? "登录后重新填入"
+      : "填入小黑盒编辑器";

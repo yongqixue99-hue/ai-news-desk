@@ -1,5 +1,50 @@
 const shouldRepairPairing = (status) => status === 401 || status === 403 || status >= 500;
 
+export const XIAOHEIHE_PAGE_SCRIPTS = Object.freeze([
+  "xiaoheihe-dom.js",
+  "xiaoheihe-image-post-dom.js",
+  "xiaoheihe-publisher-job.js",
+  "xiaoheihe.js",
+]);
+
+const normalizedEditorUrl = (value) => {
+  try {
+    const url = new URL(String(value || ""));
+    url.hash = "";
+    return url.href.replace(/\/$/u, "");
+  } catch {
+    return String(value || "").replace(/#.*$/u, "").replace(/\/$/u, "");
+  }
+};
+
+export function planEditorTab(tabs, editorUrl) {
+  const usable = (Array.isArray(tabs) ? tabs : []).filter((tab) => Number.isInteger(tab?.id));
+  const requested = normalizedEditorUrl(editorUrl);
+  const matching = usable.filter((tab) => normalizedEditorUrl(tab.url) === requested);
+  const tab = matching.find((entry) => entry.active)
+    || matching[0]
+    || usable.find((entry) => entry.active)
+    || usable[0];
+  if (!tab) return { type: "create", url: editorUrl };
+  if (normalizedEditorUrl(tab.url) === requested) {
+    return { type: "activate", tabId: tab.id, windowId: tab.windowId };
+  }
+  return {
+    type: "navigate",
+    tabId: tab.id,
+    windowId: tab.windowId,
+    url: editorUrl,
+  };
+}
+
+export function startPublisherBridgePolling(
+  run,
+  schedule = (callback, milliseconds) => globalThis.setInterval(callback, milliseconds),
+) {
+  run();
+  return schedule(run, 1_500);
+}
+
 export function createPublisherBridgeClient({
   origin,
   clientId,

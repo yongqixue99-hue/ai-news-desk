@@ -1,4 +1,9 @@
-import { createPublisherBridgeClient } from "./publisher-bridge.js";
+import {
+  createPublisherBridgeClient,
+  planEditorTab,
+  startPublisherBridgePolling,
+  XIAOHEIHE_PAGE_SCRIPTS,
+} from "./publisher-bridge.js";
 
 const XIAOHEIHE_MATCHES = ["https://xiaoheihe.cn/*", "https://*.xiaoheihe.cn/*"];
 const WORKBENCH_ORIGIN = "http://127.0.0.1:4317";
@@ -19,9 +24,16 @@ async function waitForTab(tabId, timeoutMs = 15000) {
 
 async function findOrOpenEditor(editorUrl) {
   const existing = await chrome.tabs.query({ url: XIAOHEIHE_MATCHES });
-  let tab = existing.find((entry) => entry.active) || existing[0];
-  if (!tab?.id) tab = await chrome.tabs.create({ url: editorUrl, active: true });
-  else await chrome.tabs.update(tab.id, { active: true });
+  const action = planEditorTab(existing, editorUrl);
+  let tab;
+  if (action.type === "create") {
+    tab = await chrome.tabs.create({ url: action.url, active: true });
+  } else if (action.type === "navigate") {
+    tab = await chrome.tabs.update(action.tabId, { url: action.url, active: true });
+  } else {
+    tab = await chrome.tabs.update(action.tabId, { active: true });
+  }
+  if (!tab?.id) throw new Error("无法打开小黑盒创作页面");
   if (typeof tab.windowId === "number") {
     await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
   }
@@ -70,7 +82,7 @@ async function sendJobToPage(tabId, job) {
       if (!injected && /Receiving end does not exist|Could not establish connection/i.test(detail)) {
         await chrome.scripting.executeScript({
           target: { tabId },
-          files: ["xiaoheihe-dom.js", "xiaoheihe-image-post-dom.js", "xiaoheihe.js"],
+          files: XIAOHEIHE_PAGE_SCRIPTS,
         });
         injected = true;
         await delay(250);
@@ -404,4 +416,4 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 ensurePublisherAlarm();
-runPublisherBridge();
+startPublisherBridgePolling(runPublisherBridge);
