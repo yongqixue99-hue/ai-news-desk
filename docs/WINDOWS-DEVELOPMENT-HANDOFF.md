@@ -1,10 +1,20 @@
 # AI 新闻台 Windows 开发接续文档
 
-更新时间：2026-09-02
+更新时间：2026-09-05
 
 代码仓库：<https://github.com/yongqixue99-hue/ai-news-desk>
 
 默认分支：`main`
+
+## 0. 2026-09-05 小黑盒文章填入真实闭环
+
+用户已经多次重新加载扩展，Chrome 扩展页也明确显示 v0.1.22；继续把故障归因于“没有重新加载”是错误的。复验发现两个后续问题：扩展重新加载不会替换已经注入旧工作台标签页的 content script，旧页面仍会用 v0.1.21 心跳覆盖当前客户端状态；同时小黑盒旧创作入口现在会跳转到 `/creator/content_management/home?article_type=all` 内容管理列表，页面上没有文章富文本编辑器。
+
+服务端现拒绝低于最低协议版本的心跳，旧 v0.1.21 页面不能再覆盖已连接的 v0.1.22。文章任务也不再依赖旧列表入口，统一直达小黑盒官方当前文章路由 `https://www.xiaoheihe.cn/creator/editor/draft/article`；图文任务仍保留配置入口和原有适配流程。两处修复都放在服务端，因此用户无需再次重新加载已经运行的 v0.1.22 扩展。
+
+已对真实草稿 `draft_intake_review_906fa48b-5d0` 重放填入并获得完整回执：标题已填入并验证、正文 572 字、1 张图片及图注、盒友杂谈分区和 4 个话题全部成功；登录状态和文章编辑器也由实际写入结果确认。目标页为 `/creator/editor/draft/article/local_...`，回执 outcome 为 `filled`，`finalPublishAttempted` 与 `finalPublishPerformed` 均为 false，最终发布仍由用户手动点击。
+
+本轮最终基线：`npm test` 628/628、编辑质量黄金集 22/22、`npm run build` 通过；Windows 计划任务、4317 监听进程、健康接口和常用 Chrome 填入助手 v0.1.22 均通过检查。
 
 ## 1. 先说项目现在处于什么阶段
 

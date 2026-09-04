@@ -22,6 +22,25 @@ import type {
 
 const extensionInstallPath = workspacePath("chrome-extension");
 export const MINIMUM_EXTENSION_VERSION = "0.1.22";
+const XIAOHEIHE_ARTICLE_EDITOR_URL = "https://www.xiaoheihe.cn/creator/editor/draft/article";
+
+export class UnsupportedExtensionVersionError extends Error {
+  constructor(readonly version: string) {
+    super(`填入助手版本 ${version || "unknown"} 过低，最低需要 ${MINIMUM_EXTENSION_VERSION}`);
+    this.name = "UnsupportedExtensionVersionError";
+  }
+}
+
+const compareExtensionVersions = (left: string, right: string) => {
+  const parts = (value: string) => value.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const leftParts = parts(left);
+  const rightParts = parts(right);
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+};
 // Chrome throttles timers in background tabs. Keep the helper connected across
 // that normal throttling interval while still expiring a genuinely closed tab.
 const connectedWindowMs = 45_000;
@@ -99,6 +118,9 @@ export class ExtensionPublisherBridge {
   heartbeat(token: string | undefined, clientId: string, version: string) {
     assertToken(token, this.token);
     if (!clientId.trim()) throw new Error("缺少填入助手标识");
+    if (compareExtensionVersions(version, MINIMUM_EXTENSION_VERSION) < 0) {
+      throw new UnsupportedExtensionVersionError(version);
+    }
     this.client = {
       id: clientId.trim().slice(0, 160),
       version: version.trim().slice(0, 40) || "unknown",
@@ -217,7 +239,7 @@ export const prepareJob = async (draft: ArticleDraft, editorUrl: string): Promis
   id: `publish_${randomUUID()}`,
   draftId: draft.id,
   createdAt: new Date().toISOString(),
-  editorUrl,
+  editorUrl: draft.contentFormat === "image-post" ? editorUrl : XIAOHEIHE_ARTICLE_EDITOR_URL,
   contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
   title: draft.title,
   bodyHtml: draft.contentFormat === "image-post"

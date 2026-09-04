@@ -97,7 +97,11 @@ import {
   inspectDraftImageFile,
   publicPublishedImagePromotionStatus,
 } from "./published-materials.js";
-import { extensionPublisherBridge, MINIMUM_EXTENSION_VERSION } from "./publisher-extension.js";
+import {
+  extensionPublisherBridge,
+  MINIMUM_EXTENSION_VERSION,
+  UnsupportedExtensionVersionError,
+} from "./publisher-extension.js";
 import {
   appendEditorialReadiness,
   completePublisherAttempt,
@@ -2759,7 +2763,19 @@ app.post(
     const token = request.header("x-ai-news-extension-token");
     const clientId = typeof request.body?.clientId === "string" ? request.body.clientId : "";
     const version = typeof request.body?.version === "string" ? request.body.version : "";
-    response.json(extensionPublisherBridge.heartbeat(token, clientId, version));
+    try {
+      response.json(extensionPublisherBridge.heartbeat(token, clientId, version));
+    } catch (error) {
+      if (error instanceof UnsupportedExtensionVersionError) {
+        response.status(409).json({
+          ok: false,
+          error: error.message,
+          minimumVersion: MINIMUM_EXTENSION_VERSION,
+        });
+        return;
+      }
+      throw error;
+    }
   }),
 );
 

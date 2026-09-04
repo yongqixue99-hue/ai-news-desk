@@ -40,6 +40,33 @@ test("the app rejects extension versions from before reliable article routing", 
   assert.equal(MINIMUM_EXTENSION_VERSION, "0.1.22");
 });
 
+test("an article job targets Xiaoheihe's direct article editor instead of the content list", async () => {
+  const draft: ArticleDraft = {
+    id: "draft-direct-article-editor",
+    runId: "run-1",
+    candidateId: "candidate-1",
+    createdAt: "2026-09-05T00:00:00.000Z",
+    updatedAt: "2026-09-05T00:00:00.000Z",
+    status: "ready",
+    title: "文章编辑器直达测试",
+    paragraphs: ["这是一段用于核验小黑盒文章编辑器直达路由的正文。"],
+    take: "",
+    bodyHtml: "<p>这是一段用于核验小黑盒文章编辑器直达路由的正文。</p>",
+    sources: [],
+    uncertainties: [],
+    images: [],
+    community: "盒友杂谈",
+    topics: ["AI"],
+    provenance: {
+      originalUrl: "https://example.com/source",
+      generatedBy: "test",
+    },
+  };
+
+  const prepared = await prepareJob(draft, "https://xiaoheihe.cn/community/user/post_list");
+  assert.equal(prepared.editorUrl, "https://www.xiaoheihe.cn/creator/editor/draft/article");
+});
+
 test("preparing an extension job rejects an inserted image whose local file is missing", async () => {
   const missingPath = path.join(workflowMediaRoot, "publisher-extension-test", "missing.png");
   const draft: ArticleDraft = {
@@ -136,7 +163,7 @@ test("extension bridge becomes ready only after an authenticated heartbeat", () 
   assert.equal(bridge.status().ok, false);
   assert.throws(() => bridge.heartbeat("wrong", "client-1", "0.1.0"), /配对/);
 
-  const status = bridge.heartbeat(bridge.token, "client-1", "0.1.0");
+  const status = bridge.heartbeat(bridge.token, "client-1", MINIMUM_EXTENSION_VERSION);
   assert.equal(status.ok, true);
   assert.match(status.detail, /常用 Chrome/);
 
@@ -144,9 +171,20 @@ test("extension bridge becomes ready only after an authenticated heartbeat", () 
   assert.equal(bridge.status().ok, false);
 });
 
+test("an outdated page bridge cannot overwrite the current compatible extension", () => {
+  const bridge = new ExtensionPublisherBridge(Date.now, 500);
+  bridge.heartbeat(bridge.token, "extension-id", MINIMUM_EXTENSION_VERSION);
+
+  assert.throws(
+    () => bridge.heartbeat(bridge.token, "extension-id", "0.1.21"),
+    /版本.*过低/u,
+  );
+  assert.match(bridge.status().detail, new RegExp(`v${MINIMUM_EXTENSION_VERSION.replaceAll(".", "\\.")}`));
+});
+
 test("extension bridge gives a job to one client and resolves its report", async () => {
   const bridge = new ExtensionPublisherBridge(Date.now, 1_000);
-  bridge.heartbeat(bridge.token, "client-1", "0.1.0");
+  bridge.heartbeat(bridge.token, "client-1", MINIMUM_EXTENSION_VERSION);
   const completion = bridge.submit(job());
 
   assert.equal(bridge.claim(bridge.token, "client-1")?.id, "job-1");
