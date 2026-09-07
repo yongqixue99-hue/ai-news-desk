@@ -15,7 +15,7 @@ const inFlight = new Map<string, Promise<{ draft: ArticleDraft; reused: boolean 
 const humanInFlight = new Map<string, Promise<{ draft: ArticleDraft; reused: boolean }>>();
 
 /** Bump only when routing/evidence/prompt behavior materially changes. */
-export const editorialGeneratorRevision = "source-first-v12";
+export const editorialGeneratorRevision = "source-first-v13";
 export const humanDraftRevision = "human-first-v1";
 
 const writingBriefFor = (contentPackage: ContentPackage): ArticleDraft["writingBrief"] => ({
@@ -320,7 +320,7 @@ const create = async (
         skipExtraction: true,
         contentPackage,
         draftStrategy: contentPackage.mode,
-        writingGuidelines: activeWritingGuidelines(database),
+        writingGuidelines: activeWritingGuidelines(database, initialState.settings.writingMemoryEnabled),
         communityDiscovery: communitySource ? {
           platform: communitySource.label,
           discussionUrl: communitySource.url,

@@ -171,6 +171,23 @@ test("portable collector keeps leading shared-batch sitemap pages inside the bou
   assert.equal(launch.metadata?.sitemap_lastmod_status, "shared-batch");
 });
 
+test("official sitemap resolves a matching discovery link without inventing a publication date", async () => {
+  const official: SourceConfig = { ...source, homepageUrl: "https://openai.com", routes: [
+    { topicId: "ai", label: "Sitemap", homepageUrl: "https://openai.com", url: "https://openai.com/sitemap.xml" },
+    { topicId: "ai", label: "Search", homepageUrl: "https://openai.com", query: "site:openai.com GPT" },
+  ] };
+  const result = await collectPortableStructuredSources([official], { topicIds: ["ai"] }, {
+    fetcher: async (url) => new Response(String(url).includes("sitemap")
+      ? '<urlset><url><loc>https://openai.com/index/gpt-6-astra/</loc></url><url><loc>https://evil.example/gpt-6-astra/</loc></url></urlset>'
+      : '<rss><channel><item><title>GPT-6 Astra: A new generation of intelligence - OpenAI</title><link>https://news.google.com/rss/articles/release</link><pubDate>Thu, 03 Sep 2026 18:00:00 GMT</pubDate></item><item><title>Legora reviewed 41 documents in minutes with GPT-6 Astra - OpenAI</title><link>https://news.google.com/rss/articles/case</link></item></channel></rss>'),
+  });
+  const launch = result.items.find((item) => item.url.endsWith("/release"));
+  assert.equal(launch?.metadata?.canonical_url, "https://openai.com/index/gpt-6-astra/");
+  assert.equal(launch?.url, "https://news.google.com/rss/articles/release");
+  assert.equal(launch?.published_at, "2026-09-03T18:00:00.000Z");
+  assert.equal(result.items.find((item) => item.url.endsWith("/case"))?.metadata?.canonical_url, undefined);
+});
+
 test("one unavailable portable source is reported without discarding a healthy source", async () => {
   const unavailable = { ...source, id: "unavailable", name: "Unavailable", url: "https://unavailable.example/feed" };
   const result = await collectPortableStructuredSources([source, unavailable], {

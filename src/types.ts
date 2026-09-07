@@ -1,5 +1,7 @@
 export type {
   ArticleDraft,
+  SourceImage,
+  ImageCollectionReport,
   ArticleAgentDraftInput,
   ArticleAgentMessage,
   ArticleAgentRole,

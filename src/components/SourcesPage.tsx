@@ -470,7 +470,7 @@ export function SourcesPage({
                 <option value="default">默认采集</option>
               </select>
               <div className="managed-source-name"><strong>{source.name}</strong><span>{topicSummary}{source.note ? ` · ${source.note}` : ""}</span></div>
-              <span className="source-kind">{source.kind === "rss" ? "RSS" : source.kind === "hackernews" ? "HN" : source.kind === "zhihu" ? "知乎 CLI" : source.kind === "last30days" ? "30 天社区" : source.kind === "github" ? "GitHub" : source.kind === "x" ? "X 官方" : "新闻检索"}</span>
+              <span className="source-kind">{source.kind === "documentation" ? "技术目录" : source.kind === "rss" ? "RSS" : source.kind === "hackernews" ? "HN" : source.kind === "zhihu" ? "知乎 CLI" : source.kind === "last30days" ? "30 天社区" : source.kind === "github" ? "GitHub" : source.kind === "x" ? "X 官方" : "新闻检索"}</span>
               <span className={`source-role-badge ${role}`}>{sourceRoleLabels[role]}</span>
               <span className={`source-health ${health}`} title={source.lastHealthDetail}>
                 {healthIcon}<span><strong>{healthLabel} · 检查 {formatTimestamp(source.lastCheckedAt, "尚未")}</strong><small>最后成功 {formatTimestamp(source.lastSuccessfulAt, "尚无")}{failureCount ? ` · 连续失败 ${failureCount} 次` : ""}</small></span>

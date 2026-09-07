@@ -10,8 +10,9 @@ import { eligibleEditorialImage, uniqueEligibleEditorialImages } from "./editori
 import { searchLicensedEditorialImages } from "./online-image-search.js";
 import { readState, updateState, workflowMediaRoot } from "./storage.js";
 import { storyById } from "./story-desk.js";
+import { selectStoryArticleSources } from "./story-article-sources.js";
 import type { StorySignalView } from "./product-types.js";
-import type { ExtractedPage, SourceImage, SourceRole } from "./types.js";
+import type { ExtractedPage, ImageCollectionReport, SourceImage, SourceRole } from "./types.js";
 
 export interface VisualAssetCounts {
   discoveredImageCount: number;
@@ -21,6 +22,7 @@ export interface VisualAssetCounts {
 }
 
 export interface VisualHydrationResult extends VisualAssetCounts {
+  sourceReports?: ImageCollectionReport[];
   /**
    * Compatibility field used by existing job/result consumers. It now means
    * locally usable assets, not remote image URLs discovered on a page.
@@ -47,7 +49,7 @@ export interface VisualHydrationDependencies {
   persistExtraction: (signal: StorySignalView, page: ExtractedPage) => Promise<void>;
   persistImages: (signal: StorySignalView, images: SourceImage[]) => Promise<void>;
   localize: (image: SourceImage, assetRoot: string) => Promise<SourceImage>;
-  capture: (url: string, assetRoot: string, requestedLimit: number) => Promise<SourceImage[]>;
+  capture: (url: string, assetRoot: string, requestedLimit: number, options?: { chartsOnly?: boolean }) => Promise<SourceImage[]>;
   searchOnline?: (story: VisualStorySnapshot, requestedLimit: number, priority: 3 | 4) => Promise<SourceImage[]>;
   stylizeIdentity?: (image: SourceImage, story: VisualStorySnapshot, assetRoot: string) => Promise<SourceImage>;
   generateFallback?: (story: VisualStorySnapshot, assetRoot: string) => Promise<SourceImage[]>;
@@ -116,6 +118,8 @@ const mergeEstablishedImage = (existing: SourceImage, incoming: SourceImage): So
   url: existing.url,
   localPath: incoming.localPath?.trim() ? incoming.localPath : existing.localPath,
   publicPath: incoming.publicPath?.trim() ? incoming.publicPath : existing.publicPath,
+  width: incoming.localPath ? incoming.width ?? existing.width : existing.width ?? incoming.width,
+  height: incoming.localPath ? incoming.height ?? existing.height : existing.height ?? incoming.height,
   // Localization/extraction may enrich presentation fields, but governance and
   // provenance stay with the already established source record. Missing
   // fields can be filled; populated fields require an explicit editorial edit.
@@ -199,12 +203,64 @@ const canDownload = (image: SourceImage) => /^https?:\/\//iu.test(image.url.trim
  * Story is complete only after enough files exist locally; remote discovery
  * records never satisfy the minimum on their own.
  */
+export interface VisualHydrationOptions {
+  scope?: "preview" | "article";
+  progress?: (value: number, stage: string) => void;
+}
+
+const collectArticleVisuals = async (storyId: string, dependencies: VisualHydrationDependencies, options: VisualHydrationOptions) => {
+  let story = await dependencies.getStory();
+  if (!story) throw new Error("Story 不存在");
+  const signals = selectStoryArticleSources(story);
+  const assetRoot = `story_assets_${storyId.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 70)}`;
+  let extractedSources = 0;
+  let screenshotCount = 0;
+  const sourceReports: ImageCollectionReport[] = [];
+  for (const [index, signal] of signals.entries()) {
+    options.progress?.(0.08 + index * 0.3, `读取第 ${index + 1} 篇原文的图片与图表`);
+    let extracted = false;
+    const report: ImageCollectionReport = { url: signal.url, status: "checked", imageCount: 0, screenshotCount: 0, detail: "" };
+    const errors: string[] = [];
+    try {
+      const page = await dependencies.extract(signal.url, 16);
+      extracted = true;
+      extractedSources += 1;
+      report.imageCount = uniqueEligibleEditorialImages(page.images).length;
+      await dependencies.persistExtraction(signal, page);
+      story = await dependencies.getStory();
+      for (const image of uniqueEligibleEditorialImages(page.images).slice(0, 16)) {
+        if (story?.images.some((existing) => sameImage(existing, image) && isLocalVisualAsset(existing))) continue;
+        try {
+          const localized = isLocalVisualAsset(image) ? image : canDownload(image) ? await dependencies.localize(image, assetRoot) : undefined;
+          if (localized && isLocalVisualAsset(localized)) await dependencies.persistImages(signal, [localized]);
+        } catch { errors.push("部分原图下载失败，已保留原链接"); }
+      }
+    } catch (error) { errors.push(error instanceof Error ? error.message.slice(0, 180) : "原文图片读取失败"); }
+    options.progress?.(0.24 + index * 0.3, `截取第 ${index + 1} 篇原文的可见图表`);
+    try {
+      const screenshots = (await dependencies.capture(signal.url, assetRoot, 8, { chartsOnly: extracted }))
+        .filter((image) => eligibleEditorialImage(image) && isLocalVisualAsset(image));
+      screenshotCount += screenshots.length;
+      report.screenshotCount = screenshots.length;
+      if (screenshots.length) await dependencies.persistImages(signal, screenshots);
+    } catch (error) { errors.push(error instanceof Error ? error.message.slice(0, 180) : "可见图表截图失败"); }
+    report.status = errors.length ? extracted || report.screenshotCount ? "partial" : "unavailable" : "checked";
+    report.detail = errors.length ? [...new Set(errors)].join("；") : report.imageCount || report.screenshotCount
+      ? `发现 ${report.imageCount} 张原图，截取 ${report.screenshotCount} 张可见图表` : "未找到合格正文图片或可见图表";
+    sourceReports.push(report);
+  }
+  story = await dependencies.getStory();
+  if (!story) throw new Error("Story 不存在");
+  return { ...resultFor(story, extractedSources, screenshotCount, 0, 0), sourceReports };
+};
+
 export const runVisualHydration = async (
   storyId: string,
   minimumImages: number,
   dependencies: VisualHydrationDependencies,
-  options: { progress?: (value: number, stage: string) => void } = {},
+  options: VisualHydrationOptions = {},
 ): Promise<VisualHydrationResult> => {
+  if (options.scope === "article") return collectArticleVisuals(storyId, dependencies, options);
   const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
   let story = await dependencies.getStory();
   if (!story) throw new Error("Story 不存在");
@@ -424,10 +480,10 @@ const productionDependencies = (storyId: string): VisualHydrationDependencies =>
 export const hydrateStoryAssets = (
   storyId: string,
   minimumImages = 2,
-  options: { progress?: (value: number, stage: string) => void } = {},
+  options: VisualHydrationOptions = {},
 ) => {
   const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
-  const key = `${storyId}:${minimum}`;
+  const key = `${storyId}:${minimum}:${options.scope ?? "preview"}`;
   const existing = inFlight.get(key);
   if (existing) {
     if (options.progress) existing.listeners.add(options.progress);
@@ -438,7 +494,7 @@ export const hydrateStoryAssets = (
   const report = (value: number, stage: string) => {
     for (const listener of listeners) listener(value, stage);
   };
-  const operation = runVisualHydration(storyId, minimum, productionDependencies(storyId), { progress: report })
+  const operation = runVisualHydration(storyId, minimum, productionDependencies(storyId), { ...options, progress: report })
     .finally(() => inFlight.delete(key));
   inFlight.set(key, { promise: operation, listeners });
   return operation;

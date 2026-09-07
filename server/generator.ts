@@ -1,10 +1,14 @@
+import { restoreTechnicalSourceBlocks, technicalDraftGuidelines, technicalSourceFragments } from "./technical-draft.js";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { editorialProfileForWriting } from "./editorial-controls.js";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { legacyDraftBodyHtml } from "./article-html.js";
 import { resolveCodexExecutable } from "./codex-executable.js";
 import { planEditorialImagePlacements, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
+import { completeDraftImageLibrary } from "./draft-image-library.js";
+import { frozenFactSourceUrls, reconcileDraftFactEvidence } from "./editorial-quality-desk.js";
 import {
   appendAiError,
   appendAiProviderAttempt,
@@ -341,7 +345,6 @@ export const buildPackageParagraphClaims = ({
   const packageIntent = contentPackage.intent
     ?? (contentPackage.mode === "community" ? "community" : contentPackage.mode === "curate" ? "source" : "news");
   const factById = new Map(contentPackage.facts.map((fact) => [fact.id, fact]));
-  const sourceBySignalId = new Map(contentPackage.sources.map((source) => [source.signalId, source]));
   const sourceByUrl = new Map(contentPackage.sources.map((source) => [normalizedEvidenceUrl(source.url), source]));
   const communityUrls = new Set(contentPackage.sources
     .filter((source) => source.isCommunity)
@@ -355,7 +358,7 @@ export const buildPackageParagraphClaims = ({
     [...new Set(entry.factIds)],
   ]));
 
-  return paragraphs.map((paragraph, index) => {
+  const claims = paragraphs.map((paragraph, index) => {
     const sourceUrls = evidenceByParagraph.get(index) ?? [];
     const factIds = factIdsByParagraph.get(index) ?? [];
     const unknownFactId = factIds.find((factId) => !factById.has(factId));
@@ -370,13 +373,7 @@ export const buildPackageParagraphClaims = ({
       return fact ? [fact] : [];
     });
     for (const fact of facts) {
-      const factSourceUrls = [...new Set([
-        ...(fact.sourceUrls ?? []),
-        ...fact.sourceSignalIds.flatMap((signalId) => {
-          const source = sourceBySignalId.get(signalId);
-          return source ? [source.url] : [];
-        }),
-      ])];
+      const factSourceUrls = frozenFactSourceUrls(contentPackage, fact);
       if (factSourceUrls.length && !sourceUrls.some((url) =>
         factSourceUrls.some((factUrl) => normalizedEvidenceUrl(factUrl) === normalizedEvidenceUrl(url)))) {
         throw new Error(`第 ${index + 1} 段登记了事实 ${fact.id}，但没有回指支持该事实的来源`);
@@ -409,6 +406,7 @@ export const buildPackageParagraphClaims = ({
         : "本段只说明可回指的社区发现或讨论材料，没有登记为事件事实。",
     };
   });
+  return reconcileDraftFactEvidence(contentPackage, claims);
 };
 
 export const parseGeneratedArticle = (rendered: string) => {
@@ -569,7 +567,7 @@ ${skills.filter((skill) => skill.compatibility === "codex-native").length
 8. ${contentIntent === "source"
     ? "这是用户主动选择的来源工作副本，可以忠实翻译或保留原文，但不得添加 sourceMaterials 之外的数字、人名、模型名、日期、因果或评价。"
     : "文章不能逐段翻译或大段复述来源。数字、人名、模型名、日期必须能回指来源；无法核实的内容放入 uncertainties。原报道已经简洁准确时，应保留其信息密度，不做无意义扩写。"}
-9. 把图表、产品截图和架构图视为新闻证据，而不是装饰。job.availableImages 的 editorialPriority 是硬优先级：1 原新闻可下载图片，2 原文截图，3 当事人物/公司身份资料图，4 与事件相关的其他图片，5 AI 生成兜底。必须先用完更高优先级中与正文相关的图片，低优先级不能挤掉高优先级；三段以上正文通常选择 2–4 张，并分散插在相关段落后。如果候选媒体页没有合适图片，但你核验到的官方/一手页面有与事件直接相关的原图，可把可直接下载的精确图片 URL 放入 discoveredImages。不要返回页面 URL 代替图片 URL。
+9. 把图表、产品截图和架构图视为新闻证据，而不是装饰。先检查图片是否支持对应段落，再按 editorialPriority 选择：1 原新闻可下载图片，2 原文图表截图，3 当事人物/公司身份资料图，4 事件相关图片，5 生成兜底。原图与忠实的原文图表截图都属于来源证据，可按正文需要选择；不要为了用满上限插入正文没有解释的雷达图、作者头像或推荐文章图片。三段以上正文通常选择 2–4 张，材料不适合时可更少，分散插在相关段落后。其余图片保留在配图库，不需要全部插入正文。图注用自然中文说明图片内容，保留官方自测归属与重要条件。如果没有冻结素材包，且核验到官方原图，可把精确图片 URL 放入 discoveredImages；冻结素材包任务只能使用包内图片。
 10. 只有 1–4 级都不存在合格图片时才可选择第 5 级 AI 生成兜底；不要自行生成图片，不要选择无关 logo、头像、装饰图、旧事件图片或仅凭“AI/科技”等泛词命中的通用图。caption 要说明画面是什么并保留来源语义。imageSelections 只是同级图片的段落匹配建议，系统会再次强制执行优先级。
 11. topics 必须返回空数组。平台话题只由用户从已成功发布的历史标签中选择，不能自动生成。
 12. paragraphEvidence 必须覆盖每个 paragraphs 下标。每一段列出直接支持该段的精确来源 URL；URL 必须同时出现在 sources 中，候选原始链接也必须列入 sources。${contentIntent === "source" ? "sourceMaterials 中的社区主帖 URL 只能证明原作者确实这样写过，不能把其陈述升级为已独立核验事实。" : "社区讨论链接只能支持“讨论热度、分数、评论内容”等社区事实，不能支持产品功能、公司行为或裁员传闻。"}没有来源支持的句子不得写入正文。
@@ -809,6 +807,8 @@ export const generateCandidateDraft = async (
           noGeneratedImages: true,
           noMyTakeLabel: true,
           noForcedConclusion: true,
+          editorialProfile: editorialProfileForWriting(state),
+          editorialProfilePolicy: "用户设定的定位、读者、表达偏好和红线用于组织文章；不是证据，不得扩充或修改冻结事实。用真实变化和具体场景吸引读者，不制造夸张标题。",
           learnedGuidelines: evidenceOverride?.writingGuidelines ?? [],
           learnedGuidelinesPolicy: "仅应用已由用户真实编辑解锁且仍启用的偏好；不得改变事实、引语或证据强度。",
         },
@@ -837,6 +837,8 @@ export const generateCandidateDraft = async (
             : [],
           sources: evidenceOverride.contentPackage.sources,
           sourceMaterials: evidenceOverride.contentPackage.sourceMaterials,
+          technicalGuidelines: technicalDraftGuidelines(evidenceOverride.contentPackage),
+          sourceFragments: technicalSourceFragments(evidenceOverride.contentPackage),
           assets: evidenceOverride.contentPackage.assets,
           uncertainties: evidenceOverride.contentPackage.uncertainties,
           suggestedAngles: evidenceOverride.contentPackage.suggestedAngles,
@@ -873,7 +875,7 @@ export const generateCandidateDraft = async (
         Boolean(evidenceOverride?.contentPackage),
         evidenceOverride?.contentPackage?.intent,
       ),
-      apiSystemPrompt,
+      apiSystemPrompt: `${apiSystemPrompt}\n选图先核对与段落的相关性：原图和忠实的原文图表截图均可作为来源证据。只选正文能解释的图，不为用满数量补入作者头像、推荐文章或无关插图；未选图片留在图库。图注用中文保留测试归属和条件。`,
       apiUserPrompt: `请根据下面的任务数据成稿：\n${serializedJob}`,
       schemaPath,
       outputPath,
@@ -980,10 +982,13 @@ export const generateCandidateDraft = async (
     if (!allImages.some((entry) => entry.url === image.url)) allImages.push(image);
   }
   const imageById = new Map(allImages.map((image) => [image.id, image]));
-  const placements: DraftImagePlacement[] = [];
+  let placements: DraftImagePlacement[] = [];
   evidenceOverride?.onProgress?.(0.88, "复制并编排文章图片");
+  const editorialImageLimit = evidenceOverride?.contentPackage?.technicalArticle ? Math.max(settings.imageLimit, Math.min(12, allImages.length)) : settings.imageLimit;
   const plannedSelections = planEditorialImagePlacements({
     availableImages: allImages,
+    imageAliases: Object.fromEntries((evidenceOverride?.contentPackage?.assets ?? [])
+      .map((asset) => [asset.id, asset.sourceImageId])),
     modelSelections: [
       ...article.imageSelections,
       ...discoveredImages.map((image) => ({
@@ -993,7 +998,7 @@ export const generateCandidateDraft = async (
       })),
     ],
     paragraphs: article.paragraphs,
-    imageLimit: settings.imageLimit,
+    imageLimit: editorialImageLimit,
     imagePolicy: settings.imagePolicy,
   });
   for (const selection of plannedSelections) {
@@ -1027,42 +1032,15 @@ export const generateCandidateDraft = async (
     }
   }
 
-  // Keep the remaining suitable source images as a reusable library. They are
-  // not inserted automatically once the visual-first target has been met. If
-  // a planned download failed, the next source image fills that visible slot.
-  for (const sourceImage of settings.imagePolicy === "none" ? [] : uniqueEligibleEditorialImages(allImages)) {
-    if (placements.length >= settings.imageLimit) break;
-    if (placements.some((placement) => placement.image.url === sourceImage.url)) continue;
-    try {
-      const downloaded = sourceImage.localPath
-        ? await copyLocalSourceImageToDraft(sourceImage, draftId, {
-          requireFingerprintMatch: Boolean(evidenceOverride?.contentPackage),
-        })
-        : await downloadSourceImage(sourceImage, draftId);
-      if (downloaded.fingerprint && placements.some((placement) => placement.image.fingerprint === downloaded.fingerprint)) {
-        continue;
-      }
-      const needsVisibleFallback = placements.length < plannedSelections.length;
-      placements.push({
-        id: `placement_${randomUUID().slice(0, 8)}`,
-        image: downloaded,
-        afterParagraph: needsVisibleFallback
-          ? Math.min(article.paragraphs.length - 1, placements.length)
-          : -1,
-        caption: sourceImage.caption,
-      });
-    } catch (error) {
-      if (evidenceOverride?.contentPackage) {
-        throw new Error(`素材包图片 ${sourceImage.id} 无法按冻结快照复制：${error instanceof Error ? error.message : String(error)}`);
-      }
-      await appendRunLog(
-        runId,
-        "保存备选原图",
-        `${sourceImage.url}：${error instanceof Error ? error.message : String(error)}`,
-        "warning",
-      );
-    }
-  }
+  placements = await completeDraftImageLibrary({
+    sources: settings.imagePolicy === "none" ? [] : allImages, placements,
+    imageLimit: settings.imageLimit, plannedCount: plannedSelections.length,
+    paragraphCount: article.paragraphs.length, frozenPackage: Boolean(evidenceOverride?.contentPackage),
+    copy: (image) => image.localPath
+      ? copyLocalSourceImageToDraft(image, draftId, { requireFingerprintMatch: Boolean(evidenceOverride?.contentPackage) })
+      : downloadSourceImage(image, draftId),
+    onCopyError: (image, error) => appendRunLog(runId, "保存备选原图", `${image.url}：${error instanceof Error ? error.message : String(error)}`, "warning"),
+  });
 
   const createdAt = timestamp();
   const packageClaims = evidenceOverride?.contentPackage
@@ -1143,6 +1121,7 @@ export const generateCandidateDraft = async (
     },
   };
   draft.bodyHtml = legacyDraftBodyHtml(draft);
+  if (evidenceOverride?.contentPackage) restoreTechnicalSourceBlocks(draft, evidenceOverride.contentPackage);
   evidenceOverride?.onProgress?.(0.94, "组装可编辑草稿");
   return draft;
 };

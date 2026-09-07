@@ -1,4 +1,5 @@
 import type { BootstrapState } from "../bootstrap-state";
+import { PageLoading } from "./PageLoading";
 
 interface BootstrapStatusPageProps {
   state: BootstrapState;
@@ -8,11 +9,7 @@ interface BootstrapStatusPageProps {
 export function BootstrapStatusPage({ state, onRetry }: BootstrapStatusPageProps) {
   if (state.status === "ready") return null;
   if (state.status === "loading" || state.status === "idle") {
-    return (
-      <div className="app-loading" role="status" aria-live="polite">
-        <span className="loading-mark" aria-hidden="true" />正在启动 AI 新闻台…
-      </div>
-    );
+    return <PageLoading label="正在启动 AI 新闻台…" />;
   }
   return (
     <div className="app-loading" role="alert" aria-labelledby="bootstrap-error-title">

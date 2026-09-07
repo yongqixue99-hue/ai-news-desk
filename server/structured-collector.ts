@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import type { AnyNode } from "domhandler";
+import { parseKnowledgeIndex } from "./official-knowledge.js";
 import { fetchRemote, readResponseBuffer } from "./remote-url.js";
 import { routedFeedsForSource, sourceRoleFor } from "./source-routing.js";
 import type {
@@ -211,6 +212,38 @@ export const parsePortableFeed = (
   });
 };
 
+const indexMatchStopWords = new Set([
+  "a", "an", "and", "the", "of", "for", "in", "on", "to", "with", "new", "generation", "intelligence",
+  "introducing", "introduces", "introduced", "releases", "released", "launches", "launched", "announcing",
+  "openai", "anthropic", "official", "com", "www",
+]);
+const indexMatchTokens = (value: string) => new Set(value.normalize("NFKC").toLowerCase()
+  .split(/[^\p{L}\p{N}]+/u).filter((word) => word && !indexMatchStopWords.has(word)));
+
+/** Resolve only unambiguous matches present in this publisher's own index.
+ * The discovery URL and date remain the original record; lastmod is not news time. */
+export const resolveOfficialFeedLinks = (items: RawHorizonItem[], source: SourceConfig) => {
+  if (sourceRoleFor(source) !== "official" || !source.homepageUrl) return items;
+  const owner = new URL(source.homepageUrl).hostname.replace(/^www\./u, "");
+  const indexed = items.filter((item) => {
+    const url = new URL(item.url);
+    return url.hostname === owner || url.hostname.endsWith(`.${owner}`);
+  });
+  return items.map((item) => {
+    if (new URL(item.url).hostname !== "news.google.com") return item;
+    const title = indexMatchTokens(item.title);
+    const matches = indexed.map((entry) => {
+      const slug = decodeURIComponent(new URL(entry.url).pathname.split("/").filter(Boolean).at(-1) ?? "");
+      const tokens = indexMatchTokens(slug);
+      const shared = [...tokens].filter((word) => title.has(word)).length;
+      return { entry, shared, valid: shared >= 3 && shared === tokens.size && shared / Math.max(1, title.size) >= 0.65 };
+    }).filter((match) => match.valid).sort((a, b) => b.shared - a.shared);
+    const best = matches[0];
+    if (!best || (matches[1] && matches[1].shared === best.shared && matches[1].entry.url !== best.entry.url)) return item;
+    return { ...item, metadata: { ...item.metadata, canonical_url: best.entry.url, canonical_evidence: "publisher-index" } };
+  });
+};
+
 const collectFeed = async (
   source: SourceConfig,
   topicIds: CollectionTopicId[],
@@ -250,7 +283,7 @@ const collectFeed = async (
         : []);
     throw new Error(reasons.join("；").slice(0, 700));
   }
-  return items;
+  return resolveOfficialFeedLinks(items, source);
 };
 
 interface HackerNewsItem {
@@ -344,6 +377,13 @@ export const collectPortableStructuredSources = async (
       const index = cursor++;
       const source = sources[index];
       try {
+        if (source.kind === "documentation") {
+          const response = await fetcher(source.url || source.homepageUrl || "", { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(18_000)]) : AbortSignal.timeout(18_000), headers: { accept: "text/html", "user-agent": "AI-News-Desk/0.2 (official learning index)" } });
+          if (!response.ok) { await response.body?.cancel(); throw new Error(`技术目录返回 HTTP ${response.status}`); }
+          collected[index] = parseKnowledgeIndex((await readResponseBuffer(response, maximumFeedBytes)).toString("utf8"), source, fetchedAt);
+          if (!collected[index].length) throw new Error("技术目录未识别到文章链接，请检查页面结构");
+          continue;
+        }
         if (source.kind === "hackernews") {
           collected[index] = await collectHackerNews(source, fetcher, fetchedAt, signal);
           continue;

@@ -27,8 +27,8 @@ test("article image payload must exactly match every body marker", () => {
   }).ok, true);
 });
 
-test("image-post payload must contain exactly one image", () => {
+test("image-post payload accepts an ordered gallery and rejects duplicate IDs", () => {
   assert.equal(validator.validateImagePostPayload({ images: [] }).ok, false);
-  assert.equal(validator.validateImagePostPayload({ images: [{ id: "one" }, { id: "two" }] }).ok, false);
-  assert.equal(validator.validateImagePostPayload({ images: [{ id: "one" }] }).ok, true);
+  assert.equal(validator.validateImagePostPayload({ images: [{ id: "one", dataUrl: "data:image/png;base64,YQ==" }, { id: "two", dataUrl: "data:image/png;base64,Yg==" }] }).ok, true);
+  assert.equal(validator.validateImagePostPayload({ images: [{ id: "one", dataUrl: "data:image/png;base64,YQ==" }] }).ok, true);
 });

@@ -5,6 +5,7 @@ import { repositoriesForGitHubSource } from "./github-community.js";
 import { getXBearerToken } from "./secrets.js";
 import { accountsForXSource, createXApiClient, type XRecentSearchClient } from "./x-official.js";
 import type { SourceConfig, SourceProbeResult } from "./types.js";
+import { parseKnowledgeIndex } from "./official-knowledge.js";
 
 const MAXIMUM_PROBE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 8_000;
@@ -36,6 +37,7 @@ export const applySourceProbeResult = (
 };
 
 const probeTargetFor = (source: SourceConfig) => {
+  if (source.kind === "documentation" && source.url) return { url: source.url, format: "documentation" as const };
   if (source.kind === "hackernews") return { url: HACKER_NEWS_TOP_STORIES, format: "json" as const };
   if (source.kind === "github") {
     const repository = repositoriesForGitHubSource(source)[0];
@@ -186,7 +188,7 @@ export const probeSource = async (
     }
     const content = (await readResponseBuffer(response, MAXIMUM_PROBE_BYTES)).toString("utf8");
     const isSitemap = target.format === "feed" && /<urlset\b/iu.test(content);
-    const itemCount = target.format === "feed"
+    const itemCount = target.format === "documentation" ? parseKnowledgeIndex(content, source, checkedAt).length : target.format === "feed"
       ? countFeedItems(content)
       : target.format === "json"
         ? countJsonItems(content)

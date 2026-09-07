@@ -267,12 +267,16 @@ async function fillImagePost(job) {
   await closeBlockingDialogs();
   const readiness = await ensureImagePostEditor();
   if (readiness.issue) return { pageUrl: location.href, steps: [readiness.issue] };
+  const existingGallery = document.querySelector('.editor-image-text__image-seletor');
+  if (existingGallery?.querySelector('.editor-image-wrapper__box.draggable') && existingGallery.dataset.aiNewsGalleryJob !== job.id) return { pageUrl: location.href, steps: [{ name: '图文编辑器', ok: false, detail: '当前图文已有图片，未覆盖；请进入新的图文草稿后重试' }] };
   const steps = [];
   try {
     const title = String(job.title || "").trim();
     const scratch = document.createElement("div");
     scratch.innerHTML = String(job.bodyHtml || "");
-    const bodyText = (scratch.innerText || scratch.textContent || "").trim();
+    scratch.querySelectorAll('br').forEach(node => node.replaceWith('\n'));
+    scratch.querySelectorAll('p,h2,h3,li,blockquote,pre,tr').forEach(node => node.append('\n\n'));
+    const bodyText = (scratch.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
     fillPlainText(readiness.title, title);
     fillPlainText(readiness.body, bodyText);
     await wait(400);
@@ -291,20 +295,11 @@ async function fillImagePost(job) {
       });
       return { pageUrl: location.href, steps };
     }
-    const image = Array.isArray(job.images) ? job.images[0] : undefined;
-    if (!image?.dataUrl) {
-      steps.push({ name: "配图", ok: false, detail: "图文稿没有可上传图片" });
-      return { pageUrl: location.href, steps };
-    }
     const upload = await chrome.runtime.sendMessage({
       type: "AI_NEWS_UPLOAD_XIAOHEIHE_IMAGE_POST",
-      payload: image,
+      payload: { images: job.images, jobId: job.id },
     });
-    steps.push({
-      name: "配图",
-      ok: Boolean(upload?.ok),
-      detail: String(upload?.detail || "图文图片上传没有返回结果"),
-    });
+    steps.push({ name: "配图", ok: Boolean(upload?.ok), detail: String(upload?.detail || "图集上传没有返回结果") });
     if (!upload?.ok) return { pageUrl: location.href, steps };
     steps.push(await chooseCommunity(job.community));
     steps.push(await chooseTopics(job.topics));

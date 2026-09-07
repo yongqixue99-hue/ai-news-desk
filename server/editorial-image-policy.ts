@@ -21,6 +21,7 @@ export interface EditorialImageSelection {
 interface EditorialImagePlanInput {
   availableImages: EditorialImageCandidate[];
   modelSelections: EditorialImageSelection[];
+  imageAliases?: Record<string, string>;
   paragraphs: string[];
   imageLimit: number;
   imagePolicy?: "source" | "screenshot" | "none";
@@ -60,7 +61,8 @@ export const eligibleEditorialImage = (image: EditorialImageCandidate) => {
   if (imageNoise.test(`${image.url} ${image.caption}`)) return false;
   if (badgeCaption.test(image.caption.trim())) return false;
   if (image.width && image.width < 320) return false;
-  if (image.height && image.height < 180) return false;
+  if (image.height && image.height < 180 && !((image.width ?? 0) >= 640 && image.height >= 120
+    && /chart|benchmark|comparison|图表|评测|对比/iu.test(image.caption))) return false;
   return true;
 };
 
@@ -151,6 +153,7 @@ const evenlySpacedSlots = (paragraphCount: number, count: number) => {
 export const planEditorialImagePlacements = ({
   availableImages,
   modelSelections,
+  imageAliases = {},
   paragraphs,
   imageLimit,
   imagePolicy = "source",
@@ -161,8 +164,23 @@ export const planEditorialImagePlacements = ({
   const eligible = uniqueEligibleEditorialImages(availableImages);
   if (!eligible.length) return [];
 
+  // The frozen package exposes both an asset ID and its source-image ID.
+  // Accept either explicit identity before deciding a model made no valid choice.
+  modelSelections = modelSelections.map((selection) => ({ ...selection,
+    imageId: eligible.some((image) => image.id === selection.imageId) ? selection.imageId
+      : imageAliases[selection.imageId] ?? selection.imageId,
+  }));
+
   const nonGenerated = eligible.filter((image) => (image.editorialPriority ?? 1) < 5);
-  const eligiblePool = nonGenerated.length ? nonGenerated : eligible;
+  const safePool = nonGenerated.length ? nonGenerated : eligible;
+  const explicitSourceSelections = modelSelections.length > 0 && modelSelections.every((selection) =>
+    safePool.some((image) => image.id === selection.imageId && (image.editorialPriority ?? 1) <= 2));
+  // Original images and faithful source-chart screenshots are both factual
+  // visuals. Respect an explicit choice between them; an unrelated photo must
+  // not be inserted merely to fill the image limit. Others stay in the library.
+  const eligiblePool = explicitSourceSelections
+    ? safePool.filter((image) => modelSelections.some((selection) => selection.imageId === image.id))
+    : safePool;
   const modelRank = new Map(modelSelections.map((selection, index) => [selection.imageId, index]));
   const originalRank = new Map(eligiblePool.map((image, index) => [image.id, index]));
   const prioritized = [...eligiblePool].sort((left, right) =>

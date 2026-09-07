@@ -8,6 +8,16 @@ import {
   evaluatePublisherPreflight,
 } from "./publisher-preflight.js";
 
+test("CDP gallery delivery has one actionable protocol capability", () => {
+  const result = evaluatePublisherPreflight({
+    runtime: { mode: "cdp", connected: true },
+    draft: { id: "gallery-cdp", contentFormat: "image-post", title: "图集测试", bodyHtml: "<p>用于检查图文通道。</p>", community: "盒友杂谈", topics: ["AI"], images: [{ id: "one", available: true, caption: "测试图片" }] },
+  });
+  assert.equal(result.canQueueFill, false);
+  assert.equal(result.capabilities.filter(item => item.id === "protocol").length, 1);
+  assert.ok(result.blocking.some(item => item.code === "PREFLIGHT_IMAGE_POST_EXTENSION_REQUIRED"));
+});
+
 test("editorial blockers are added without hiding transport or title failures", () => {
   const preflight = evaluatePublisherPreflight({
     runtime: { mode: "chrome-extension", connected: false },
@@ -229,7 +239,7 @@ test("an unprobed login and editor are described as fill-time checks, not user f
   assert.equal(result.warnings.some((warning) => /等待页面探针/.test(warning.message)), false);
 });
 
-test("an image post is blocked unless it has exactly one inserted image", () => {
+test("an image post accepts multiple available original images", () => {
   const result = evaluatePublisherPreflight({
     minimumProtocolVersion: "0.1.17",
     runtime: {
@@ -253,11 +263,11 @@ test("an image post is blocked unless it has exactly one inserted image", () => 
     },
   });
 
-  assert.equal(result.canQueueFill, false);
-  assert.equal(result.publishReady, false);
+  assert.equal(result.canQueueFill, true);
+  assert.equal(result.publishReady, true);
   assert.equal(
     result.blocking.some((issue) => issue.code === "PREFLIGHT_IMAGE_POST_IMAGE_COUNT"),
-    true,
+    false,
   );
 });
 

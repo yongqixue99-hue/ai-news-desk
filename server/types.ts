@@ -21,7 +21,7 @@ export type RunStatus =
   | "failed"
   | "cancelled";
 
-export type SourceKind = "rss" | "hackernews" | "google_news" | "zhihu" | "last30days" | "github" | "x";
+export type SourceKind = "rss" | "hackernews" | "google_news" | "zhihu" | "last30days" | "github" | "x" | "documentation";
 export type SourceRole = "official" | "verification" | "research" | "discovery" | "community";
 export type SourceHealthStatus = "unknown" | "healthy" | "warning" | "error";
 export type CollectionTopicId =
@@ -309,11 +309,19 @@ export interface Settings {
   spendingPolicy: "zero-cost" | "allow-metered";
   /** Apply a small, capped editorial preference adjustment to candidate order. */
   personalizationEnabled: boolean;
+  /** Focus on consequential changes and concrete useful/interesting projects. */
+  recommendationMode: "focused" | "balanced";
+  editorialProfileEnabled: boolean;
+  writingMemoryEnabled: boolean;
+  inlineCompletionEnabled: boolean;
   /** Keep notifications in the drawer without showing unread red badges. */
   notificationsMuted: boolean;
   scheduleEnabled: boolean;
   scheduleTime: string;
   lastScheduledDate?: string;
+  officialMonitorEnabled?: boolean;
+  officialMonitorIntervalMinutes?: number;
+  lastOfficialPollAt?: string;
   draftMode: "separate" | "roundup";
   imagePolicy: "source" | "screenshot" | "none";
   imageLimit: number;
@@ -359,9 +367,20 @@ export interface CandidateEngagement {
   discussionUrl?: string;
 }
 
+export interface ImageCollectionReport {
+  url: string;
+  status: "checked" | "partial" | "unavailable";
+  imageCount: number;
+  screenshotCount: number;
+  detail: string;
+}
+
 export interface SourceImage {
   id: string;
   url: string;
+  /** Original raster URL when the local asset is a rendered crop. */
+  originalImageUrl?: string;
+  captureKind?: "image" | "chart" | "table";
   localPath?: string;
   publicPath?: string;
   caption: string;
@@ -396,6 +415,8 @@ export interface SourceImage {
 }
 
 export interface Candidate {
+  technicalArticle?: import("./technical-article.js").TechnicalArticlePolicy;
+  publicationDateKnown?: boolean;
   id: string;
   rawId: string;
   sourceType: string;
@@ -516,6 +537,7 @@ export interface SourceRunResult {
 }
 
 export interface WorkflowRun {
+  collectionPurpose?: "official-monitor";
   id: string;
   horizonRunId?: string;
   createdAt: string;
@@ -907,6 +929,8 @@ export interface ArticleDraft {
   status: "editing" | "reviewing" | "needs-images" | "ready" | "filled" | "published" | "shelved";
   /** Xiaoheihe surface to fill. Legacy drafts default to the article editor. */
   contentFormat?: "article" | "image-post";
+  /** Ordered image-post selection, independent from the article body. */
+  imagePostImageIds?: string[];
   title: string;
   /** Editorial route selected before generation; absent on legacy drafts. */
   draftStrategy?: Exclude<ArticleDraftStrategy, "skip">;
@@ -1001,6 +1025,7 @@ export type DraftSaveMode = "auto" | "manual";
 
 export interface DraftRevisionSnapshot {
   contentFormat?: "article" | "image-post";
+  imagePostImageIds?: string[];
   title: string;
   paragraphs: string[];
   take: string;
@@ -1174,8 +1199,9 @@ export interface ExtractedPage {
   text: string;
   /** Ordered article blocks, preserved before the plain-text fallback flattens whitespace. */
   blocks?: Array<{
-    kind: "heading" | "paragraph" | "quote" | "list-item";
+    kind: "heading" | "paragraph" | "quote" | "list-item" | "code" | "table";
     text: string;
+    language?: string;
   }>;
   images: SourceImage[];
 }

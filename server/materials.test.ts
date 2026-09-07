@@ -1,12 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   DuplicateMaterialError,
   normalizeMaterialInput,
   saveMaterialBytes,
   sourceImageFromMaterial,
+  copyLocalSourceImageToDraft,
 } from "./materials.js";
-import type { ImageMaterial } from "./types.js";
+import type { ImageMaterial, SourceImage } from "./types.js";
+
+test("copying an image into a draft preserves the original URL and verified bytes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "ai-news-image-copy-"));
+  try {
+    const sourcePath = path.join(root, "source.png");
+    await writeFile(sourcePath, Buffer.from("hello"));
+    const image: SourceImage = { id: "source", url: "https://cdn.example.com/benchmark.png", sourceUrl: "https://example.com/article",
+      caption: "Benchmark", attribution: "Author", selected: true, rights: "check-required", localPath: sourcePath,
+      fingerprint: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" };
+    const result = await copyLocalSourceImageToDraft(image, "draft", { requireFingerprintMatch: true, mediaRoot: root });
+    assert.equal(result.originalImageUrl, image.url);
+    assert.equal(result.url, result.publicPath);
+    assert.deepEqual(await readFile(result.localPath!), await readFile(sourcePath));
+    await assert.rejects(copyLocalSourceImageToDraft({ ...image, fingerprint: "0".repeat(64) }, "other", { requireFingerprintMatch: true, mediaRoot: root }), /指纹/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 const existingMaterial = (overrides: Partial<ImageMaterial> = {}): ImageMaterial => ({
   id: "material_existing",

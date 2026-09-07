@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { assessEditorialOpportunity, opportunityPriority } from "./newsworthiness.js";
+import { personalizeCandidates } from "./personalization.js";
 import type {
   EvidenceStrength,
   ModelReleaseDossier,
@@ -138,11 +140,11 @@ const versionedEntityKeys = (title: string) => {
   return keys;
 };
 
-const versionKeysFor = (record: CandidateRecord) => new Set(
+const versionKeysFor = (record: CandidateRecord) => record.candidate.technicalArticle ? new Set<string>() : new Set(
   recordTitles(record).flatMap((title) => {
     const keys = [...versionedEntityKeys(title)];
     const normalized = title.normalize("NFKC").toLocaleLowerCase();
-    const looksLikeRelease = /(?:\bv?\d+(?:\.\d+)+\b|\b(?:release|released|releases|launch|launched|introducing|announce|announced|preview)\b|发布|推出|上线|预告)/iu.test(normalized);
+    const looksLikeRelease = /(?:\bv?\d+(?:\.\d+)+\b|\b(?:release(?:d|s)?|launch(?:ed|es)?|introduc(?:e|ed|es|ing)|announce(?:d|s)?|preview)\b|发布|推出|上线|预告)/iu.test(normalized);
     if (!looksLikeRelease) return keys;
     const words = normalized.replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(/\s+/u);
     for (const word of words) {
@@ -182,7 +184,9 @@ const clustersFor = (state: WorkflowState) => {
   const records = state.runs.flatMap((run) => run.candidates.map((candidate) => ({ runId: run.id, candidate })))
     .sort((left, right) => timeFor(left) - timeFor(right));
 
-  for (const record of records) {
+  // Research documents belong to their explicit event. Indexing their own URL
+  // would join unrelated Stories every time they share a pricing page/manual.
+  for (const record of records.filter((entry) => entry.candidate.evidenceRelation !== "research-material")) {
     const exactKeys = exactKeysFor(record.candidate);
     const versionKeys = versionKeysFor(record);
     let cluster = exactKeys.map((key) => exactIndex.get(key)).find(Boolean);
@@ -203,6 +207,7 @@ const clustersFor = (state: WorkflowState) => {
       }
       cluster = [...nearbyClusters].find((candidateCluster) => {
         const latest = candidateCluster.records.at(-1)!;
+        if (Boolean(record.candidate.technicalArticle) !== Boolean(latest.candidate.technicalArticle)) return false;
         if (!withinMergeWindow(record, latest)) return false;
         return recordTitles(record).some((leftTitle) => candidateCluster.titles.some((rightTitle) =>
           titleSimilarity(leftTitle, rightTitle) >= 0.78));
@@ -238,6 +243,10 @@ const clustersFor = (state: WorkflowState) => {
         titleIndex.set(token, indexed);
       }
     }
+  }
+  for (const record of records.filter((entry) => entry.candidate.evidenceRelation === "research-material")) {
+    const owner = exactIndex.get(normalizedUrl(record.candidate.evidenceGroupUrl));
+    if (owner) owner.records.push(record);
   }
   return clusters;
 };
@@ -395,6 +404,15 @@ const modelReleaseTerms = /(?:\b(?:claude|fable|mythos|gpt(?:-[\w.]+)?|astra|gem
 const releaseEventTerms = /(?:\b(?:release(?:d|s)?|launch(?:ed|es)?|introduc(?:e|ed|es|ing)|announce(?:d|s)?|available|preview|coming soon|on the way|preparing)\b|发布|推出|上线|预告|即将|模型)/iu;
 const launchHeadlineTerms = /(?:\b(?:new generation|release(?:d|s)?|launch(?:ed|es)?|introduc(?:e|ed|es|ing)|announce(?:d|s)?)\b|正式发布|发布|推出|上线)/iu;
 const supportingDocumentTerms = /(?:\b(?:safety|system card|pricing|case study|apolog(?:y|ize[sd]?)|reviewed|cut manual fixes)\b|安全|模型卡|定价|致歉|案例)/iu;
+const modelIdentityTerms = /\b(?:gpt[\s-]*\d+|astra|(?:claude[\s-]*)?(?:fable|mythos|opus|sonnet|haiku)[\s-]*\d+|gemini[\s-]*\d+|deepseek[\s-]*[rv]?\d+|qwen[\s-]*\d+)\b/iu;
+const routineReleaseTerms = /\b(?:nightly|canary|daily|weekly|webinar|(?:co)?workshop|cli|sdk)\b|报名|活动预告/iu;
+const isFirstPartyModelSignal = (signal: StorySignalView) => signal.sourceRole === "official"
+  && Boolean(firstPartyModelVendorFor(signal))
+  && modelReleaseTerms.test(`${signal.title} ${signal.titleZh ?? ""}`)
+  && !routineReleaseTerms.test(signal.title)
+  && !supportingDocumentTerms.test(signal.title);
+const isFirstPartyModelAnnouncement = (signal: StorySignalView) => isFirstPartyModelSignal(signal)
+  && launchHeadlineTerms.test(`${signal.title} ${signal.titleZh ?? ""}`);
 
 const dossierTextFor = (records: CandidateRecord[]) => records.flatMap(({ candidate }) => [
   candidate.title,
@@ -602,15 +620,16 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     records.filter((record) => isCommunityCandidate(record.candidate)),
     (record) => normalizedUrl(record.candidate.engagement?.discussionUrl || record.candidate.url) || record.candidate.sourceName,
   );
-  const primary = [...records].sort((left, right) =>
+  const eventRecords = records.filter((record) => record.candidate.evidenceRelation !== "research-material");
+  const primary = [...eventRecords].sort((left, right) =>
     roleRank(right.candidate) - roleRank(left.candidate)
       || briefingRank(right.candidate) - briefingRank(left.candidate)
       || right.candidate.recommendationScore - left.candidate.recommendationScore)[0]!;
-  const bestBriefing = [...records].sort((left, right) =>
+  const bestBriefing = [...eventRecords].sort((left, right) =>
     briefingRank(right.candidate) - briefingRank(left.candidate)
       || roleRank(right.candidate) - roleRank(left.candidate))[0]!.candidate.briefing;
   const firstPartyLaunch = storyVendor
-    ? [...records]
+    ? [...eventRecords]
       .filter((record) => {
         const titles = recordTitles(record).join(" ");
         return record.candidate.sourceRole === "official"
@@ -632,19 +651,20 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
       })[0]
     : undefined;
   const headlinePrimary = firstPartyLaunch ?? primary;
+  const technicalArticle = primary.candidate.technicalArticle;
   const bestInsight = records.find((record) => record.candidate.communityInsight)?.candidate.communityInsight;
   const images = uniqueEligibleEditorialImages(
     uniqueBy(records.flatMap((record) => record.candidate.images), (image) => normalizedUrl(image.url) || image.id),
-  ).slice(0, 24);
+  ).slice(0, 48);
   const localImages = images.filter(isLocalImageFileReady);
   const publishReadyImages = localImages.filter((image) => isNeutralImagePublishReady(image, now));
-  const factualPublishedTimes = records
+  const factualPublishedTimes = eventRecords
     .filter((record) => isFactBearingCandidate(record.candidate))
     .map((record) => Date.parse(record.candidate.publishedAt))
     .filter(Number.isFinite);
   const publishedTimes = factualPublishedTimes.length
     ? factualPublishedTimes
-    : records.map((record) => Date.parse(record.candidate.publishedAt)).filter(Number.isFinite);
+    : eventRecords.map((record) => Date.parse(record.candidate.publishedAt)).filter(Number.isFinite);
   const fetchedTimes = records.map(timeFor).filter(Number.isFinite);
   const fallbackTime = Date.parse(now);
   // `publishedAt` is the event's original factual publication time. Later
@@ -664,6 +684,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     || (headlinePrimary === primary ? bestBriefing?.titleZh : undefined)
     || headlinePrimary.candidate.title;
   const assignment = assignStory({
+    technicalArticle,
     title,
     ageHours,
     evidenceStrength,
@@ -675,7 +696,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     now,
   });
   const id = `story_${createHash("sha1").update(cluster.identityKey).digest("hex").slice(0, 16)}`;
-  const releaseDossier = releaseDossierFor(cluster, records, factRecords, images.length, localImages.length);
+  const releaseDossier = technicalArticle ? undefined : releaseDossierFor(cluster, records, factRecords, images.length, localImages.length);
   const sourceCount = uniqueBy(records, (record) => `${record.candidate.sourceName}:${normalizedUrl(record.candidate.url)}`).length;
   const topicIds = [...new Set(records.flatMap((record) => record.candidate.topicIds ?? []))] as CollectionTopicId[];
   const signals: StorySignalView[] = uniqueSignals.map((record) => ({
@@ -692,6 +713,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     discussionUrl: record.candidate.engagement?.discussionUrl,
     author: record.candidate.author,
     publishedAt: record.candidate.publishedAt,
+    publicationDateKnown: record.candidate.publicationDateKnown,
     fetchedAt: record.candidate.fetchedAt,
     isCommunity: isCommunityCandidate(record.candidate),
     factBearing: isFactBearingCandidate(record.candidate),
@@ -707,6 +729,8 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     id,
     title,
     originalTitle: headlinePrimary.candidate.title,
+    technicalArticle,
+    publicationDateKnown: headlinePrimary.candidate.publicationDateKnown,
     summary: bestBriefing?.summaryZh || primary.candidate.excerpt.slice(0, 240) || "等待补充来源摘要",
     whyImportant: assignment.audienceValue,
     communitySummary: bestInsight?.summaryZh,
@@ -740,20 +764,54 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   };
 };
 
-const storyRank = (story: StoryView) => {
+const storyRank = (story: StoryView, focused = true) => {
   const evidence = story.evidenceStrength === "strong" ? 18 : story.evidenceStrength === "moderate" ? 9 : 0;
-  const trend = story.trend.direction === "rising" ? 15 : story.trend.direction === "steady" ? 5 : 0;
-  const images = Math.min(6, (story.localImageCount ?? 0) * 2 + Math.min(2, story.imageCount)) * 1.5;
+  const trend = story.trend.direction === "rising" ? 8 : story.trend.direction === "steady" ? 3 : 0;
+  const images = Math.min(2, story.localImageCount ?? 0);
   const recency = Math.max(0, 16 - story.ageHours / 3);
   const release = story.releaseDossier
     ? story.releaseDossier.releaseStatus === "released" ? 14 : story.releaseDossier.releaseStatus === "preview" ? 10 : 4
     : 0;
-  return story.recommendationScore + evidence + trend + images + recency + release;
+  return story.recommendationScore + evidence + trend + images + recency + release
+    + (story.technicalArticle?.priorityAdjustment ?? 0)
+    + (story.preferenceAdjustment ?? 0)
+    + (focused && story.opportunity ? opportunityPriority(story.opportunity) : 0);
 };
 
-export const buildStories = (state: WorkflowState, now = new Date().toISOString()) => clustersFor(state)
-  .map((cluster) => storyFromCluster(cluster, now))
-  .sort((left, right) => storyRank(right) - storyRank(left));
+export const buildStories = (state: WorkflowState, now = new Date().toISOString()) => {
+  const cutoff = Date.parse(now) - 30 * 86_400_000;
+  const feedback = state.candidateFeedback.filter((entry) => Date.parse(entry.createdAt) >= cutoff && Date.parse(entry.createdAt) <= Date.parse(now));
+  const candidates = [...new Map(state.runs.flatMap((run) => run.candidates).map((candidate) => [candidate.id, candidate])).values()];
+  const preferences = new Map(personalizeCandidates(candidates, feedback, state.settings.personalizationEnabled).map((candidate) => [candidate.id, candidate]));
+  const focused = state.settings.recommendationMode !== "balanced";
+  return clustersFor(state).map((cluster) => {
+    const story = storyFromCluster(cluster, now);
+    const opportunity = assessEditorialOpportunity(story.originalTitle, story.summary);
+    if (story.releaseDossier?.releaseStatus === "released"
+      && modelIdentityTerms.test(`${story.originalTitle} ${story.title}`)
+      && !routineReleaseTerms.test(story.originalTitle)
+      && story.signals.some(isFirstPartyModelAnnouncement)) {
+      opportunity.lane = "important";
+      opportunity.label = "重要发布";
+      opportunity.reason = "有厂商发布来源，优先核对能力、价格与可用范围的变化。";
+    }
+    if (story.releaseDossier?.releaseStatus === "preview"
+      && story.releaseDossier.facets.some((facet) => facet.id === "official" && facet.status === "ready")
+      && !routineReleaseTerms.test(story.originalTitle)
+      && story.signals.some((signal) => isFirstPartyModelSignal(signal)
+        && /\b(?:preview|coming soon|on the way|preparing)\b|预告|即将/iu.test(`${signal.title} ${signal.titleZh ?? ""}`))) {
+      opportunity.lane = "important";
+      opportunity.label = "官方预告";
+      opportunity.reason = "厂商已发布预告，正式上线时间和可用范围仍需核对。";
+    }
+    const strongest = story.signals.map((signal) => preferences.get(signal.candidateId)).filter((candidate) => candidate !== undefined)
+      .sort((left, right) => Math.abs(right.personalizationScore ?? 0) - Math.abs(left.personalizationScore ?? 0))[0];
+    const topicMatch = state.settings.editorialProfileEnabled !== false
+      && state.editorialSystem.profile.preferredTopicIds.some((topic) => story.topicIds.includes(topic));
+    return { ...story, opportunity, preferenceAdjustment: (strongest?.personalizationScore ?? 0) + (topicMatch ? 2 : 0),
+      preferenceReasons: [...(strongest?.personalizationReasons ?? []), ...(topicMatch ? ["符合长期关注主题 +2"] : [])] };
+  }).sort((left, right) => storyRank(right, focused) - storyRank(left, focused));
+};
 
 const diagnosticsFor = (sources: SourceConfig[]) => sources
   .filter((source) => source.selected && source.enabled && source.health && source.health !== "healthy")
@@ -789,22 +847,39 @@ const isWithinTodayWindow = (story: StoryView) => {
 export const buildTodayView = (state: WorkflowState, now = new Date().toISOString()): TodayView => {
   const recommendationTarget = 8;
   const stories = buildStories(state, now);
-  const active = stories.filter((story) => isWithinTodayWindow(story) && !story.ignored && !story.published);
+  // Visibility is separate from evidence readiness: an indexed official
+  // announcement deserves attention while its original page is being read.
+  const releaseHighlights = stories.filter((story) => story.ageHours <= confirmedModelLaunchCatchupHours
+    && !story.ignored && !story.published && story.releaseDossier
+    && modelIdentityTerms.test(`${story.originalTitle} ${story.title}`)
+    && !routineReleaseTerms.test(`${story.originalTitle} ${story.title}`)
+    && story.signals.some(isFirstPartyModelAnnouncement))
+    .sort((left, right) => Number(right.releaseDossier?.releaseStatus === "released")
+      - Number(left.releaseDossier?.releaseStatus === "released") || left.ageHours - right.ageHours)
+    .slice(0, 4);
+  const knowledge = stories.filter((story) => story.technicalArticle && !story.ignored && !story.published)
+    .sort((left, right) => Number(right.selected) - Number(left.selected)
+      || (right.technicalArticle?.priorityAdjustment ?? 0) - (left.technicalArticle?.priorityAdjustment ?? 0)
+      || Date.parse(right.firstSeenAt) - Date.parse(left.firstSeenAt));
+  const active = stories.filter((story) => !story.technicalArticle && isWithinTodayWindow(story) && !story.ignored && !story.published);
+  const focused = state.settings.recommendationMode !== "balanced";
+  const eligible = (story: StoryView) => !focused || story.opportunity?.lane !== "routine" || story.selected
+    || story.signals.some((signal) => signal.feedback === "interested");
   const ready = interleaveBySource(
-    active.filter((story) => story.assignment.canDraft && !story.drafted),
+    active.filter((story) => story.assignment.canDraft && !story.drafted && eligible(story)),
     (story) => story.signals.find((signal) => !signal.isCommunity)?.sourceName
       ?? story.signals[0]?.sourceName
       ?? "未知来源",
   );
-  const watching = active.filter((story) => story.assignment.mode === "watch").slice(0, 6);
+  const watching = active.filter((story) => story.assignment.mode === "watch" && eligible(story)).slice(0, 6);
   const backlog = interleaveBySource(
-    stories.filter((story) => !isWithinTodayWindow(story)
+    stories.filter((story) => !story.technicalArticle && !isWithinTodayWindow(story)
       && story.ageHours > standardTodayWindowHours
       && story.ageHours <= 7 * 24
       && !story.ignored
       && !story.published
       && !story.drafted
-      && story.assignment.canDraft),
+      && story.assignment.canDraft && eligible(story)),
     (story) => story.signals.find((signal) => !signal.isCommunity)?.sourceName
       ?? story.signals[0]?.sourceName
       ?? "未知来源",
@@ -813,35 +888,45 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
   const autoUsableMaterials = state.materials.filter((material) => isNeutralImagePublishReady(material, now));
   const sourceImageReadyCount = active.filter((story) => (story.localImageCount ?? 0) >= 2).length;
   const publishReadyStoryCount = active.filter((story) => (story.publishReadyImageCount ?? 0) >= 2).length;
-  const visibleRecommendations = ready.slice(0, recommendationTarget);
-  const diagnosticStories = stories.filter((story) => story.ageHours <= 7 * 24);
+  const interesting = focused ? ready.filter((story) => story.opportunity?.lane === "interesting").slice(0, 2) : [];
+  const news = focused ? ready.filter((story) => story.opportunity?.lane !== "interesting") : ready;
+  const visibleNews = news.slice(0, recommendationTarget - interesting.length);
+  const visibleRecommendations = [...visibleNews, ...interesting];
+  const diagnosticStories = stories.filter((story) => !story.technicalArticle && story.ageHours <= 7 * 24);
   const dropCounts = diagnosticStories.reduce((counts, story) => {
     if (story.ignored || story.published) counts["ignored-or-published"] += 1;
     else if (!isWithinTodayWindow(story)) counts["outside-window"] += 1;
     else if (story.drafted) counts["already-drafted"] += 1;
     else if (!story.assignment.canDraft) counts["evidence-blocked"] += 1;
+    else if (!eligible(story)) counts["routine-update"] += 1;
     return counts;
   }, {
     "outside-window": 0,
     "already-drafted": 0,
     "evidence-blocked": 0,
     "ignored-or-published": 0,
+    "routine-update": 0,
   });
   const recommendationDropReasons = [
     { code: "outside-window" as const, label: "超过常规 48 小时或模型发布 7 天窗口", count: dropCounts["outside-window"] },
     { code: "already-drafted" as const, label: "已经进入成稿流程", count: dropCounts["already-drafted"] },
     { code: "evidence-blocked" as const, label: "证据不足，暂留观察", count: dropCounts["evidence-blocked"] },
     { code: "ignored-or-published" as const, label: "已忽略或已发布", count: dropCounts["ignored-or-published"] },
+    { code: "routine-update" as const, label: "常规动态，保留在全部候选", count: dropCounts["routine-update"] },
     {
       code: "below-display-limit" as const,
-      label: `证据合格但暂未进入前 ${recommendationTarget} 条`,
-      count: Math.max(0, ready.length - recommendationTarget),
+      label: "证据合格，本次精选未展示",
+      count: Math.max(0, ready.length - visibleRecommendations.length),
     },
   ].filter((reason) => reason.count > 0);
   return {
     generatedAt: now,
-    mustReads: visibleRecommendations.slice(0, 3),
-    secondary: visibleRecommendations.slice(3),
+    releaseHighlights,
+    selectionMode: focused ? "focused" : "balanced",
+    mustReads: visibleNews.slice(0, 3),
+    knowledge,
+    secondary: visibleNews.slice(3),
+    interesting,
     backlog,
     watching,
     diagnostics: diagnosticsFor(state.sources),

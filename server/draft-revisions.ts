@@ -15,6 +15,7 @@ const clone = <T>(value: T): T => structuredClone(value);
 
 export const snapshotDraft = (draft: ArticleDraft): DraftRevisionSnapshot => ({
   contentFormat: draft.contentFormat,
+  imagePostImageIds: draft.imagePostImageIds ? clone(draft.imagePostImageIds) : undefined,
   title: draft.title,
   paragraphs: clone(draft.paragraphs),
   take: draft.take,
@@ -107,6 +108,7 @@ export const restoreDraftRevision = (
   appendDraftRevision(state, draft, "restore-backup", now);
   const snapshot = clone(revision.snapshot);
   draft.contentFormat = snapshot.contentFormat === "image-post" ? "image-post" : "article";
+  draft.imagePostImageIds = snapshot.imagePostImageIds ? clone(snapshot.imagePostImageIds) : undefined;
   draft.title = snapshot.title;
   draft.paragraphs = snapshot.paragraphs;
   draft.take = snapshot.take;

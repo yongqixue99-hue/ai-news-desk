@@ -1,16 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { completionAvailability } from "../server/editorial-controls.js";
 import { AppShell } from "./components/AppShell";
-import { AISettingsPage } from "./components/AISettingsPage";
 import { BootstrapStatusPage } from "./components/BootstrapStatusPage";
-import { CommunityWorkspace } from "./components/CommunityWorkspace";
-import { EditorialSystemPage } from "./components/EditorialSystemPage";
 import { Notice, type NoticeState } from "./components/Notice";
 import { ProductJobCenter } from "./components/ProductJobCenter";
-import { RunsPage } from "./components/RunsPage";
-import { SchedulePage } from "./components/SchedulePage";
-import { SourcesPage } from "./components/SourcesPage";
+import { PageLoading } from "./components/PageLoading";
+import { PageBoundary } from "./components/PageBoundary";
 import { TodayPage } from "./components/TodayPage";
-import { Workbench } from "./components/Workbench";
 import { api, type MaterialMetadataInput, type ShellView } from "./api";
 import { resolveBootstrap, type BootstrapState } from "./bootstrap-state";
 import { useHashPageNavigation } from "./hooks/useHashPageNavigation";
@@ -49,6 +45,13 @@ import type {
 const DraftWorkspace = lazy(() =>
   import("./components/DraftWorkspace").then((module) => ({ default: module.DraftWorkspace })),
 );
+const Workbench = lazy(() => import("./components/Workbench").then((module) => ({ default: module.Workbench })));
+const CommunityWorkspace = lazy(() => import("./components/CommunityWorkspace").then((module) => ({ default: module.CommunityWorkspace })));
+const SourcesPage = lazy(() => import("./components/SourcesPage").then((module) => ({ default: module.SourcesPage })));
+const EditorialSystemPage = lazy(() => import("./components/EditorialSystemPage").then((module) => ({ default: module.EditorialSystemPage })));
+const RunsPage = lazy(() => import("./components/RunsPage").then((module) => ({ default: module.RunsPage })));
+const SchedulePage = lazy(() => import("./components/SchedulePage").then((module) => ({ default: module.SchedulePage })));
+const AISettingsPage = lazy(() => import("./components/AISettingsPage").then((module) => ({ default: module.AISettingsPage })));
 
 function App() {
   const [state, setState] = useState<WorkflowState>();
@@ -248,16 +251,6 @@ function App() {
     navigate(notification.target.page);
   };
 
-  const openLatestDraft = async () => {
-    try {
-      const next = await refresh();
-      setActiveDraftId(next.drafts[0]?.id);
-      navigate("drafts");
-    } catch (error) {
-      setNotice({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-  };
-
   const openDraftById = async (draftId: string) => {
     const next = await refresh();
     if (!next.drafts.some((draft) => draft.id === draftId)) {
@@ -310,19 +303,25 @@ function App() {
         onOpenNotification={openShellNotification}
       >
         <Notice notice={notice} onClose={() => setNotice(null)} />
-        <ProductJobCenter onOpenDrafts={() => void openLatestDraft()} />
+        <ProductJobCenter onOpenDraft={openDraftById} />
+        <PageBoundary key={page}>
         <TodayPage
           onNavigate={navigate}
           onNotice={(kind, message) => setNotice({ kind, message })}
           onOpenDraft={openDraftById}
           onSearch={searchNews}
         />
+        </PageBoundary>
       </AppShell>
     );
   }
 
   if (!state || !editorialSystem) {
-    return <BootstrapStatusPage state={bootstrapState} onRetry={() => void bootstrap()} />;
+    return (
+      <AppShell page={page} onNavigate={navigate} notifications={shell.notifications} notificationsMuted={shell.notificationsMuted} onToggleNotificationsMuted={toggleShellNotifications} onMarkNotificationRead={markShellNotificationRead} onMarkAllNotificationsRead={markAllShellNotificationsRead} onOpenNotification={openShellNotification}>
+        <BootstrapStatusPage state={bootstrapState} onRetry={() => void bootstrap()} />
+      </AppShell>
+    );
   }
 
   const saveSettings = async (patch: Partial<Settings>) => {
@@ -1309,7 +1308,9 @@ function App() {
       onOpenNotification={openNotification}
     >
       <Notice notice={notice} onClose={() => setNotice(null)} />
-      <ProductJobCenter onOpenDrafts={() => void openLatestDraft()} />
+      <ProductJobCenter onOpenDraft={openDraftById} />
+      <PageBoundary key={page}>
+      <Suspense fallback={<PageLoading />}>
       {page === "today" ? (
         <TodayPage
           onNavigate={navigate}
@@ -1365,9 +1366,12 @@ function App() {
         />
       ) : null}
       {page === "drafts" ? (
-        <Suspense fallback={<div className="app-loading">正在加载连续编辑器…</div>}>
+        <Suspense fallback={<PageLoading label="正在打开文章编辑器…" />}>
           <DraftWorkspace
             drafts={state.drafts}
+            completion={completionAvailability(state.settings, state.aiSettings)}
+            completionEnabled={state.settings.inlineCompletionEnabled !== false}
+            onToggleCompletion={(enabled) => saveSettings({ inlineCompletionEnabled: enabled })}
             materials={state.materials}
             analysisProvider={state.aiSettings.providers.find((provider) => provider.id === state.aiSettings.analysisProviderId)}
             optimizationProvider={state.aiSettings.providers.find((provider) => provider.id === state.aiSettings.optimizationProviderId)}
@@ -1408,6 +1412,7 @@ function App() {
         <EditorialSystemPage
           view={editorialSystem}
           settings={state.settings}
+          aiSettings={state.aiSettings}
           busy={actionBusy}
           onSaveProfile={saveEditorialProfile}
           onDecision={decideEditorialSuggestion}
@@ -1566,6 +1571,8 @@ function App() {
           onDeleteMaterial={deleteMaterial}
         />
       ) : null}
+      </Suspense>
+      </PageBoundary>
     </AppShell>
   );
 }

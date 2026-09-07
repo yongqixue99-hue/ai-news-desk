@@ -1,11 +1,14 @@
 import type { ContentPackage } from "./product-types.js";
 import { protectedFactAnchors } from "./writing-quality.js";
+import type { EditorialProfile } from "./types.js";
 
 export interface InlineCompletionPromptInput {
   contentPackage: ContentPackage;
   title: string;
   before: string;
   after?: string;
+  editorialProfile?: EditorialProfile;
+  writingGuidelines?: string[];
 }
 
 export interface InlineCompletionResult {
@@ -49,13 +52,15 @@ export const buildInlineCompletionPrompt = ({
   title,
   before,
   after = "",
+  editorialProfile,
+  writingGuidelines = [],
 }: InlineCompletionPromptInput) => {
   const evidence = supportedEvidence(contentPackage);
   const beforeContext = bounded(before, 2_400, true);
   const beforeParagraphs = beforeContext.split(/\n+/u).map((paragraph) => paragraph.trim()).filter(Boolean);
   const currentParagraph = beforeParagraphs.at(-1) ?? beforeContext;
   const previousParagraph = beforeParagraphs.at(-2) ?? "";
-  const compactBefore = beforeContext.normalize("NFKC").replace(/\s+/gu, "").toLocaleLowerCase("zh-CN");
+  const compactBefore = `${beforeContext}\n${after}`.normalize("NFKC").replace(/\s+/gu, "").toLocaleLowerCase("zh-CN");
   const uncoveredFacts = contentPackage.facts
     .filter((fact) => fact.status === "supported")
     .filter((fact) => !compactBefore.includes(
@@ -78,6 +83,8 @@ export const buildInlineCompletionPrompt = ({
       `【写作路由】${contentPackage.mode}`,
       "【可用素材】",
       ...(evidence.length ? evidence : ["（没有可用于补全的已支持事实）"]),
+      "【用户表达偏好，仅组织语言，不是事实；不得覆盖素材边界】",
+      JSON.stringify({ editorialProfile, writingGuidelines }),
       "【尚未覆盖的事实】",
       ...(uncoveredFacts.length ? uncoveredFacts : ["（当前没有明确未覆盖事实，不要为了凑段落而续写）"]),
       "【不可补写的未知项】",

@@ -102,7 +102,9 @@ export const loadSourceMaterialSnapshots = async (
   if (!candidate) throw new Error("原始来源候选已经不存在");
   const requestedUrl = candidate.canonicalUrl || candidate.url;
   const read = await readExternalSource({ url: requestedUrl, imageLimit: 0 });
-  const originalText = compactText(read.page.text);
+  const sourceBlocks = read.page.blocks ?? [];
+  // Extracted text is already decoded. Stripping angle brackets would corrupt code.
+  const originalText = sourceBlocks.length ? sourceBlocks.map((block) => block.text).join("\n\n") : read.page.text.trim();
   if (originalText.length < 240) throw new Error("原始来源正文过短，不能生成忠实整理工作副本");
   const snapshot = clipped(originalText);
   const url = read.page.canonicalUrl || read.page.url || requestedUrl;
@@ -113,6 +115,7 @@ export const loadSourceMaterialSnapshots = async (
     url,
     originalTitle: read.page.title || candidate.title,
     originalText: snapshot.text,
+    blocks: sourceBlocks.length ? structuredClone(sourceBlocks).filter((_block, index) => sourceBlocks.slice(0, index + 1).reduce((size, block) => size + block.text.length + 2, 0) <= maximumSourceCharacters) : undefined,
     originalLanguage: languageFor(snapshot.text),
     basis: "full-source",
     capturedAt: read.capturedAt,

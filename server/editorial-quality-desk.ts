@@ -66,17 +66,28 @@ const normalizedSourceUrl = (value: string) => {
   }
 };
 
+type FrozenFactSources = Pick<ContentPackage, "sources"> & Partial<Pick<ContentPackage, "intent" | "mode">>;
+
+export const frozenFactSourceUrls = (contentPackage: FrozenFactSources, fact: ContentPackage["facts"][number]) => {
+  const community = contentPackage.intent === "community" || (!contentPackage.intent && contentPackage.mode === "community");
+  const eligible = contentPackage.sources.filter((source) => community || !source.isCommunity);
+  const urls = fact.sourceUrls?.length ? fact.sourceUrls
+    : eligible.filter((source) => fact.sourceSignalIds.includes(source.signalId)).map((source) => source.url);
+  return urls.filter((url, index) => urls.findIndex((entry) => normalizedSourceUrl(entry) === normalizedSourceUrl(url)) === index)
+    .filter((url) => !contentPackage.sources.some((source) => source.isCommunity
+      && normalizedSourceUrl(source.url) === normalizedSourceUrl(url)) || community);
+};
+
 /**
  * Rebinds fact ids added by an exact repair patch to the immutable package
  * sources. It never infers a fact id from prose and rejects ids outside the
  * package, so a client edit cannot manufacture evidence metadata.
  */
 export const reconcileDraftFactEvidence = (
-  contentPackage: Pick<ContentPackage, "facts" | "sources">,
+  contentPackage: Pick<ContentPackage, "facts" | "sources"> & Partial<Pick<ContentPackage, "intent" | "mode">>,
   factClaims: DraftFactClaim[],
 ): DraftFactClaim[] => {
   const factById = new Map(contentPackage.facts.map((fact) => [fact.id, fact]));
-  const sourceBySignalId = new Map(contentPackage.sources.map((source) => [source.signalId, source]));
   const sourceByUrl = new Map(contentPackage.sources.map((source) => [normalizedSourceUrl(source.url), source]));
   return factClaims.map((claim) => {
     if (!claim.factIds?.length) return structuredClone(claim);
@@ -85,21 +96,12 @@ export const reconcileDraftFactEvidence = (
       if (!fact) throw new Error(`草稿引用了素材包之外的事实：${factId}`);
       return fact;
     });
-    const sourceUrls = [...new Set([
-      ...(claim.sourceUrls ?? (claim.sourceUrl ? [claim.sourceUrl] : [])),
-      ...facts.flatMap((fact) => [
-        ...(fact.sourceUrls ?? []),
-        ...fact.sourceSignalIds.flatMap((signalId) => {
-          const source = sourceBySignalId.get(signalId);
-          return source ? [source.url] : [];
-        }),
-      ]),
-    ])];
+    const sourceUrls = [...new Set(facts.flatMap((fact) => frozenFactSourceUrls(contentPackage, fact)))];
     const labels = [...new Set(sourceUrls.flatMap((url) => {
       const source = sourceByUrl.get(normalizedSourceUrl(url));
       return source ? [source.label] : [];
     }))];
-    const status = facts.some((fact) => fact.status === "unverified" || fact.status === "conflicted")
+    const status = !sourceUrls.length || facts.some((fact) => fact.status === "unverified" || fact.status === "conflicted")
       ? "unverified" as const
       : facts.some((fact) => fact.status === "partially-supported")
         ? "excerpt-only" as const

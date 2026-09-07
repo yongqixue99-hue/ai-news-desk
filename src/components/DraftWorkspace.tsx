@@ -48,6 +48,8 @@ import {
 } from "../draft-stability";
 import { RichArticleEditor, type RichArticleEditorHandle } from "./RichArticleEditor";
 import { WeChatDraftPanel, type WeChatDraftMetadata } from "./WeChatDraftPanel";
+import { XiaoheiheFormatPanel } from "./XiaoheiheFormatPanel";
+import { normalizePublisherTopics } from "../../server/xiaoheihe-format.js";
 import { DraftEvidencePanel } from "./DraftEvidencePanel";
 import { buildDraftEvidenceView } from "../../server/draft-evidence-view.js";
 import { draftStatusLabel, manualDraftStatuses } from "../draft-lifecycle-view";
@@ -61,6 +63,7 @@ import {
   type DistributionPreparationResult,
 } from "../distribution-preparation";
 import { getRovingTabTarget } from "../hooks/rovingTabs";
+import type { CompletionAvailability } from "../../server/editorial-controls.js";
 import type {
   ArticleDraft,
   AiProviderConfig,
@@ -83,6 +86,9 @@ import type {
 } from "../types";
 
 interface DraftWorkspaceProps {
+  completion?: CompletionAvailability;
+  completionEnabled?: boolean;
+  onToggleCompletion?: (enabled: boolean) => Promise<void>;
   drafts: ArticleDraft[];
   materials: ImageMaterial[];
   analysisProvider?: AiProviderConfig;
@@ -217,6 +223,9 @@ const wechatMetadataFor = (
 });
 
 export function DraftWorkspace({
+  completion,
+  completionEnabled,
+  onToggleCompletion,
   drafts,
   materials,
   analysisProvider,
@@ -300,6 +309,8 @@ export function DraftWorkspace({
   const [fillResult, setFillResult] = useState<PublisherResult | undefined>();
   const [preflight, setPreflight] = useState<PublisherPreflightResult>();
   const [preflightBusy, setPreflightBusy] = useState(false);
+  const [deliveryBusy, setDeliveryBusy] = useState(false);
+  const deliveryLock = useRef(false);
   const [preflightError, setPreflightError] = useState("");
   const [confirmingPublication, setConfirmingPublication] = useState(false);
   const [publishedImageStatuses, setPublishedImageStatuses] = useState<PublishedImagePromotionPublicStatus[]>([]);
@@ -386,12 +397,13 @@ export function DraftWorkspace({
   }, []);
 
   const insertedMediaIds = useMemo(() => {
+    if (editing?.contentFormat === "image-post" && editing.imagePostImageIds) return new Set(editing.imagePostImageIds);
     const ids = new Set<string>();
     for (const match of editing?.bodyHtml?.matchAll(/data-media-id=["']([^"']+)["']/g) ?? []) {
       ids.add(match[1]);
     }
     return ids;
-  }, [editing?.bodyHtml]);
+  }, [editing?.bodyHtml, editing?.contentFormat, editing?.imagePostImageIds]);
 
   const articleCharCount = editing
     ? `${editing.title}${textFromHtml(editing.bodyHtml || "")}`.replace(/\s/g, "").length
@@ -738,9 +750,9 @@ export function DraftWorkspace({
   };
 
   const addTopic = () => {
-    const next = topicInput.trim();
-    if (!next || editing.topics.includes(next)) return;
-    updateEditing({ topics: [...editing.topics, next].slice(0, 5) });
+    const topics = normalizePublisherTopics([...editing.topics, topicInput]);
+    if (topics.length > 5) { setPreflightError("最多选择 5 个话题，请先移除一个。"); return; }
+    updateEditing({ topics });
     setTopicInput("");
   };
 
@@ -818,11 +830,17 @@ export function DraftWorkspace({
   };
 
   const fill = async () => {
+    if (deliveryLock.current) return;
+    deliveryLock.current = true;
+    setDeliveryBusy(true);
     setPreflightError("");
     try {
       await prepareXiaoheihe(true);
     } catch (error) {
       setPreflightError(error instanceof Error ? error.message : String(error));
+    } finally {
+      deliveryLock.current = false;
+      setDeliveryBusy(false);
     }
   };
 
@@ -1191,7 +1209,7 @@ export function DraftWorkspace({
   });
   const draftQuality = buildDraftQualityView(editing.qualityWarnings);
   const extensionPublisher = publisherStatus?.mode !== "cdp";
-  const exactBlockingGuidance = publisherBlockingGuidance(preflight);
+  const exactBlockingGuidance = dirty ? undefined : publisherBlockingGuidance(preflight);
   const publishGuidance = exactBlockingGuidance ?? (!publisherReady
     ? extensionPublisher
       ? "暂不能填入：请先在常用 Chrome 加载填入助手，并刷新工作台。"
@@ -1264,7 +1282,10 @@ export function DraftWorkspace({
         onChange={(bodyHtml) => updateEditing({ bodyHtml })}
         onUploadFile={uploadImage}
         onImportUrl={importImage}
-        onRequestCompletion={editing.provenance.contentPackageId && onCompleteInline
+        completion={editing.provenance.contentPackageId ? completion : { ready: false, reason: "当前稿件没有冻结素材包，暂不自动补全" }}
+        completionEnabled={completionEnabled}
+        onToggleCompletion={onToggleCompletion}
+        onRequestCompletion={onCompleteInline
           ? (input, signal, onPreview) => onCompleteInline(editing.id, input, signal, onPreview)
           : undefined}
       />
@@ -1690,6 +1711,10 @@ export function DraftWorkspace({
                             <span>{placement.caption}</span>
                             <small>{insertedMediaIds.has(placement.id) ? "已在正文 · 再次插入" : "插入到光标"}</small>
                           </button>
+                          <div className="image-reference-links">
+                            <a href={placement.image.publicPath || placement.image.url} target="_blank" rel="noreferrer noopener"><ExternalLink size={12} />查看大图</a>
+                            {placement.image.originalImageUrl ? <a href={placement.image.originalImageUrl} target="_blank" rel="noreferrer noopener">原图链接</a> : null}
+                          </div>
                           <div className="image-governance-fields">
                             <label><span>版权状态</span><select value={placement.image.rights} onChange={(event) => updateImageGovernance(placement.id, { rights: event.target.value as typeof placement.image.rights })}><option value="check-required">待确认</option><option value="owned">自有／明确授权</option><option value="licensed">许可使用</option><option value="official">官方来源</option><option value="editorial-screenshot">评论性截图</option><option value="expired">授权已到期</option></select></label>
                             <label><span>来源署名</span><input value={placement.image.attribution} onChange={(event) => updateImageGovernance(placement.id, { attribution: event.target.value })} /></label>
@@ -1840,23 +1865,15 @@ export function DraftWorkspace({
                   {publishPlatform === "xiaoheihe" ? (
                     <>
                   <section className="utility-section publishing-prep">
+                    <XiaoheiheFormatPanel draft={editing} selectedIds={[...insertedMediaIds]} onChange={updateEditing} disabled={busy || deliveryBusy} />
                     <h3>分区与话题</h3>
                     <label>
                       <span>关联社区</span>
-                      <select value={editing.community} onChange={(event) => updateEditing({ community: event.target.value })}>
-                        {customCommunityOption ? <option value={customCommunityOption}>{customCommunityOption}</option> : null}
-                        {recentCommunityOptions.length ? (
-                          <optgroup label="最近使用">
-                            {recentCommunityOptions.map((community) => <option key={`recent-${community}`} value={community}>{community}</option>)}
-                          </optgroup>
-                        ) : null}
-                        <optgroup label="热门板块">
-                          {popularCommunityOptions.map((community) => <option key={community} value={community}>{community}</option>)}
-                        </optgroup>
-                      </select>
+                      <input aria-label="关联社区" list="xhh-community-options" value={editing.community} disabled={deliveryBusy} onChange={event => updateEditing({ community: event.target.value })} placeholder="选择或输入小黑盒分区" />
+                      <datalist id="xhh-community-options">{[...new Set([...recentCommunityOptions, ...popularCommunityOptions, ...(customCommunityOption ? [customCommunityOption] : [])])].map(community => <option key={community} value={community} />)}</datalist>
                     </label>
                     <div className="topic-editor">
-                      <span>本篇已选</span>
+                      <span>本篇话题 · {editing.topics.length} / 5</span>
                       <div className="topic-list">
                         {editing.topics.map((topic) => (
                           <button key={topic} onClick={() => updateEditing({ topics: editing.topics.filter((item) => item !== topic) })}>{topic}<X size={13} /></button>
@@ -2053,10 +2070,10 @@ export function DraftWorkspace({
                   className="primary-button full"
                   aria-describedby={`${editing.id}-publish-guidance`}
                   onClick={() => void fill()}
-                  disabled={busy || preflightBusy || !publisherReady || preflight?.canQueueFill === false}
+                  disabled={busy || deliveryBusy || preflightBusy || !publisherReady}
                 >
-                  {busy || preflightBusy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
-                  {publisherFillButtonLabel({ preflightBusy, busy, loginRequired })}
+                  {busy || deliveryBusy || preflightBusy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
+                  {deliveryBusy ? "正在保存、检查并填入…" : publisherFillButtonLabel({ preflightBusy, busy, loginRequired })}
                 </button>
                 <p
                   className={!publisherReady || loginRequired ? "publish-guidance blocked" : evidenceView.factUncertainties.length || uncheckedImageCount ? "publish-guidance warning" : "publish-guidance"}

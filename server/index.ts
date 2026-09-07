@@ -4,6 +4,7 @@ import path from "node:path";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import { pruneJobArtifacts } from "./artifact-retention.js";
+import { buildDraftOverview } from "./draft-overview.js";
 import { createLocalSecurityMiddleware } from "./http-security.js";
 import {
   insertedMediaIds,
@@ -119,9 +120,11 @@ import {
 } from "./editorial-system.js";
 import {
   recordDraftEdit,
+  activeWritingGuidelines,
   recordPublishedWritingSignals,
   writingMemoryView,
 } from "./learning-desk.js";
+import { completionAvailability, editorialProfileForWriting } from "./editorial-controls.js";
 import { probeProviderConnection } from "./provider-health.js";
 import { validateRemoteUrl } from "./remote-url.js";
 import {
@@ -131,6 +134,8 @@ import {
   deleteSourcePreset,
 } from "./source-management.js";
 import { applySourceProbeResult, probeSource } from "./source-probe.js";
+import { officialPollInterval } from "./official-source-monitor.js";
+import { normalizePublisherTopics } from "./xiaoheihe-format.js";
 import { startScheduler } from "./scheduler.js";
 import { startOwnedServer } from "./startup.js";
 import {
@@ -255,7 +260,7 @@ const validDateInput = (value: string) => {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 };
 
-const sourceKinds = new Set(["rss", "hackernews", "google_news", "zhihu", "last30days", "github", "x"]);
+const sourceKinds = new Set(["rss", "hackernews", "google_news", "zhihu", "last30days", "github", "x", "documentation"]);
 const sourceRoles = new Set(["official", "verification", "research", "discovery", "community"]);
 const draftableAssignmentModes = new Set<Exclude<AssignmentMode, "watch" | "skip">>([
   "brief",
@@ -404,11 +409,18 @@ app.get(
 );
 
 app.get(
+  "/api/drafts/overview",
+  asyncRoute(async (_request, response) => {
+    response.json(buildDraftOverview((await readState()).drafts));
+  }),
+);
+
+app.get(
   "/api/today",
   asyncRoute(async (_request, response) => {
     const view = buildTodayView(await readState());
     const database = await getLocalDatabase();
-    for (const story of [...view.mustReads, ...view.secondary].slice(0, 5)) {
+    for (const story of [...view.mustReads, ...(view.interesting ?? []), ...view.secondary].slice(0, 5)) {
       if ((story.localImageCount ?? 0) >= 2) continue;
       database.enqueueJob({
         type: "hydrate-story-assets",
@@ -420,6 +432,7 @@ app.get(
     const evidencePool = [
       ...view.watching,
       ...view.mustReads,
+      ...(view.interesting ?? []),
       ...view.secondary,
     ].filter((story, index, stories) => (story.evidenceStrength !== "strong"
       || Boolean(story.releaseDossier && story.releaseDossier.readyCount < story.releaseDossier.totalCount))
@@ -469,6 +482,9 @@ app.get(
       story,
       contentPackage: database.latestContentPackageForStory<ContentPackage>(storyId),
       feedback: database.listFeedback("story", storyId, 30),
+      assetCollection: database.listJobs(500).find((job) => job.type === "hydrate-story-assets" && job.status === "complete"
+        && (job.payload as { storyId?: string; scope?: string } | undefined)?.storyId === storyId
+        && (job.payload as { scope?: string }).scope === "article")?.result,
     });
   }),
 );
@@ -627,6 +643,25 @@ app.delete(
     const event = database.recordFeedback({ type: "feedback_restored", subjectType: "story", subjectId: storyId });
     database.recordWorkflowEvent({ type: "story.feedback_restored", subjectType: "story", subjectId: storyId });
     response.json({ event, story: restored });
+  }),
+);
+
+app.post(
+  "/api/stories/:storyId/assets",
+  asyncRoute(async (request, response) => {
+    const storyId = routeParam(request.params.storyId);
+    const story = storyById(await readState(), storyId);
+    if (!story) { response.status(404).json({ error: "Story 不存在" }); return; }
+    const database = await getLocalDatabase();
+    const active = database.listJobs(500).find((job) => job.type === "hydrate-story-assets"
+      && ["queued", "running", "retrying"].includes(job.status)
+      && (job.payload as { storyId?: string; scope?: string } | undefined)?.storyId === storyId
+      && (job.payload as { scope?: string }).scope === "article");
+    const queued = active ? { job: active, reused: true } : database.enqueueJob({
+      type: "hydrate-story-assets", idempotencyKey: `article-assets:${storyId}:${randomUUID()}`,
+      payload: { storyId, minimumImages: 2, scope: "article" }, maxAttempts: 1,
+    });
+    response.status(202).json(queued);
   }),
 );
 
@@ -806,7 +841,7 @@ app.get(
     const database = await getLocalDatabase();
     response.json({
       ...buildEditorialSystemView(await readState()),
-      writingMemories: writingMemoryView(database),
+      writingMemories: writingMemoryView(database, (await readState()).settings.writingMemoryEnabled),
     });
   }),
 );
@@ -819,7 +854,7 @@ app.patch(
       updateEditorialProfile(state, patch);
       return buildEditorialSystemView(state);
     });
-    response.json({ ...view, writingMemories: writingMemoryView(await getLocalDatabase()) });
+    response.json({ ...view, writingMemories: writingMemoryView(await getLocalDatabase(), (await readState()).settings.writingMemoryEnabled) });
   }),
 );
 
@@ -838,7 +873,7 @@ app.post(
       decideEditorialSuggestion(state, suggestionId, decision);
       return buildEditorialSystemView(state);
     });
-    response.json({ ...view, writingMemories: writingMemoryView(await getLocalDatabase()) });
+    response.json({ ...view, writingMemories: writingMemoryView(await getLocalDatabase(), (await readState()).settings.writingMemoryEnabled) });
   }),
 );
 
@@ -860,7 +895,7 @@ app.patch(
       subjectType: "writing-memory",
       subjectId: memory.id,
     });
-    response.json(writingMemoryView(database));
+    response.json(writingMemoryView(database, (await readState()).settings.writingMemoryEnabled));
   }),
 );
 
@@ -878,7 +913,7 @@ app.delete(
       subjectType: "writing-memory",
       subjectId: memoryId,
     });
-    response.json(writingMemoryView(database));
+    response.json(writingMemoryView(database, (await readState()).settings.writingMemoryEnabled));
   }),
 );
 
@@ -1157,11 +1192,18 @@ app.patch(
       // Keep scheduled collection aligned with Today's 48-hour editorial
       // window so a late daily run cannot create an artificial blind spot.
       next.windowHours = 48;
+      next.officialMonitorEnabled = next.officialMonitorEnabled !== false;
+      next.officialMonitorIntervalMinutes = officialPollInterval(next.officialMonitorIntervalMinutes);
+      next.lastOfficialPollAt = state.settings.lastOfficialPollAt;
       next.collectionTopics = normalizeTopicIds(next.collectionTopics);
       next.imageLimit = Math.max(0, Math.min(12, Number(next.imageLimit) || 0));
       next.autoGenerateCount = Math.max(1, Math.min(10, Number(next.autoGenerateCount) || 3));
       next.publisherMode = next.publisherMode === "cdp" ? "cdp" : "chrome-extension";
       next.personalizationEnabled = next.personalizationEnabled !== false;
+      next.recommendationMode = next.recommendationMode === "balanced" ? "balanced" : "focused";
+      for (const key of ["editorialProfileEnabled", "writingMemoryEnabled", "inlineCompletionEnabled"] as const) {
+        next[key] = next[key] !== false;
+      }
       next.notificationsMuted = next.notificationsMuted !== false;
       state.settings = next;
       if (requestedSpendingPolicy) applySpendingPolicy(state, requestedSpendingPolicy);
@@ -2178,9 +2220,16 @@ app.patch(
       const before = snapshotDraft(target);
       const saveMode: DraftSaveMode = body._saveMode === "auto" ? "auto" : "manual";
       if (body.status !== undefined) assertDraftTransition(target, body.status);
-      for (const key of ["title", "paragraphs", "take", "sources", "factClaims", "uncertainties", "images", "community", "topics", "status", "contentFormat", "layoutTheme"] as const) {
+      for (const key of ["title", "paragraphs", "take", "sources", "factClaims", "uncertainties", "images", "community", "topics", "status", "contentFormat", "imagePostImageIds", "layoutTheme"] as const) {
         if (body[key] !== undefined) (target[key] as unknown) = body[key];
       }
+      if (body.imagePostImageIds !== undefined && (!Array.isArray(body.imagePostImageIds) || body.imagePostImageIds.some(id => typeof id !== "string" || !target.images.some(image => image.id === id)) || new Set(body.imagePostImageIds).size !== body.imagePostImageIds.length || body.imagePostImageIds.length > 18)) throw new Error("图集包含无效、重复或过多图片，请重新选择");
+      if (body.topics !== undefined) {
+        if (!Array.isArray(body.topics) || body.topics.some(topic => typeof topic !== "string")) throw new Error("话题格式无效");
+        target.topics = normalizePublisherTopics(body.topics);
+        if (target.topics.length > 5) throw new Error("最多选择 5 个话题");
+      }
+      if (body.contentFormat !== undefined && !["article", "image-post"].includes(body.contentFormat)) throw new Error("发送形式无效");
       if (body.bodyHtml !== undefined) target.bodyHtml = sanitizeDraftHtml(body.bodyHtml);
       const contentPackage = target.provenance.contentPackageId
         ? database.getContentPackage<ContentPackage>(target.provenance.contentPackageId)
@@ -2272,6 +2321,11 @@ app.post(
       return;
     }
     const packageId = draft.provenance.contentPackageId;
+    const completion = completionAvailability(state.settings, state.aiSettings);
+    if (!completion.ready) {
+      response.json({ available: false, reason: completion.reason });
+      return;
+    }
     const contentPackage = packageId
       ? (await getLocalDatabase()).getContentPackage<ContentPackage>(packageId)
       : await ensureIntakeContentPackageForDraft(draft.id);
@@ -2304,6 +2358,8 @@ app.post(
         title: draft.title,
         before,
         after,
+        editorialProfile: editorialProfileForWriting(state),
+        writingGuidelines: activeWritingGuidelines(await getLocalDatabase(), state.settings.writingMemoryEnabled),
       });
       if (wantsStream) {
         response.status(200);
@@ -3159,7 +3215,8 @@ const durableJobDesk = createJobDesk({
         : 2;
       if (!storyId) throw new Error("任务缺少 Story ID");
       context.progress(0.08, "读取来源图片");
-      const result = await hydrateStoryAssets(storyId, Number.isFinite(minimumImages) ? minimumImages : 2);
+      const scope = payload && typeof payload === "object" && "scope" in payload && payload.scope === "article" ? "article" : "preview";
+      const result = await hydrateStoryAssets(storyId, Number.isFinite(minimumImages) ? minimumImages : 2, { scope, progress: context.progress });
       context.progress(0.96, "保存来源图片");
       return result;
     },

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { imagePostCapacity, imagePostEditorUrl, normalizePublisherTopics } from "./xiaoheihe-format.js";
 import path from "node:path";
 import {
   insertedMediaIds,
@@ -21,7 +22,7 @@ import type {
 } from "./types.js";
 
 const extensionInstallPath = workspacePath("chrome-extension");
-export const MINIMUM_EXTENSION_VERSION = "0.1.22";
+export const MINIMUM_EXTENSION_VERSION = "0.1.23";
 const XIAOHEIHE_ARTICLE_EDITOR_URL = "https://www.xiaoheihe.cn/creator/editor/draft/article";
 
 export class UnsupportedExtensionVersionError extends Error {
@@ -202,8 +203,8 @@ export const extensionPublisherBridge = new ExtensionPublisherBridge();
 
 const jobImages = async (draft: ArticleDraft): Promise<ExtensionPublisherImage[]> => {
   const inserted = [...insertedMediaIds(draft)];
-  if (draft.contentFormat === "image-post" && inserted.length !== 1) {
-    throw new Error(`图文稿必须恰好包含 1 张待上传图片，当前为 ${inserted.length} 张`);
+  if (draft.contentFormat === "image-post" && (inserted.length < 1 || inserted.length > imagePostCapacity)) {
+    throw new Error(`工作台图文支持 1–${imagePostCapacity} 张图片，当前为 ${inserted.length} 张`);
   }
   const captions = publisherImageCaptions(draft);
   const placements = new Map(draft.images.map((placement) => [placement.id, placement]));
@@ -220,7 +221,7 @@ const jobImages = async (draft: ArticleDraft): Promise<ExtensionPublisherImage[]
     }
     results.push({
       id: placement.id,
-      fileName: path.basename(placement.image.localPath!),
+      fileName: `${placement.id}-${path.basename(placement.image.localPath!)}`,
       mimeType: inspected.contentType,
       dataUrl: `data:${inspected.contentType};base64,${inspected.bytes.toString("base64")}`,
       caption: captions.get(placement.id)
@@ -239,14 +240,14 @@ export const prepareJob = async (draft: ArticleDraft, editorUrl: string): Promis
   id: `publish_${randomUUID()}`,
   draftId: draft.id,
   createdAt: new Date().toISOString(),
-  editorUrl: draft.contentFormat === "image-post" ? editorUrl : XIAOHEIHE_ARTICLE_EDITOR_URL,
+  editorUrl: draft.contentFormat === "image-post" ? imagePostEditorUrl : XIAOHEIHE_ARTICLE_EDITOR_URL,
   contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
   title: draft.title,
   bodyHtml: draft.contentFormat === "image-post"
     ? publisherImagePostBodyHtml(draft)
     : publisherBodyHtml(draft),
-  community: draft.community,
-  topics: [...draft.topics],
+  community: draft.community.trim(),
+  topics: normalizePublisherTopics(draft.topics),
   images: await jobImages(draft),
 });
 

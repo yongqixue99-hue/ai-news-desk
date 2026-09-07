@@ -1,10 +1,83 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import sharp from "sharp";
 
 import {
   extractArticleFromModuleSource,
   extractImageUrlsFromModuleSource,
+  extractArticleImageCandidates,
+  downloadSourceImage,
 } from "./extractor.js";
+
+test("official CDN charts served as octet-stream are decoded and saved with their real dimensions", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "news-cdn-chart-"));
+  const originalFetch = globalThis.fetch;
+  const bytes = await sharp({ create: { width: 800, height: 600, channels: 3, background: "white" } }).webp().toBuffer();
+  globalThis.fetch = async () => new Response(bytes, { headers: { "content-type": "application/octet-stream" } });
+  try {
+    const image = await downloadSourceImage({
+      id: "chart", url: "https://8.8.8.8/chart.bin", sourceUrl: "https://publisher.example/release",
+      caption: "Model benchmark", attribution: "Publisher", selected: false, rights: "check-required",
+    }, "pilot", { mediaRoot: root });
+    assert.equal(image.width, 800);
+    assert.equal(image.height, 600);
+    assert.equal(path.extname(image.localPath!), ".webp");
+    assert.equal(image.localPath!.startsWith(root + path.sep), true);
+    assert.deepEqual(await readFile(image.localPath!), bytes);
+    assert.equal(image.rights, "check-required");
+    assert.match(image.fingerprint!, /^[a-f0-9]{64}$/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("octet-stream does not allow HTML or an error page to become a source image", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "news-cdn-error-"));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("<html>Access denied</html>", { headers: { "content-type": "application/octet-stream" } });
+  try {
+    await assert.rejects(downloadSourceImage({
+      id: "error", url: "https://8.8.8.8/chart.webp", sourceUrl: "https://publisher.example/release",
+      caption: "Model benchmark", attribution: "Publisher", selected: false, rights: "check-required",
+    }, "pilot", { mediaRoot: root }));
+    assert.deepEqual(await readdir(root), []);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("article images include lazy and picture sources at the largest resolution, excluding related cards", () => {
+  const images = extractArticleImageCandidates(`<main><article>
+    <figure><img src="data:image/gif;base64,blank" data-src="/bench.png" width="1200" height="280"><figcaption>Model capability benchmark</figcaption></figure>
+    <figure><picture><source srcset="/large.webp 1600w, /small.webp 400w"><img src="/placeholder.jpg" alt="Reasoning comparison"></picture></figure>
+    <figure><img srcset="/big.png 1200w, /tiny.png 240w" alt="Latency chart" width="1200" height="150"></figure>
+    <aside><img src="/advert.jpg" alt="Other article"></aside>
+  </article><section aria-label="Related articles"><img src="/related.jpg" alt="Read next"></section></main>`, "https://openai.com/index/example");
+  assert.deepEqual(images.map((image) => image.url), ["https://openai.com/bench.png", "https://openai.com/large.webp", "https://openai.com/big.png"]);
+  assert.equal(images[0]?.caption, "Model capability benchmark");
+});
+
+test("article photo credits do not pull author portraits or most-read recommendations into the image pool", () => {
+  const images = extractArticleImageCandidates(`<article>
+    <figure><img src="/model-chart.png" alt="Capability comparison"></figure>
+    <section class="author-mini-bio"><img src="/AV4.jpg" alt="Photo of Ryan Whitwam"></section>
+    <section class="most-read"><img src="/driving-license.jpg" alt="Listing image for first story in Most Read"></section>
+  </article>`, "https://publisher.example/release");
+  assert.deepEqual(images.map((image) => image.url), ["https://publisher.example/model-chart.png"]);
+});
+
+test("publisher data-loading JSON selects the real desktop chart instead of its 100-pixel placeholder", () => {
+  const images = extractArticleImageCandidates(`<article>
+    <img src="/chart.width-100.webp" alt="Model comparison" data-loading='{"mobile":"/chart.width-500.webp","desktop":"/chart.width-1000.webp"}'>
+    <img src="/fallback.png" alt="Second chart" data-loading='invalid JSON'>
+  </article>`, "https://publisher.example/release");
+  assert.deepEqual(images.map((image) => image.url), ["https://publisher.example/chart.width-1000.webp", "https://publisher.example/fallback.png"]);
+});
 
 test("finds article images embedded in a client-rendered page module", () => {
   const source = String.raw`

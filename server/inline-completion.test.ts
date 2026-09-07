@@ -56,6 +56,13 @@ test("stream previews wait for a stable clause instead of repainting every token
   assert.equal(isStableInlineCompletionPreview("完整一句。"), true);
 });
 
+test("completion does not label facts already present after the cursor as uncovered", () => {
+  const prompt = buildInlineCompletionPrompt({ contentPackage: packageData, title: packageData.title,
+    before: "这次的变化是", after: packageData.facts[0].text });
+  const uncovered = prompt.user.split("【尚未覆盖的事实】")[1].split("【不可补写的未知项】")[0];
+  assert.doesNotMatch(uncovered, /fact-supported/u);
+});
+
 test("inline completion prompt exposes supported package facts and keeps unknown claims outside the writing evidence", () => {
   const prompt = buildInlineCompletionPrompt({
     contentPackage: packageData,

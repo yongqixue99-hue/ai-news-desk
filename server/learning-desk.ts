@@ -191,14 +191,14 @@ const isEffectivePayload = (payload: unknown) => Boolean(
   payload && typeof payload === "object" && (payload as { effective?: unknown }).effective === true,
 );
 
-export const writingMemoryView = (database: LocalDatabase): WritingMemoryView => {
+export const writingMemoryView = (database: LocalDatabase, enabled = true): WritingMemoryView => {
   const effectiveEditCount = database.listFeedback(undefined, undefined, 2_000)
     .filter((event) => event.type === "edited" && isEffectivePayload(event.payload)).length;
   const applicationUnlocked = effectiveEditCount >= 5;
   const memories = database.listEditorialMemories().map((memory): WritingMemory => ({
     ...memory,
     kind: memory.kind as WritingMemoryKind,
-    applicable: memory.enabled && applicationUnlocked,
+    applicable: enabled && memory.enabled && applicationUnlocked,
   }));
   return {
     effectiveEditCount,
@@ -208,8 +208,8 @@ export const writingMemoryView = (database: LocalDatabase): WritingMemoryView =>
   };
 };
 
-export const activeWritingGuidelines = (database: LocalDatabase) => {
-  const view = writingMemoryView(database);
+export const activeWritingGuidelines = (database: LocalDatabase, enabled = true) => {
+  const view = writingMemoryView(database, enabled);
   return view.applicationUnlocked
     ? view.memories.filter((memory) => memory.applicable).map((memory) => memory.label)
     : [];

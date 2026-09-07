@@ -63,6 +63,7 @@ export const publicationRevisionHash = (
     defaultDigest: normalizedText(draft.take),
   } : {}),
   ...(platform === "xiaoheihe" ? {
+    imagePostImageIds: draft.contentFormat === "image-post" ? [...insertedMediaIds(draft)] : undefined,
     community: normalizedText(draft.community),
     topics: draft.topics.map((topic) => normalizedText(topic)).filter(Boolean),
   } : {}),

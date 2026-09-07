@@ -41,6 +41,7 @@ export const fillDraftInPublisher = async (
   expectedRevisionHash: string,
   settings: PublisherSettings,
 ) => {
+  if (draftSnapshot.contentFormat === "image-post" && settings.publisherMode !== "chrome-extension") throw new Error("图文图集请使用常用 Chrome 填入助手；CDP 备用通道目前仅支持文章");
   if (settings.publisherMode === "chrome-extension") {
     return fillViaChromeExtension(
       draftSnapshot,

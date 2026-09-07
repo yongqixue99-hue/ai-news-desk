@@ -1,10 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
+import type { CompletionAvailability } from "../../server/editorial-controls.js";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
+import { sourceTableExtensions } from "../tiptap-source-table";
 import {
   AlignCenter,
   Bold,
@@ -47,6 +49,9 @@ export interface RichArticleEditorHandle {
 }
 
 interface RichArticleEditorProps {
+  completion?: CompletionAvailability;
+  completionEnabled?: boolean;
+  onToggleCompletion?: (enabled: boolean) => Promise<void>;
   draftId?: string;
   title: string;
   content: string;
@@ -121,7 +126,7 @@ const visibleAttributionFor = (placement: DraftImagePlacement) => {
 
 export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticleEditorProps>(
   function RichArticleEditor(
-    { draftId, title, content, preview, theme, onChange, onUploadFile, onImportUrl, onRequestCompletion },
+    { draftId, title, content, preview, theme, onChange, onUploadFile, onImportUrl, onRequestCompletion, completion, completionEnabled = true, onToggleCompletion },
     ref,
   ) {
     const fileInput = useRef<HTMLInputElement>(null);
@@ -142,6 +147,10 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
     const completionDisabledReason = useRef<string | undefined>(undefined);
     const completionRetryAt = useRef(0);
     const completionProviderName = useRef<string | undefined>(undefined);
+    const completionCanRun = useRef(true);
+    const dismissedContext = useRef<string | undefined>(undefined);
+    const liveEditor = useRef<Editor | null>(null);
+    completionCanRun.current = !preview && completionEnabled && completion?.ready !== false;
     completionRequest.current = onRequestCompletion;
     completionDraftId.current = draftId;
 
@@ -160,7 +169,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
       const { selection, doc } = currentEditor.state;
       if (!selection.empty) return undefined;
       const parentName = selection.$from.parent.type.name;
-      if (!(["paragraph", "heading"] as string[]).includes(parentName)) return undefined;
+      if (parentName !== "paragraph" || selection.$from.node(-1)?.type.name === "blockquote") return undefined;
       if (selection.$from.parentOffset !== selection.$from.parent.content.size) return undefined;
       const before = doc.textBetween(0, selection.from, "\n", "\n").slice(-1_600);
       if (before.trim().length < 4) return undefined;
@@ -191,27 +200,29 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
       return true;
     };
 
-    const scheduleCompletion = (currentEditor: Editor) => {
+    const scheduleCompletion = (currentEditor: Editor, manual = false) => {
+      if (!completionCanRun.current) { clearCompletionRuntime(currentEditor); return; }
       if (syncForwardStableCompletion(currentEditor)) return;
       clearCompletionRuntime(currentEditor);
       const requestCompletion = completionRequest.current;
       if (
-        preview
-        || !requestCompletion
+        !requestCompletion
         || !currentEditor.isFocused
         || currentEditor.view.composing
         || completionDisabledReason.current
         || Date.now() < completionRetryAt.current
       ) return;
       const scheduledContext = completionContextFor(currentEditor);
-      if (!scheduledContext) return;
+      if (!scheduledContext || (!manual && dismissedContext.current === scheduledContext.key)) return;
+      if (manual) { dismissedContext.current = undefined; completionCache.current.delete(scheduledContext.key); }
       completionTimer.current = window.setTimeout(() => {
         completionTimer.current = undefined;
         const latestContext = completionContextFor(currentEditor);
-        if (!latestContext || latestContext.key !== scheduledContext.key || !currentEditor.isFocused) return;
+        if (!completionCanRun.current || currentEditor.isDestroyed || currentEditor.view.composing || !latestContext || latestContext.key !== scheduledContext.key || !currentEditor.isFocused) return;
         const started = beginInlineCompletion(completionState.current, latestContext.key);
         completionState.current = started.state;
         const cached = completionCache.current.get(latestContext.key);
+        if (cached && !cached.available) { setCompletionUi({ status: "unavailable", message: cached.reason || "当前没有合适的续写" }); return; }
         if (cached?.available && cached.text) {
           const resolved = resolveInlineCompletion(completionState.current, {
             token: started.token,
@@ -257,7 +268,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
             text: result.available ? result.text : undefined,
           });
           completionState.current = resolved;
-          if (result.available && result.text) {
+          if (result.available && result.text || !result.available) {
             completionCache.current.delete(latestContext.key);
             completionCache.current.set(latestContext.key, result);
             while (completionCache.current.size > 24) {
@@ -297,16 +308,17 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
           completionRetryAt.current = Date.now() + retryDelay;
           setCompletionUi({
             status: "unavailable",
-            message: `补全暂不可用，约 ${Math.ceil(retryDelay / 1_000)} 秒后自动重试`,
+            message: `补全暂不可用，${Math.ceil(retryDelay / 1_000)} 秒后继续输入可重试`,
           });
         }).finally(() => {
           if (completionAbort.current === controller) completionAbort.current = undefined;
         });
-      }, inlineCompletionIdleDelay(scheduledContext.before));
+      }, manual ? 0 : inlineCompletionIdleDelay(scheduledContext.before));
     };
 
     const editor = useEditor({
       extensions: [
+        ...sourceTableExtensions,
         StarterKit.configure({
           heading: { levels: [2, 3] },
           link: { openOnClick: false, autolink: true, linkOnPaste: true },
@@ -336,6 +348,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
             setCompletionUi({ status: "idle" });
           },
           onDismiss: () => {
+            dismissedContext.current = completionState.current.contextKey;
             completionState.current = invalidateInlineCompletion(completionState.current);
             setCompletionUi({ status: "idle" });
           },
@@ -343,6 +356,13 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
       ],
       content,
       editorProps: {
+        handleDOMEvents: {
+          compositionstart: () => {
+            if (liveEditor.current) clearCompletionRuntime(liveEditor.current);
+            return false;
+          },
+          compositionend: () => { window.setTimeout(() => { const current = liveEditor.current; if (current && !current.isDestroyed) scheduleCompletion(current); }, 0); return false; },
+        },
         attributes: {
           class: "continuous-prose",
           "aria-label": "连续文章编辑器",
@@ -356,13 +376,15 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
       onFocus: ({ editor: current }) => scheduleCompletion(current),
       onBlur: ({ editor: current }) => clearCompletionRuntime(current),
     });
+    liveEditor.current = editor;
 
     useEffect(() => {
       completionDisabledReason.current = undefined;
       completionRetryAt.current = 0;
       completionCache.current.clear();
       if (editor && !editor.isDestroyed) clearCompletionRuntime(editor);
-    }, [draftId, editor]);
+      dismissedContext.current = undefined;
+    }, [draftId, editor, completionEnabled, completion?.ready, completion?.providerName, completion?.model]);
 
     useEffect(() => () => {
       if (completionTimer.current !== undefined) window.clearTimeout(completionTimer.current);
@@ -380,6 +402,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
       editor.setEditable(!preview);
+      if (preview) clearCompletionRuntime(editor);
     }, [editor, preview]);
 
     useEffect(() => {
@@ -545,16 +568,18 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
             <span className="toolbar-divider" />
             <select
               aria-label="段落格式"
-              value={editor.isActive("heading", { level: 2 }) ? "h2" : editor.isActive("heading", { level: 3 }) ? "h3" : "p"}
+              value={editor.isActive("codeBlock") ? "code" : editor.isActive("heading", { level: 2 }) ? "h2" : editor.isActive("heading", { level: 3 }) ? "h3" : "p"}
               onChange={(event) => {
                 if (event.target.value === "h2") editor.chain().focus().toggleHeading({ level: 2 }).run();
                 else if (event.target.value === "h3") editor.chain().focus().toggleHeading({ level: 3 }).run();
+                else if (event.target.value === "code") editor.chain().focus().setCodeBlock().run();
                 else editor.chain().focus().setParagraph().run();
               }}
             >
               <option value="p">正文</option>
               <option value="h2">二级标题</option>
               <option value="h3">三级标题</option>
+              <option value="code">代码块</option>
             </select>
             <button className={editor.isActive("bold") ? "active" : ""} title="加粗" onClick={() => editor.chain().focus().toggleBold().run()}><Bold size={16} /></button>
             <button className={editor.isActive("italic") ? "active" : ""} title="斜体" onClick={() => editor.chain().focus().toggleItalic().run()}><Italic size={16} /></button>
@@ -602,6 +627,10 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
               accept="image/jpeg,image/png,image/webp,image/gif"
               onChange={(event) => event.target.files?.[0] && void uploadFile(event.target.files[0])}
             />
+            {onRequestCompletion ? <div className="completion-control">
+              {onToggleCompletion ? <button type="button" className="completion-toggle" aria-label="Tab 续写开关" aria-pressed={completionEnabled} title={completion?.reason || "开启或关闭自动补全"} onClick={() => void onToggleCompletion(!completionEnabled)}>Tab 续写 · {completionEnabled ? "开" : "关"}</button> : null}
+              <button type="button" className="completion-manual" disabled={!completionCanRun.current} title="在当前段末请求一次续写" onMouseDown={(event) => event.preventDefault()} onClick={() => { editor.commands.focus(); scheduleCompletion(editor, true); }}>续写一次</button>
+            </div> : null}
           </div>
         ) : null}
         <div className="rich-editor-canvas" onPaste={handlePaste} onDrop={handleDrop} onDragOver={(event) => !preview && event.preventDefault()}>
@@ -629,11 +658,13 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
           <EditorContent editor={editor} />
           {!preview && onRequestCompletion ? (
             <div className={`inline-completion-status is-${completionUi.status}`} role="status" aria-live="polite">
+              {!completionEnabled ? "Tab 续写已关闭" : completion?.ready === false ? completion.reason : <>
               {completionUi.status === "loading" ? <><LoaderCircle className="spin" size={12} />正在补全</> : null}
-              {completionUi.status === "streaming" ? <><LoaderCircle className="spin" size={12} />正在核验 <span className="inline-completion-stream-preview">{completionUi.preview}</span>{completionUi.providerName ? ` · ${completionUi.providerName}` : ""}</> : null}
+              {completionUi.status === "streaming" ? <><LoaderCircle className="spin" size={12} />正在生成 <span className="inline-completion-stream-preview">{completionUi.preview}</span>{completionUi.providerName ? ` · ${completionUi.providerName}` : ""}</> : null}
               {completionUi.status === "visible" ? <><kbd>Tab</kbd> {completionUi.paragraphs > 1 ? "接受下一段" : "接受"}{completionUi.paragraphs > 1 ? <><span>·</span><kbd>Ctrl+Enter</kbd> 接受全部</> : null}{completionUi.providerName ? ` · ${completionUi.providerName}` : ""} <span>·</span> <kbd>Esc</kbd> 取消</> : null}
               {completionUi.status === "unavailable" ? completionUi.message : null}
               {completionUi.status === "idle" ? <>停顿后预测下一句或下一段，按 <kbd>Tab</kbd> 接受</> : null}
+              </>}
             </div>
           ) : null}
           {!preview ? <span className="editor-drop-hint">连续编辑 · 支持粘贴、拖放和光标插图</span> : null}

@@ -42,9 +42,10 @@
 
   const validateImagePostPayload = (job) => {
     const images = imagePayload(job);
-    return images.length === 1
-      ? { ok: true, detail: "图文稿包含 1 张待上传图片" }
-      : { ok: false, detail: `图文稿必须恰好上传 1 张图片，当前为 ${images.length} 张` };
+    if (images.length < 1 || images.length > 18) return { ok: false, detail: `工作台图文支持 1–18 张图片，当前 ${images.length} 张` };
+    const ids = images.map(image => String(image?.id || "").trim());
+    if (ids.some(id => !id) || new Set(ids).size !== ids.length || images.some(image => !/^data:image\/(png|jpeg|webp|gif);base64,/iu.test(image?.dataUrl || ""))) return { ok: false, detail: "图集包含重复、缺失或不可上传的图片" };
+    return { ok: true, detail: `图文稿包含 ${images.length} 张待上传图片` };
   };
 
   globalThis.XiaoheihePublisherJob = {

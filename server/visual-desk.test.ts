@@ -51,6 +51,17 @@ const image = (
   ...overrides,
 });
 
+test("article material collection continues beyond two cached covers and includes rendered charts", async () => {
+  const cached = ["cover-one", "cover-two"].map((id) => image(id, { localPath: imageFixture(`${id}.jpg`), publicPath: `/media/${id}.jpg` }));
+  const chart = image("rendered-chart", { localPath: imageFixture("chart.png"), publicPath: "/media/chart.png", rights: "editorial-screenshot" });
+  const fixture = memoryDependencies({ images: cached, extracted: [image("benchmark"), image("capability")], screenshots: [chart] });
+  const result = await runVisualHydration("story-test", 2, fixture.dependencies, { scope: "article" });
+  assert.equal(fixture.calls.extract, 1);
+  assert.equal(fixture.calls.capture, 1);
+  assert.equal(result.localReadyImageCount, 5);
+  assert.equal(fixture.calls.generate, 0);
+});
+
 const page = (images: SourceImage[]): ExtractedPage => ({
   url: signal.url,
   canonicalUrl: signal.url,
@@ -428,4 +439,12 @@ test("localization can add paths without overwriting established rights provenan
   assert.equal(merged[0]?.modificationNote, "No modification");
   assert.deepEqual(merged[0]?.allowedPlatforms, ["wechat", "xiaoheihe"]);
   assert.equal(merged[0]?.fingerprint, "a".repeat(64));
+});
+
+test("reading the page again cannot erase decoded local image dimensions", () => {
+  const local = image("chart", { width: 2000, height: 1200, localPath: imageFixture("chart.webp"), publicPath: "/media/chart.webp" });
+  const refreshed = image("chart", { width: undefined, height: undefined });
+  const merged = mergeVisualImages([local], [refreshed]);
+  assert.equal(merged[0]?.width, 2000);
+  assert.equal(merged[0]?.height, 1200);
 });

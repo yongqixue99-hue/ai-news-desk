@@ -1,3 +1,5 @@
+import type { DraftOverview } from "../server/draft-overview.js";
+export type { DraftOverview } from "../server/draft-overview.js";
 import type {
   ArticleDraft,
   ArticleAgentDraftInput,
@@ -241,6 +243,7 @@ export interface StoryDetailResult {
   story: StoryView;
   contentPackage?: ContentPackage;
   feedback: ProductFeedbackEvent[];
+  assetCollection?: { sourceReports?: import("./types").ImageCollectionReport[] };
 }
 
 export interface EditorialIntakeResult extends StoryDetailResult {
@@ -303,6 +306,7 @@ export const api = {
   bootstrap: () => request<WorkflowState>("/api/bootstrap"),
   shell: () => request<ShellView>("/api/shell"),
   today: () => request<TodayView>("/api/today"),
+  draftOverview: () => request<DraftOverview>("/api/drafts/overview"),
   story: (storyId: string) => request<StoryDetailResult>(`/api/stories/${storyId}`),
   editorialIntake: (runId: string, candidateId: string) => request<EditorialIntakeResult>(
     `/api/editorial-intakes/${encodeURIComponent(runId)}/${encodeURIComponent(candidateId)}`,
@@ -331,6 +335,7 @@ export const api = {
   }),
   restoreStoryFeedback: (storyId: string) =>
     request<{ event: ProductFeedbackEvent; story: StoryView }>(`/api/stories/${storyId}/feedback`, { method: "DELETE" }),
+  collectStoryAssets: (storyId: string) => request<{ job: ProductJob; reused: boolean }>(`/api/stories/${encodeURIComponent(storyId)}/assets`, { method: "POST", body: "{}" }),
   createContentPackage: (storyId: string, mode?: Exclude<AssignmentMode, "watch" | "skip">, force = false) =>
     request<ContentPackageRequestResult>(`/api/stories/${storyId}/packages`, {
       method: "POST",

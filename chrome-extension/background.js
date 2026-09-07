@@ -207,57 +207,39 @@ async function uploadImageInPage(payload) {
 }
 
 async function uploadImagePostInPage(payload) {
-  const input = [...document.querySelectorAll('input[type="file"]')]
-    .find((element) => !element.disabled && (!element.accept || /image/i.test(element.accept)));
-  const uploadDropzone = document.querySelector('.editor-image-wrapper__box.upload');
-  if (!(input instanceof HTMLInputElement) && !(uploadDropzone instanceof HTMLElement)) {
-    return { ok: false, detail: "没有识别到图文图片上传区域" };
+  const images = Array.isArray(payload.images) ? payload.images : [];
+  if (!images.length || images.length > 18) return { ok: false, detail: "图集数量无效" };
+  const gallery = document.querySelector('.editor-image-text__image-seletor')
+    || document.querySelector('.editor-image-text__media-row .editor__image-wrapper');
+  const dropzone = gallery?.querySelector('.editor-image-wrapper__box.upload');
+  if (!(gallery instanceof HTMLElement) || !(dropzone instanceof HTMLElement)) return { ok: false, detail: "没有识别到图文图集上传区域" };
+  const boxes = () => [...gallery.querySelectorAll('.editor-image-wrapper__box.draggable')];
+  const settled = () => boxes().length === images.length && !gallery.querySelector('.editor-image-wrapper__box-uploading')
+    && boxes().every(box => { const image = box.querySelector('img'); return image && /^https?:/.test(image.currentSrc || image.src) && image.complete && image.naturalWidth > 0; });
+  if (boxes().length) {
+    if (gallery.dataset.aiNewsGalleryJob === payload.jobId && settled()) return { ok: true, detail: '已核验同一次任务的完整图集（' + images.length + ' 张）' };
+    return { ok: false, detail: "编辑器已有图集，未覆盖；请打开新的图文草稿后重试" };
   }
-  const before = new Set(
-    [...document.querySelectorAll("img")]
-      .map((image) => image.currentSrc || image.src)
-      .filter(Boolean),
-  );
-  const response = await fetch(payload.dataUrl);
-  const blob = await response.blob();
   const transfer = new DataTransfer();
-  transfer.items.add(new File(
-    [blob],
-    payload.fileName || "image-post.png",
-    { type: payload.mimeType || blob.type || "image/png" },
-  ));
-  if (input instanceof HTMLInputElement) {
-    input.files = transfer.files;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  } else if (uploadDropzone instanceof HTMLElement) {
-    const rect = uploadDropzone.getBoundingClientRect();
-    const eventInit = {
-      bubbles: true,
-      cancelable: true,
-      clientX: rect.left + rect.width / 2,
-      clientY: rect.top + rect.height / 2,
-      dataTransfer: transfer,
-    };
-    uploadDropzone.dispatchEvent(new DragEvent("dragenter", eventInit));
-    uploadDropzone.dispatchEvent(new DragEvent("dragover", eventInit));
-    uploadDropzone.dispatchEvent(new DragEvent("drop", eventInit));
+  for (const image of images) {
+    if (!/^data:image\/(png|jpeg|webp|gif);base64,/i.test(image.dataUrl || '')) return { ok: false, detail: "图集包含无效图片数据" };
+    const response = await fetch(image.dataUrl);
+    const blob = await response.blob();
+    transfer.items.add(new File([blob], image.fileName || image.id + '.png', { type: image.mimeType || blob.type }));
   }
-
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 30_000) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const preview = [...document.querySelectorAll("img")].find((image) => {
-      const source = image.currentSrc || image.src;
-      return source && !before.has(source) && image.getBoundingClientRect().width > 40;
-    });
-    if (preview) return { ok: true, detail: "图文图片已上传并显示预览" };
-    const bodyText = document.body?.innerText || "";
-    if (/图片上传失败|上传失败|重新上传/.test(bodyText)) {
-      return { ok: false, detail: "小黑盒返回图文图片上传失败" };
-    }
+  gallery.dataset.aiNewsGalleryJob = String(payload.jobId || '');
+  const rect = dropzone.getBoundingClientRect();
+  const init = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, dataTransfer: transfer };
+  dropzone.dispatchEvent(new DragEvent('dragenter', init));
+  dropzone.dispatchEvent(new DragEvent('dragover', init));
+  dropzone.dispatchEvent(new DragEvent('drop', init));
+  const started = Date.now();
+  while (Date.now() - started < 60000) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    if (/图片上传失败|上传失败|重新上传/.test(document.body?.innerText || '')) return { ok: false, detail: "小黑盒返回图集上传失败，请检查网络或图片格式" };
+    if (settled()) return { ok: true, detail: '图集 ' + images.length + '/' + images.length + ' 张已完成上传并核验预览，首图为封面' };
   }
-  return { ok: false, detail: "图片已选择，但小黑盒没有显示新的图片预览" };
+  return { ok: false, detail: '图集尚未全部上传完成（已出现 ' + boxes().length + '/' + images.length + ' 张），请检查小黑盒页面' };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -306,7 +288,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return undefined;
     }
     const payload = message.payload || {};
-    if (!/^data:image\//i.test(String(payload.dataUrl || ""))) {
+    if (!Array.isArray(payload.images) || !payload.images.length || payload.images.length > 18 || payload.images.some(image => !/^data:image\//i.test(String(image?.dataUrl || "")))) {
       sendResponse({ ok: false, detail: "图文图片数据无效" });
       return undefined;
     }

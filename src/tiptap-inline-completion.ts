@@ -119,10 +119,11 @@ export const InlineCompletionExtension = Extension.create<InlineCompletionOption
           return DecorationSet.create(state.doc, [widget]);
         },
         handleKeyDown(view, event) {
+          if (view.composing || event.isComposing || event.keyCode === 229) return false;
           const completion = pluginKey.getState(view.state);
           if (!completion || completion.position !== view.state.selection.from || !view.state.selection.empty) return false;
           const acceptsAll = event.key === "Enter" && (event.ctrlKey || event.metaKey);
-          if (event.key === "Tab" || acceptsAll) {
+          if ((event.key === "Tab" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) || acceptsAll) {
             event.preventDefault();
             const acceptance = inlineCompletionAcceptance(completion.text, acceptsAll);
             let transaction = inlineCompletionTransaction(view.state, acceptance.acceptedText);

@@ -94,6 +94,7 @@ const sanitizerOptions: sanitizeHtml.IOptions = {
     "img",
     "pre",
     "code",
+    "table", "thead", "tbody", "tr", "th", "td",
   ],
   allowedAttributes: {
     a: ["href", "target", "rel"],
@@ -247,6 +248,10 @@ export const publisherImagePostBodyHtml = (draft: ArticleDraft) => {
     const placement = placements.get(image.attr("data-media-id") || "");
     const caption = image.next("p").first();
     if (caption.text().replace(/\s+/g, " ").trim().startsWith("图：")) caption.remove();
+    image.remove();
+  });
+  for (const id of insertedMediaIds(draft)) {
+    const placement = placements.get(id);
     if (placement && mustKeepVisibleAttribution(placement)) {
       visibleAttributions.push(
         `图片来源：${escapeHtml(captions.get(placement.id) || placement.caption || placement.image.caption || "配图")}｜${[
@@ -254,8 +259,7 @@ export const publisherImagePostBodyHtml = (draft: ArticleDraft) => {
         ].join("；")}`,
       );
     }
-    image.remove();
-  });
+  }
   $("#article-root [data-ai-news-image]").remove();
   if (visibleAttributions.length) {
     $("#article-root").append(visibleAttributions.map((entry) => `<p>${entry}</p>`).join(""));
@@ -264,6 +268,7 @@ export const publisherImagePostBodyHtml = (draft: ArticleDraft) => {
 };
 
 export const insertedMediaIds = (draft: ArticleDraft) => {
+  if (draft.contentFormat === "image-post" && draft.imagePostImageIds) return new Set(draft.imagePostImageIds);
   const $ = cheerio.load(`<article>${normalizedDraftBodyHtml(draft)}</article>`, null, false);
   return new Set(
     $("img[data-media-id]")

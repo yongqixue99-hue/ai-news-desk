@@ -51,13 +51,26 @@ const draftIdFrom = (job: ProductJob) => {
 };
 
 interface ProductJobCenterProps {
-  onOpenDrafts: () => void;
+  onOpenDraft: (draftId: string) => Promise<void> | void;
 }
 
-export function ProductJobCenter({ onOpenDrafts }: ProductJobCenterProps) {
+export function ProductJobCenter({ onOpenDraft }: ProductJobCenterProps) {
   const [jobs, setJobs] = useState<ProductJob[]>([]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string>();
+  const [openingDraftId, setOpeningDraftId] = useState<string>();
+
+  const openDraft = async (draftId: string) => {
+    setOpeningDraftId(draftId);
+    try {
+      await onOpenDraft(draftId);
+      setOpen(false);
+    } catch (openError) {
+      setError(openError instanceof Error ? openError.message : String(openError));
+    } finally {
+      setOpeningDraftId(undefined);
+    }
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -127,7 +140,7 @@ export function ProductJobCenter({ onOpenDrafts }: ProductJobCenterProps) {
                     {activity ? <small>{activity.elapsed} · {activity.freshness}</small> : null}
                     {job.error ? <small>{job.error}</small> : null}
                   </div>
-                  {draftId ? <button type="button" onClick={onOpenDrafts}><FileText size={13} />打开草稿</button> : null}
+                  {draftId ? <button type="button" disabled={Boolean(openingDraftId)} onClick={() => void openDraft(draftId)}><FileText size={13} />{openingDraftId === draftId ? "正在打开…" : "打开草稿"}</button> : null}
                 </li>
               );
             })}

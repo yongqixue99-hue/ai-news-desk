@@ -27,6 +27,8 @@ import { normalizeDraftPublicationState } from "./publication-state.js";
 import { normalizeDraftCatalog } from "./draft-catalog.js";
 import { applySpendingPolicy } from "./spending-policy.js";
 
+import { officialKnowledgeSources } from "./official-knowledge.js";
+
 const configuredDefaultSources: SourceConfig[] = [
   {
     id: "openai-official",
@@ -1254,6 +1256,9 @@ const configuredDefaultSources: SourceConfig[] = [
   },
 ];
 
+// Append adapters without changing the identity/order of existing sources.
+configuredDefaultSources.push(...officialKnowledgeSources);
+
 const localSkillPath = (skillDirectory: string) =>
   path.join(homedir(), ".codex", "skills", skillDirectory, "SKILL.md");
 
@@ -1269,6 +1274,7 @@ export const defaultSourcePresets: SourcePreset[] = [
     id: "preset_ai_daily",
     name: "AI 日常完整包",
     sourceIds: [
+      ...officialKnowledgeSources.map((source) => source.id),
       "openai-official",
       "x-ai-official",
       "anthropic-official",
@@ -1395,10 +1401,16 @@ const defaultDailyAiSourceIds = new Set(
 );
 
 export const defaultSettings: Settings = {
+  officialMonitorEnabled: true,
+  officialMonitorIntervalMinutes: 60,
   windowHours: 48,
   collectionTopics: ["ai"],
   spendingPolicy: "zero-cost",
   personalizationEnabled: true,
+  recommendationMode: "focused",
+  editorialProfileEnabled: true,
+  writingMemoryEnabled: true,
+  inlineCompletionEnabled: true,
   notificationsMuted: true,
   scheduleEnabled: true,
   scheduleTime: "22:30",
@@ -1634,6 +1646,10 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   const storedSpendingPolicy = state.settings?.spendingPolicy;
   state.version = WORKFLOW_STATE_VERSION;
   state.settings = { ...defaultSettings, ...state.settings };
+  state.settings.recommendationMode = state.settings.recommendationMode === "balanced" ? "balanced" : "focused";
+  for (const key of ["editorialProfileEnabled", "writingMemoryEnabled", "inlineCompletionEnabled"] as const) {
+    state.settings[key] = state.settings[key] !== false;
+  }
   state.settings.spendingPolicy = storedSpendingPolicy === "zero-cost" || storedSpendingPolicy === "allow-metered"
     ? storedSpendingPolicy
     : state.aiSettings?.providers?.some((provider) => provider.id === "gemini" && provider.apiKeyConfigured)

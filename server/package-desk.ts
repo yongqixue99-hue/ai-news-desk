@@ -10,6 +10,7 @@ import type {
   DiscussionSample,
   EditorialIntent,
   EvidenceClaim,
+  PackageSourceEvidence,
   SourceMaterialSnapshot,
   StoryView,
 } from "./product-types.js";
@@ -369,6 +370,8 @@ const normalizedAssetGovernanceSnapshot = (asset: AssetCandidate) => {
     image: {
       id: image.id,
       url: image.url,
+      originalImageUrl: image.originalImageUrl,
+      captureKind: image.captureKind,
       caption: image.caption,
       attribution: image.attribution,
       sourceUrl: image.sourceUrl,
@@ -460,6 +463,7 @@ export interface BuildContentPackageInput {
   now?: string;
   discussionSamples?: DiscussionSample[];
   sourceMaterials?: SourceMaterialSnapshot[];
+  articleEvidence?: PackageSourceEvidence;
 }
 
 /**
@@ -471,14 +475,16 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
   const now = input.now ?? new Date().toISOString();
   const story = storyById(state, input.storyId, now);
   if (!story) throw new Error("Story 不存在或已经从当前数据中移除");
+  const requestedMode = input.mode ?? story.assignment.mode;
   const requestedIntent = input.intent
-    ?? (input.mode === "community" ? "community" : input.mode === "curate" ? "source" : "news");
+    ?? (requestedMode === "community" ? "community" : requestedMode === "curate" ? "source" : "news");
   if (!story.assignment.canDraft && requestedIntent !== "source") {
     throw new Error(story.assignment.blockers[0] || "当前 Story 不能进入成稿流程");
   }
   const mode = requestedIntent === "source" ? "curate" : input.mode ?? story.assignment.mode;
   if (mode === "watch" || mode === "skip") throw new Error("Watch 和 Skip 不会生成素材包");
-  const facts = evidenceClaimsFor(state, story);
+  const articleEvidence = requestedIntent === "news" ? input.articleEvidence : undefined;
+  const facts = articleEvidence ? structuredClone(articleEvidence.facts) : evidenceClaimsFor(state, story);
   const availableDiscussionSamples = input.discussionSamples?.length
     ? input.discussionSamples
     : discussionSamplesFor(state, story);
@@ -491,7 +497,11 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
     now,
     { allowGenerated: localSourceImageCount === 0 },
   );
-  const assets = assetsFor(story, facts, fallbackImages, now);
+  const articleImageUrls = articleEvidence?.imageUrls ? new Set(articleEvidence.imageUrls) : undefined;
+  const articleSources = new Set(articleEvidence?.sources.map((source) => source.url.replace(/\/+$/u, "")) ?? []);
+  const assetStory = articleImageUrls ? { ...story, images: story.images.filter((image) =>
+    articleImageUrls.has(image.url) || Boolean(image.captureKind && articleSources.has(image.sourceUrl.replace(/\/+$/u, "")))) } : story;
+  const assets = assetsFor(assetStory, facts, articleEvidence ? [] : fallbackImages, now);
   const sourceMaterials = input.sourceMaterials ?? [];
   const blockers = requestedIntent === "source" ? [] : [...story.assignment.blockers];
   if (requestedIntent === "source" && !sourceMaterials.some((material) => material.originalText.trim().length >= 80)) {
@@ -505,7 +515,7 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
       ? ["这是来源派生的私有编辑工作副本；正文事实、引用范围、转载或翻译权限均需发布前复核。"]
       : [
         ...story.assignment.warnings.filter((warning) => requestedIntent === "community" || !/社区样本/u.test(warning)),
-        ...story.explanation.unknowns.map((item) => `仍未知：${item}`),
+        ...(articleEvidence ? articleEvidence.uncertainties : story.explanation.unknowns.map((item) => `仍未知：${item}`)),
         ...facts.filter((claim) => claim.status === "unverified").map((claim) => `待核验：${claim.text}`),
       ]),
     ...sourceMaterials.filter((material) => material.truncated).map(() => "原始材料过长，素材包仅冻结了前 48000 个字符。"),
@@ -520,7 +530,9 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
     .digest("hex");
   const evidenceFingerprint = createHash("sha256")
     .update(JSON.stringify({
-      facts: facts.map((claim) => ({ text: claim.text, status: claim.status, sources: claim.sourceUrls })),
+      technicalArticle: story.technicalArticle,
+      facts: facts.map((claim) => ({ text: claim.text, status: claim.status, sources: claim.sourceUrls, quotations: claim.quotations })),
+      sourceEvidence: articleEvidence?.snapshots,
       explanationGeneratedAt: story.explanation.generatedAt,
       explanationUnknowns: story.explanation.unknowns,
       discussionSamples: discussionSamples.map((sample) => ({
@@ -537,6 +549,7 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
       url: material.url,
       capturedAt: material.capturedAt,
       originalText: material.originalText,
+      blocks: material.blocks,
       rightsNotice: material.rightsNotice,
     }))))
     .digest("hex");
@@ -545,6 +558,7 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
   return {
     id,
     storyId: story.id,
+    technicalArticle: story.technicalArticle,
     mode,
     intent,
     intakeReason: input.intakeReason,
@@ -555,8 +569,9 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
     communityFocus: story.communityFocus,
     discussionSamples,
     sourceSignalIds: story.signals.map((signal) => signalIdFor(signal.runId, signal.candidateId)),
-    sources: packageSourcesFor(story),
+    sources: articleEvidence ? [...structuredClone(articleEvidence.sources), ...packageSourcesFor(story).filter((source) => source.isCommunity)] : packageSourcesFor(story),
     sourceMaterials: sourceMaterials.length ? structuredClone(sourceMaterials) : undefined,
+    ...(articleEvidence ? { sourceEvidence: structuredClone(articleEvidence.snapshots) } : {}),
     imageIds: assets.map((asset) => asset.id),
     assets,
     uncertainties: [...new Set(uncertainties)],

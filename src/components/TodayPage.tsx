@@ -21,7 +21,11 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
-import { api, type ProductJob, type StoryDetailResult } from "../api";
+import { api, type DraftOverview, type ProductJob, type StoryDetailResult } from "../api";
+import { PageLoading } from "./PageLoading";
+import { TodayWorkspaceRail } from "./TodayWorkspaceRail";
+import { StoryAssetGallery } from "./StoryAssetGallery";
+import { KnowledgeShelf } from "./KnowledgeShelf";
 import { useDialogA11y } from "../hooks/useDialogA11y";
 import { beginStarterDraft, starterDraftActionCopy } from "../starter-draft";
 import type {
@@ -126,7 +130,9 @@ const StoryImage = ({ story, eager = false }: { story: StoryView; eager?: boolea
   const localCount = story.localImageCount
     ?? story.images.filter((candidate) => Boolean(candidate.localPath && candidate.publicPath)).length;
   const image = story.images.find((candidate) => Boolean(candidate.publicPath)) ?? story.images[0];
-  const [failed, setFailed] = useState(false);
+  const source = image?.publicPath || image?.url;
+  const [failedSource, setFailedSource] = useState<string>();
+  const failed = Boolean(source && failedSource === source);
   if (!image || failed) {
     return (
       <div className={`today-story-image empty${failed ? " failed" : ""}`} aria-label={failed ? "图片加载失败" : "当前来源没有合格图片"}>
@@ -138,10 +144,10 @@ const StoryImage = ({ story, eager = false }: { story: StoryView; eager?: boolea
   return (
     <div className="today-story-image">
       <img
-        src={image.publicPath || image.url}
+        src={source}
         alt={image.caption || story.title}
         loading={eager ? "eager" : "lazy"}
-        onError={() => setFailed(true)}
+        onError={() => setFailedSource(source)}
       />
       <span>{localCount ? `本地 ${localCount} / 发现 ${story.imageCount}` : `发现 ${story.imageCount} · 待缓存`}</span>
     </div>
@@ -184,34 +190,37 @@ const StoryRow = ({ story, rank, featured = false, busy = false, processing = fa
       <StoryImage story={story} eager={featured && rank === 1} />
       <div className="today-story-copy">
         <div className="today-story-kicker">
+          <span className="today-source-name">{story.signals.find((signal) => !signal.isCommunity)?.sourceName || story.signals[0]?.sourceName || "来源待核对"}</span>
           <span className={`assignment-pill mode-${story.assignment.mode}`}>{modeLabels[story.assignment.mode]}</span>
           <span className={`evidence-pill evidence-${story.evidenceStrength}`}>{evidenceLabels[story.evidenceStrength]}</span>
           <span>{relativeTime(story.publishedAt)}</span>
         </div>
         <h3>{story.title}</h3>
         <p className="today-story-summary">{story.summary}</p>
+        {story.opportunity ? <span className="today-opportunity"><strong>{story.opportunity.label}</strong>{story.opportunity.reason}</span> : null}
+        {story.preferenceReasons?.length ? <span className="today-opportunity">推荐偏好：{story.preferenceReasons.join("；")}</span> : null}
         <ReleaseDossierStrip story={story} compact={!featured} />
         {featured ? (
           <div className="today-story-reasons">
             <p><strong>编辑备注</strong>{story.explanation.editorNote || story.assignment.reason}</p>
-            <p><strong>社区怎么说</strong>{story.communitySummary || "尚未形成可引用的社区样本"}</p>
+            {story.communitySummary ? <p><strong>社区线索</strong>{story.communitySummary}</p> : null}
           </div>
         ) : null}
         <div className="today-story-meta">
           <span><FileStack size={14} />{story.sourceCount} 个来源</span>
-          <span><MessageSquareText size={14} />{story.communitySampleCount} 条样本</span>
-          <span className={`trend-${story.trend.direction}`}><TrendingUp size={14} />{story.trend.summary}</span>
+          {story.communitySampleCount ? <span><MessageSquareText size={14} />{story.communitySampleCount} 条样本</span> : null}
+          {story.trend.direction !== "unknown" ? <span className={`trend-${story.trend.direction}`}><TrendingUp size={14} />{story.trend.summary}</span> : null}
         </div>
       </div>
       <ChevronRight className="today-story-chevron" size={20} aria-hidden="true" />
     </button>
     <div className="today-story-actions" aria-label={`${story.title} 的快捷操作`}>
       <button type="button" className="text-button" onClick={() => onOpen(story)}>查看证据</button>
-      <button type="button" className="secondary-button" disabled={busy || story.drafted} onClick={() => onQueue(story, !story.selected)}>
+      <button type="button" className="secondary-button" aria-pressed={story.selected} disabled={busy || story.drafted} onClick={() => onQueue(story, !story.selected)}>
         {story.selected ? <><Check size={14} />已加入待写</> : "加入待写"}
       </button>
       <button type="button" className="primary-button" disabled={busy || processing || !story.assignment.canDraft || story.drafted} onClick={() => onQuickDraft(story)}>
-        {story.drafted ? "已有草稿" : <><Sparkles size={14} />{starterDraftActionCopy.primary}</>}
+        {story.drafted ? "已有草稿" : <><Pencil size={14} />生成基础稿<ArrowRight size={14} /></>}
       </button>
     </div>
   </article>
@@ -229,7 +238,7 @@ const Funnel = ({ data }: { data: TodayView["funnel"] }) => {
   return (
     <section className="today-funnel" aria-label="内容生产漏斗">
       <div className="today-section-heading">
-        <div><span>生产闭环</span><h2>哪里正在掉队</h2></div>
+        <div><span>工作记录</span><h2>从选题到发布</h2></div>
         <small>{data.feedbackCount} 次选择反馈 · 素材库 {data.materialLibraryTotal} 张：{data.autoUsableMaterialCount} 张可自动使用，{data.rightsReviewMaterialCount} 张待处理</small>
       </div>
       <ol>
@@ -245,8 +254,8 @@ const Funnel = ({ data }: { data: TodayView["funnel"] }) => {
         <div>
           <strong>今日推荐 {data.visibleRecommendationCount} / {data.recommendationTarget}</strong>
           <span>{data.recommendationShortageCount
-            ? `距离目标还差 ${data.recommendationShortageCount} 条合格事件，原因见右侧`
-            : "推荐数量与质量门槛均已达标"}</span>
+            ? "当前符合条件的题目较少，保留空位；筛选原因见右侧"
+            : "当前推荐已达展示上限，成稿与交付仍按各自条件检查"}</span>
         </div>
         {data.recommendationDropReasons.length ? (
           <ul>{data.recommendationDropReasons.map((reason) => <li key={reason.code}><span>{reason.label}</span><strong>{reason.count}</strong></li>)}</ul>
@@ -265,6 +274,7 @@ interface StoryDrawerProps {
   onClose: () => void;
   onRetryExplanation: () => void;
   onSupplementEvidence: () => void;
+  onCollectAssets: () => void;
   onSkip: () => void;
   onQueue: (selected: boolean) => void;
   onRestoreFeedback: () => void;
@@ -283,6 +293,7 @@ const StoryDrawer = ({
   onClose,
   onRetryExplanation,
   onSupplementEvidence,
+  onCollectAssets,
   onSkip,
   onQueue,
   onRestoreFeedback,
@@ -292,10 +303,11 @@ const StoryDrawer = ({
   onQuickWrite,
 }: StoryDrawerProps) => {
   const { story } = detail;
+  const [readerView, setReaderView] = useState<"summary" | "images">("summary");
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useDialogA11y<HTMLElement>({ open: true, onClose: busy ? undefined : onClose, initialFocusRef: closeButtonRef });
   const [mode, setMode] = useState<Exclude<AssignmentMode, "watch" | "skip">>(
-    story.assignment.canDraft ? story.assignment.mode as Exclude<AssignmentMode, "watch" | "skip"> : "brief",
+    story.technicalArticle ? "curate" : story.assignment.canDraft ? story.assignment.mode as Exclude<AssignmentMode, "watch" | "skip"> : "brief",
   );
   const contentPackage = detail.contentPackage;
   const processing = Boolean(activeJob && !terminalJobStatuses.has(activeJob.status));
@@ -319,8 +331,16 @@ const StoryDrawer = ({
           <button ref={closeButtonRef} type="button" className="icon-button" onClick={onClose} aria-label="关闭事件详情"><X size={19} /></button>
         </header>
 
+        <nav className="story-reader-tabs" aria-label="事件视图">
+          <button type="button" aria-pressed={readerView === "summary"} onClick={() => setReaderView("summary")}><BookOpen size={15} />事件摘要</button>
+          <button type="button" aria-pressed={readerView === "images"} onClick={() => setReaderView("images")}><Images size={15} />图片与图表 <span>{story.imageCount}</span></button>
+          <small>阅读来源，再形成自己的文章</small>
+        </nav>
         <div className="story-drawer-body story-reader-body">
-          <div className="story-reader-layout">
+          {readerView === "images" ? <>
+            {processing ? <div className="asset-collection-progress" role="status"><RefreshCw className="spin" size={15} /><span>{activeJob?.stage || "正在准备素材"}</span><progress value={activeJob?.progress ?? 0} max={1} /></div> : null}
+            <StoryAssetGallery images={story.images} localCount={story.localImageCount ?? 0} publishReadyCount={story.publishReadyImageCount ?? 0} reports={detail.assetCollection?.sourceReports} busy={busy || processing} onCollect={onCollectAssets} />
+          </> : <div className="story-reader-layout">
             <aside className="story-reader-sidebar" aria-label="事件来源与判断">
               <section className="story-decision-band story-decision-stack">
                 <div><span>建议</span><strong>{story.assignment.reason}</strong></div>
@@ -367,7 +387,7 @@ const StoryDrawer = ({
                       <a key={`${signal.runId}:${signal.candidateId}`} href={signal.url} target="_blank" rel="noreferrer" className="story-source-row">
                         <span>{signal.sourceName}</span>
                         <strong>{signal.titleZh || signal.title}</strong>
-                        <small>{relativeTime(signal.publishedAt)} · {signal.sourceRole || "discovery"}</small>
+                        <small>{signal.publicationDateKnown === false ? "日期待读取核对" : relativeTime(signal.publishedAt)} · {{ official: "官方来源", research: "研究资料", verification: "媒体核验", discovery: "发现线索", community: "社区讨论" }[signal.sourceRole || "discovery"]}</small>
                         <ExternalLink size={14} />
                       </a>
                     )) : <p className="story-empty-copy">尚无可建立事实主干的来源。</p>}
@@ -386,28 +406,7 @@ const StoryDrawer = ({
                 </div>
               </section>
 
-              <section className="story-detail-section story-visual-section">
-                <div className="story-detail-heading">
-                  <h3>图片就绪状态</h3>
-                  <span>发现 {story.imageCount} · 本地 {story.localImageCount ?? 0} · 可直接发布 {story.publishReadyImageCount ?? 0}</span>
-                </div>
-                {story.images.length ? (
-                  <div className="story-image-grid">
-                    {story.images.slice(0, 6).map((image) => (
-                      <figure key={image.id}>
-                        <img src={image.publicPath || image.url} alt={image.caption || "来源图片"} loading="lazy" />
-                        <figcaption>
-                          <strong>
-                            优先级 {image.editorialPriority ?? (image.rights === "editorial-screenshot" || image.rights === "commentary-screenshot" ? 2 : 1)} · {editorialAssetLabels[image.editorialPriority ?? (image.rights === "editorial-screenshot" || image.rights === "commentary-screenshot" ? 2 : 1)]}
-                          </strong>
-                          <span>{image.caption || "来源图片"}</span>
-                          <span>{image.attribution || "来源待核对"} · {image.localPath && image.publicPath ? "已缓存" : "仅远程"} · {image.rights}</span>
-                        </figcaption>
-                      </figure>
-                    ))}
-                  </div>
-                ) : <p className="story-empty-copy">暂未发现原图；建立素材包时会继续尝试原文截图、联网检索可核权的人物／公司身份图、事件相关图，全部失败后才现场生成非纪实封面。</p>}
-              </section>
+              <button className="story-material-shortcut" type="button" onClick={() => setReaderView("images")}><Images size={21} /><span><strong>查看原文图片与图表</strong><small>{story.imageCount} 张已发现 · {story.localImageCount ?? 0} 张已保存</small></span><ArrowRight size={17} /></button>
             </aside>
 
             <article className="story-reader-content">
@@ -474,7 +473,7 @@ const StoryDrawer = ({
                 <h3>成稿素材包</h3>
                 <span>{modeLabels[contentPackage.mode]}</span>
                 <button type="button" className="text-button" disabled={busy || processing} onClick={() => onBuildPackage(contentPackage.mode)}>
-                  {busy ? <><RefreshCw className="spin" size={13} />正在按 1→5 补图</> : <><RefreshCw size={13} />重新按 1→5 补图</>}
+                  {busy ? <><RefreshCw className="spin" size={13} />正在更新</> : <><RefreshCw size={13} />重新整理素材</>}
                 </button>
               </div>
               <PackageStatus contentPackage={contentPackage} />
@@ -536,15 +535,16 @@ const StoryDrawer = ({
               ) : null}
                 </section>
               ) : (
-                <section className="story-package-builder">
-              <div><span>下一步</span><h3>先建立可审查的素材包</h3><p>事实、社区原句和图片会先冻结为证据边界，写稿模型不能凭记忆补充。</p></div>
+                <details className="story-package-builder">
+              <summary><FileStack size={16} /><span>想先核对依据？检查成稿素材包</span><ChevronRight size={15} /></summary>
+              <p>生成基础稿时会自动整理事实和原文图表。也可以先单独检查素材，再决定怎么写。</p>
               {story.assignment.canDraft ? (
                 <div className="story-package-actions">
                   <label>稿型<select value={mode} onChange={(event) => setMode(event.target.value as Exclude<AssignmentMode, "watch" | "skip">)}>
                     {["brief", "synthesis", "community", "playbook", "curate"].map((value) => <option key={value} value={value}>{modeLabels[value as AssignmentMode]}</option>)}
                   </select></label>
-                  <button type="button" className="primary-button" disabled={busy || processing} onClick={() => onBuildPackage(mode)}>
-                    {busy ? <><RefreshCw className="spin" size={16} />按 1→5 顺序补图</> : <><FileStack size={16} />生成素材包</>}
+                  <button type="button" className="secondary-button" disabled={busy || processing} onClick={() => onBuildPackage(mode)}>
+                    {busy ? <><RefreshCw className="spin" size={16} />正在整理原文素材</> : <><FileStack size={16} />先整理素材包</>}
                   </button>
                 </div>
               ) : null}
@@ -554,13 +554,14 @@ const StoryDrawer = ({
                   <progress value={activeJob.progress} max={1}>{Math.round(activeJob.progress * 100)}%</progress>
                 </div>
               ) : null}
-                </section>
+                </details>
               )}
             </article>
-          </div>
+          </div>}
         </div>
 
         <footer className="story-drawer-footer">
+          <p className="story-footer-note">原文图表随素材整理 · 生成后可以逐张删改</p>
           {story.ignored ? (
             <button type="button" className="secondary-button" disabled={busy} onClick={onRestoreFeedback}><RotateCcw size={15} />恢复到今日候选</button>
           ) : (
@@ -587,6 +588,10 @@ interface TodayPageProps {
 
 export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: TodayPageProps) {
   const [today, setToday] = useState<TodayView>();
+  const [drafts, setDrafts] = useState<DraftOverview>();
+  const [draftError, setDraftError] = useState<string>();
+  const [openingDraftId, setOpeningDraftId] = useState<string>();
+  const loadRequestRef = useRef(0);
   const [detail, setDetail] = useState<StoryDetailResult>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -600,20 +605,26 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
   const activeStoryJobRef = useRef<ProductJob | undefined>(undefined);
   const handledJobIdsRef = useRef(new Set<string>());
   const storyJobIntentsRef = useRef(new Map<string, {
-    kind: "package" | "evidence" | "quick-write" | "draft";
+    kind: "package" | "evidence" | "quick-write" | "draft" | "assets";
     storyId: string;
   }>());
 
   const loadToday = useCallback(async (quiet = false) => {
+    const requestId = ++loadRequestRef.current;
     if (!quiet) setLoading(true);
-    try {
-      setToday(await api.today());
+    const [recommendations, overview] = await Promise.allSettled([api.today(), api.draftOverview()]);
+    if (requestId !== loadRequestRef.current) return;
+    if (recommendations.status === "fulfilled") {
+      setToday(recommendations.value);
       setError(undefined);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : String(loadError));
-    } finally {
-      if (!quiet) setLoading(false);
+    } else {
+      setError(recommendations.reason instanceof Error ? recommendations.reason.message : String(recommendations.reason));
     }
+    if (overview.status === "fulfilled") {
+      setDrafts(overview.value);
+      setDraftError(undefined);
+    } else setDraftError("最近草稿读取失败");
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -630,7 +641,11 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
         // The next SSE snapshot is authoritative; a malformed frame is ignored.
       }
     });
-    return () => events.close();
+    return () => {
+      loadRequestRef.current += 1;
+      explanationRequestRef.current += 1;
+      events.close();
+    };
   }, [loadToday]);
 
   useEffect(() => {
@@ -658,7 +673,9 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
       let job = queued.job;
       if (!job) throw new Error("正文讲解任务没有成功启动");
       for (let attempt = 0; attempt < 160 && !["complete", "failed", "cancelled"].includes(job.status); attempt += 1) {
+        if (explanationRequestRef.current !== requestId) return;
         await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+        if (explanationRequestRef.current !== requestId) return;
         job = await api.productJob(job.id);
       }
       if (job.status !== "complete") throw new Error(job.error || "正文讲解暂时没有完成");
@@ -683,13 +700,14 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
     setBusy(true);
     try {
       const next = await api.story(story.id);
+      if (explanationRequestRef.current !== requestId) return;
       setDetail(next);
       void api.recordStoryEvent(story.id, "opened").catch(() => undefined);
       if (next.story.explanation.status !== "ready") void hydrateExplanation(story.id, requestId);
     } catch (openError) {
-      onNotice("error", openError instanceof Error ? openError.message : String(openError));
+      if (explanationRequestRef.current === requestId) onNotice("error", openError instanceof Error ? openError.message : String(openError));
     } finally {
-      setBusy(false);
+      if (explanationRequestRef.current === requestId) setBusy(false);
     }
   };
 
@@ -774,6 +792,18 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
     } finally {
       setBusy(false);
     }
+  };
+
+  const collectAssets = async () => {
+    if (!detail) return;
+    setBusy(true);
+    try {
+      const queued = await api.collectStoryAssets(detail.story.id);
+      storyJobIntentsRef.current.set(queued.job.id, { kind: "assets", storyId: detail.story.id });
+      setActiveStoryJob(queued.job);
+      onNotice("info", "正在读取原文图片与图表；可以继续浏览，完成后素材会自动更新。");
+    } catch (error) { onNotice("error", error instanceof Error ? error.message : String(error)); }
+    finally { setBusy(false); }
   };
 
   const buildPackage = async (mode: Exclude<AssignmentMode, "watch" | "skip">) => {
@@ -899,6 +929,10 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
           setDetail(undefined);
           if (onOpenDraft) await onOpenDraft(draftId);
           else onNavigate("drafts");
+        } else if (intent.kind === "assets") {
+          const refreshed = await api.story(intent.storyId);
+          setDetail((current) => current?.story.id === intent.storyId ? refreshed : current);
+          onNotice("info", `已保存 ${refreshed.story.localImageCount ?? 0} 张来源素材，可在「图片与图表」中查看。`);
         } else if (intent.kind === "evidence") {
           const refreshed = await api.story(intent.storyId);
           setDetail((current) => current?.story.id === intent.storyId ? refreshed : current);
@@ -944,22 +978,37 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
     setSearching(true);
     try {
       await onSearch(query);
+    } catch (searchError) {
+      onNotice("error", searchError instanceof Error ? searchError.message : String(searchError));
     } finally {
       setSearching(false);
     }
   };
 
+  const resumeDraft = async (draftId: string) => {
+    setOpeningDraftId(draftId);
+    try {
+      if (onOpenDraft) await onOpenDraft(draftId);
+      else onNavigate("drafts");
+    } catch (openError) {
+      onNotice("error", openError instanceof Error ? openError.message : String(openError));
+    } finally {
+      setOpeningDraftId(undefined);
+    }
+  };
+
   return (
     <div className="page today-page">
+      <div className="today-edition"><span><i aria-hidden="true" />个人科技编辑室</span><span>AI NEWS DESK <span aria-hidden="true">/</span> 每日选题</span></div>
       <header className="today-header">
         <div>
-          <span className="today-date">{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date())}</span>
           <h1>今日编辑台</h1>
-          <p>先判断今天该写什么，再进入事实、社区与图片素材包。</p>
+          <p>发现值得写的事，把好文章留给读者。</p>
         </div>
         <div className="today-header-actions">
-          {today ? <span className="today-updated"><Clock3 size={14} />{relativeTime(today.generatedAt)}更新</span> : null}
-          <button type="button" className="secondary-button" disabled={loading} onClick={() => void loadToday()}><RefreshCw className={loading ? "spin" : ""} size={16} />重新整理</button>
+          <span className="today-date">{new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Hong_Kong", month: "long", day: "numeric", weekday: "long" }).format(new Date())}</span>
+          <div>{today ? <span className="today-updated"><Clock3 size={13} />{relativeTime(today.generatedAt)}更新</span> : null}
+          <button type="button" className="text-button today-refresh" title="重新整理已有事件；搜索才会读取外部新闻源" disabled={loading} onClick={() => void loadToday()}><RefreshCw className={loading ? "spin" : ""} size={14} />重新整理</button></div>
         </div>
       </header>
 
@@ -973,43 +1022,52 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
             maxLength={120}
             aria-label="搜索想写的新闻"
             placeholder="搜索模型、公司或事件，例如 GPT-6 Astra"
+            aria-describedby="today-search-help"
           />
         </div>
         <button type="submit" className="primary-button" disabled={!searchQuery.trim() || searching}>
           {searching ? <><RefreshCw className="spin" size={16} />搜索中</> : <><Search size={16} />搜索最近 7 天</>}
         </button>
-        <p>实时读取已启用的官网与新闻来源；X 和社区帖子不参与这次事实搜索。</p>
+        <p id="today-search-help">实时读取已启用的官网与新闻来源；X 和社区帖子不参与这次事实搜索。</p>
       </form>
 
-      <section className="today-metrics" aria-label="今日覆盖概览">
+      {today ? <section className="today-metrics" aria-label="今日覆盖概览">
         {metrics.map(({ label, value, icon: Icon }) => <div key={label}><Icon size={17} /><span>{label}</span><strong>{value}</strong></div>)}
-      </section>
+      </section> : null}
 
       {error ? (
-        <div className="today-error"><AlertTriangle size={18} /><div><strong>今日推荐读取失败</strong><p>{error}</p></div><button type="button" onClick={() => void loadToday()}>重试</button></div>
+        <div className="today-error" role="alert"><AlertTriangle size={18} /><div><strong>今日推荐读取失败</strong><p>{error}</p></div><button type="button" onClick={() => void loadToday()}>重试</button></div>
       ) : null}
 
-      {loading && !today ? <div className="today-loading"><span className="loading-mark" />正在聚合事件、证据和社区讨论…</div> : null}
+      {loading && !today ? <PageLoading label="正在整理今天的选题与草稿…" /> : null}
 
       {today ? (
         <>
+          {today.releaseHighlights?.length ? <section className="today-release-highlights" aria-label="近期重要发布">
+            <div className="release-highlights-heading"><span>RELEASE RADAR</span><h2>近期重要发布</h2><small>过去 7 天 · 官方发布线索</small></div>
+            <div className="release-highlights-list">{today.releaseHighlights.map((story) => <button type="button" key={story.id} onClick={() => openStory(story)}>
+              <span className="release-status"><i />{story.drafted ? "已进入写作" : story.releaseDossier?.facets.find((facet) => facet.id === "official")?.status === "ready" ? "已定位官方原文" : "原文待核对"}<small>{relativeTime(story.publishedAt)}</small></span>
+              <strong>{story.title}</strong><span className="release-open">查看发布资料 <ArrowRight size={14} /></span>
+            </button>)}</div>
+          </section> : null}
+          <div className="today-editorial-grid">
+          <div className="today-reading-column">
           <section className="today-section today-must-read">
             <div className="today-section-heading">
-              <div><span>今日事件推荐</span><h2>今天最值得判断的事件</h2></div>
-              <p>按事件聚合相似报道，只保留证据足够、仍在时效窗口内且尚未写过的内容。</p>
+              <div><span>今日重点 / {String(today.mustReads.length).padStart(2, "0")}</span><h2>今天，先看这几件事</h2></div>
+              <span className="desk-section-caption">已合并同一事件的报道</span>
             </div>
             {today.mustReads.length ? (
               <div className="today-featured-list">{today.mustReads.map((story, index) => (
                 <StoryRow key={story.id} story={story} rank={index + 1} featured busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />
               ))}</div>
             ) : (
-              <div className="today-empty"><Eye size={22} /><div><strong>暂时没有达到必写门槛的事件</strong><p>可以去新闻工作台补充来源，或查看仍在观察的事件。</p></div><button type="button" className="secondary-button" onClick={() => onNavigate("workbench")}>打开新闻工作台</button></div>
+              <div className="today-empty"><Eye size={28} /><div><strong>下一篇好文章，从一条线索开始</strong><p>暂时没有符合推荐条件的事件。搜索你关注的主题，或去工作台读取新闻源。</p></div><button type="button" className="secondary-button" onClick={() => onNavigate("workbench")}>打开新闻工作台 <ArrowRight size={15} /></button></div>
             )}
           </section>
 
-          <div className="today-lower-grid">
             <section className="today-section">
-              <div className="today-section-heading"><div><span>次级候选</span><h2>值得浏览，但不必立刻写</h2></div><button type="button" className="text-button" onClick={() => onNavigate("workbench")}>查看全部新闻 <ArrowRight size={14} /></button></div>
+              <div className="today-section-heading"><div><span>更多线索</span><h2>也值得花一分钟</h2></div><button type="button" className="text-button" onClick={() => onNavigate("workbench")}>全部新闻 <ArrowRight size={14} /></button></div>
               <div className="today-secondary-list">
                 {today.secondary.length ? today.secondary.map((story) => (
                   <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />
@@ -1017,28 +1075,10 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
               </div>
             </section>
 
-            <aside className="today-watch-column">
-              <section className="today-watch-list">
-                <div className="today-section-heading"><div><span>继续观察</span><h2>有热度，证据还没跟上</h2></div></div>
-                {today.watching.length ? today.watching.map((story) => (
-                  <button type="button" key={story.id} onClick={() => openStory(story)}>
-                    <span>{story.title}</span><small>{story.assignment.blockers[0] || story.assignment.reason}</small><ChevronRight size={15} />
-                  </button>
-                )) : <p className="story-empty-copy">没有等待补证的事件。</p>}
-              </section>
-
-              {today.diagnostics.length ? (
-                <section className="today-diagnostics">
-                  <div className="today-section-heading"><div><span>来源诊断</span><h2>{today.diagnostics.length} 个来源需要处理</h2></div></div>
-                  {today.diagnostics.slice(0, 6).map((diagnostic) => (
-                    <div key={diagnostic.sourceId}><AlertTriangle size={15} /><p><strong>{diagnostic.name}</strong><span>{diagnostic.detail}</span></p><small>{diagnostic.consecutiveFailures} 次失败</small></div>
-                  ))}
-                  <button type="button" className="text-button" onClick={() => onNavigate("sources")}>去来源页诊断 <ArrowRight size={14} /></button>
-                </section>
-              ) : null}
-            </aside>
-          </div>
-
+          {today.interesting?.length ? <section className="today-section today-interesting">
+            <div className="today-section-heading"><div><span>不只追热度</span><h2>有趣，也有用</h2></div><small>具体实践与新鲜题材 · 最多 2 条</small></div>
+            <div className="today-secondary-list">{today.interesting.map((story) => <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />)}</div>
+          </section> : null}
           {today.backlog.length ? (
             <section className="today-section today-backlog">
               <div className="today-section-heading">
@@ -1053,7 +1093,25 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
             </section>
           ) : null}
 
-          <Funnel data={today.funnel} />
+          </div>
+          <TodayWorkspaceRail today={today} drafts={drafts} draftError={draftError} openingDraftId={openingDraftId} onRetry={() => void loadToday(true)} onNavigate={onNavigate} onOpenDraft={(draftId) => void resumeDraft(draftId)} onOpenStory={openStory} />
+          </div>
+
+          <KnowledgeShelf stories={today.knowledge ?? []} onOpen={openStory} />
+          <div className="desk-operational-details">
+            {today.diagnostics.length ? (
+              <details className="desk-disclosure">
+                <summary><span><AlertTriangle size={16} />来源运行提示 <strong>{today.diagnostics.length}</strong></span><span>展开诊断 <ChevronRight size={15} /></span></summary>
+                <section className="today-diagnostics" aria-label="来源诊断">
+                  {today.diagnostics.map((diagnostic) => (
+                    <div key={diagnostic.sourceId}><AlertTriangle size={15} /><p><strong>{diagnostic.name}</strong><span>{diagnostic.detail}</span></p><small>{diagnostic.consecutiveFailures ? `${diagnostic.consecutiveFailures} 次失败` : "检查匹配"}</small></div>
+                  ))}
+                  <button type="button" className="text-button" onClick={() => onNavigate("sources")}>去来源页诊断 <ArrowRight size={14} /></button>
+                </section>
+              </details>
+            ) : null}
+            <details className="desk-disclosure"><summary><span><FileStack size={16} />工作记录与推荐覆盖</span><span>查看统计 <ChevronRight size={15} /></span></summary><Funnel data={today.funnel} /></details>
+          </div>
         </>
       ) : null}
 
@@ -1071,6 +1129,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
           onClose={closeStory}
           onRetryExplanation={retryExplanation}
           onSupplementEvidence={() => void supplementEvidence()}
+          onCollectAssets={() => void collectAssets()}
           onSkip={skipStory}
           onQueue={(selected) => void queueStory(detail.story, selected)}
           onRestoreFeedback={restoreFeedback}

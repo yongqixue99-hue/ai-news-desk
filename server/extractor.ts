@@ -2,16 +2,38 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import * as cheerio from "cheerio";
+import sharp from "sharp";
 import { fetchRemote, readResponseBuffer, validateRemoteUrl } from "./remote-url.js";
 import { workflowMediaRoot } from "./storage.js";
 import type { ExtractedPage, SourceImage } from "./types.js";
 
 const imageNoise = /logo|icon|avatar|emoji|tracking|pixel|spinner|loading|sprite|favicon|author|profile|badge|button/i;
 
+export const extractArticleBlocks = (html: string): NonNullable<ExtractedPage["blocks"]> => {
+  const $ = cheerio.load(html);
+  $("script, style, nav, footer, aside, form, noscript, svg").remove();
+  const root = $("article").first().length ? $("article").first() : $("main").first().length ? $("main").first() : $("body");
+  const blocks: NonNullable<ExtractedPage["blocks"]> = [];
+  root.find("h2, h3, h4, p, blockquote, li, pre, table").each((_index, element) => {
+    const node = $(element);
+    const tag = element.tagName?.toLowerCase();
+    if (node.parents("pre, table").length || (tag === "p" && node.parents("blockquote, li").length) || (tag === "li" && node.parents("li").length)) return;
+    const text = tag === "pre" ? node.text().replace(/\r\n?/gu, "\n")
+      : tag === "table" ? node.find("tr").map((_row, row) => $(row).find("th, td").map((_cell, cell) => normalizedText($(cell).text())).get().join("\t")).get().join("\n")
+      : normalizedText(node.text());
+    if (!text.trim() || blocks.at(-1)?.text === text) return;
+    blocks.push({ kind: /^h[234]$/u.test(tag) ? "heading" : tag === "pre" ? "code" : tag === "table" ? "table" : tag === "blockquote" ? "quote" : tag === "li" ? "list-item" : "paragraph", text,
+      ...(tag === "pre" ? { language: (node.find("code").attr("class") ?? node.attr("class") ?? "").match(/language-([a-z0-9+-]+)/iu)?.[1] } : {}),
+    });
+  });
+  return blocks;
+};
+
 const absoluteUrl = (raw: string | undefined, base: URL) => {
   if (!raw || raw.startsWith("data:") || raw.startsWith("blob:")) return undefined;
   try {
-    return new URL(raw, base).toString();
+    const url = new URL(raw, base);
+    return ["https:", "http:"].includes(url.protocol) ? url.toString() : undefined;
   } catch {
     return undefined;
   }
@@ -21,9 +43,10 @@ const srcFromSet = (srcset?: string) => {
   if (!srcset) return undefined;
   const candidates = srcset
     .split(",")
-    .map((entry) => entry.trim().split(/\s+/)[0])
-    .filter(Boolean);
-  return candidates.at(-1);
+    .map((entry) => { const [url, descriptor] = entry.trim().split(/\s+/); return { url, size: Number.parseFloat(descriptor ?? "1") || 1 }; })
+    .filter((entry) => entry.url && !entry.url.startsWith("data:"))
+    .sort((a, b) => b.size - a.size);
+  return candidates[0]?.url;
 };
 
 const normalizedText = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -206,6 +229,47 @@ const moduleFallbackForClientShell = async (
   };
 };
 
+interface ArticleImageCandidate {
+  url?: string;
+  caption?: string;
+  attribution?: string;
+  width?: number;
+  height?: number;
+  priority: number;
+}
+
+export const extractArticleImageCandidates = (html: string, pageUrl: string): ArticleImageCandidate[] => {
+  const $ = cheerio.load(html);
+  const base = new URL(pageUrl);
+  const images: ArticleImageCandidate[] = [];
+  $("nav, footer, aside, form, [role='navigation'], [aria-label*='Related'], [class*='related-'], [class*='recommendation'], [class*='author-'], [class*='authorBio'], [class*='byline'], [class*='most-read'], [class*='MostRead']").remove();
+  const root = $("article").first().length ? $("article").first() : $("main, [role='main']").first().length ? $("main, [role='main']").first() : $("body");
+  root.find("img").each((index, element) => {
+    const node = $(element);
+    const pictureSets = node.closest("picture").find("source").map((_i, source) => $(source).attr("srcset") || $(source).attr("data-srcset") || "").get().join(",");
+    let deferredUrl: string | undefined;
+    try {
+      const loading = JSON.parse(node.attr("data-loading") || "null") as { desktop?: unknown; mobile?: unknown } | null;
+      deferredUrl = typeof loading?.desktop === "string" ? loading.desktop
+        : typeof loading?.mobile === "string" ? loading.mobile : undefined;
+    } catch { /* Treat publisher metadata as data only; malformed JSON falls back to ordinary image attributes. */ }
+    const url = [srcFromSet(pictureSets), srcFromSet(node.attr("srcset") || node.attr("data-srcset")),
+      deferredUrl, node.attr("data-src"), node.attr("data-original"), node.attr("src")]
+      .map((raw) => absoluteUrl(raw, base)).find(Boolean);
+    if (!url || imageNoise.test(`${url} ${node.attr("class") ?? ""} ${node.attr("alt") ?? ""}`)) return;
+    const width = Number(node.attr("width")) || undefined;
+    const height = Number(node.attr("height")) || undefined;
+    if (width && height && (width < 320 || height < 120)) return;
+    const figure = node.closest("figure");
+    images.push({ url, width, height,
+      caption: normalizedText(figure.find("figcaption").text() || node.attr("alt") || ""),
+      attribution: normalizedText(figure.find(".credit, [class*='credit'], [class*='caption']").text() || ""),
+      priority: 120 - Math.min(index, 16),
+    });
+  });
+  return images;
+};
+
 export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<ExtractedPage> => {
   const requestedUrl = await validateRemoteUrl(rawUrl);
   const response = await fetchRemote(requestedUrl, {
@@ -251,37 +315,10 @@ export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<Extra
     : $("main").first().length
       ? $("main").first()
       : $("body");
-  const blocks: NonNullable<ExtractedPage["blocks"]> = [];
-  articleRoot.find("h2, h3, p, blockquote, li").each((_index, element) => {
-    const node = $(element);
-    const tagName = element.tagName?.toLowerCase();
-    // A paragraph inside a quote/list item is already represented by its
-    // parent block. Keeping both would duplicate source text in verbatim mode.
-    if (tagName === "p" && node.parents("blockquote, li").length) return;
-    if (tagName === "li" && node.parents("li").length) return;
-    const blockText = normalizedText(node.text());
-    if (blockText.length < 2 || blocks.at(-1)?.text === blockText) return;
-    blocks.push({
-      kind: tagName === "h2" || tagName === "h3"
-        ? "heading"
-        : tagName === "blockquote"
-          ? "quote"
-          : tagName === "li"
-            ? "list-item"
-            : "paragraph",
-      text: blockText.slice(0, 8_000),
-    });
-  });
+  const blocks = extractArticleBlocks(html);
   let text = normalizedText(articleRoot.text()).slice(0, 30_000);
 
-  const imageCandidates: Array<{
-    url?: string;
-    caption?: string;
-    attribution?: string;
-    width?: number;
-    height?: number;
-    priority: number;
-  }> = [];
+  const imageCandidates: ArticleImageCandidate[] = [];
 
   const pushMeta = (selector: string, priority: number) => {
     const url = absoluteUrl($(selector).attr("content"), finalUrl);
@@ -290,34 +327,9 @@ export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<Extra
   pushMeta("meta[property='og:image']", 100);
   pushMeta("meta[name='twitter:image']", 90);
 
-  let articleImageCount = 0;
-  $("article figure img, main figure img, article img, main img").each((index, element) => {
-    const node = $(element);
-    const raw =
-      srcFromSet(node.attr("srcset") || node.attr("data-srcset")) ||
-      node.attr("src") ||
-      node.attr("data-src") ||
-      node.attr("data-original");
-    const url = absoluteUrl(raw, finalUrl);
-    if (!url || imageNoise.test(`${url} ${node.attr("class") ?? ""} ${node.attr("alt") ?? ""}`)) return;
-    const width = Number(node.attr("width")) || undefined;
-    const height = Number(node.attr("height")) || undefined;
-    if (width && height && (width < 320 || height < 180)) return;
-    const figure = node.closest("figure");
-    const caption = normalizedText(figure.find("figcaption").text() || node.attr("alt") || "");
-    const attribution = normalizedText(
-      figure.find(".credit, [class*='credit'], [class*='caption']").text() || "",
-    );
-    imageCandidates.push({
-      url,
-      caption,
-      attribution,
-      width,
-      height,
-      priority: 70 - Math.min(index, 30),
-    });
-    articleImageCount += 1;
-  });
+  const articleImages = extractArticleImageCandidates(html, finalUrl.toString());
+  const articleImageCount = articleImages.length;
+  imageCandidates.push(...articleImages);
 
   if (moduleUrls.length && (articleImageCount === 0 || blocks.length === 0 || text.length < 80 || !title)) {
     const moduleFallback = await moduleFallbackForClientShell(moduleUrls, finalUrl, imageLimit);
@@ -360,18 +372,11 @@ export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<Extra
   return { url: finalUrl.toString(), canonicalUrl, title, publishedAt, text, blocks, images };
 };
 
-const extensionFor = (contentType: string, url: string) => {
-  if (contentType.includes("png")) return ".png";
-  if (contentType.includes("webp")) return ".webp";
-  if (contentType.includes("gif")) return ".gif";
-  if (contentType.includes("jpeg") || contentType.includes("jpg")) return ".jpg";
-  const extension = path.extname(new URL(url).pathname).toLowerCase();
-  return [".png", ".webp", ".gif", ".jpg", ".jpeg"].includes(extension)
-    ? extension
-    : ".jpg";
-};
-
-export const downloadSourceImage = async (image: SourceImage, draftId: string) => {
+export const downloadSourceImage = async (
+  image: SourceImage,
+  draftId: string,
+  options: { mediaRoot?: string } = {},
+) => {
   const response = await fetchRemote(image.url, {
     signal: AbortSignal.timeout(20_000),
     headers: {
@@ -381,17 +386,32 @@ export const downloadSourceImage = async (image: SourceImage, draftId: string) =
     },
   });
   if (!response.ok) throw new Error(`图片下载失败：HTTP ${response.status}`);
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.startsWith("image/")) throw new Error("来源地址没有返回图片");
-  const bytes = await readResponseBuffer(response, 8 * 1024 * 1024);
-  const targetDirectory = path.join(workflowMediaRoot, draftId);
+  const contentType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  if (contentType && !contentType.startsWith("image/") && contentType !== "application/octet-stream") {
+    throw new Error("来源地址没有返回图片");
+  }
+  let bytes = await readResponseBuffer(response, 8 * 1024 * 1024);
+  // Several publisher CDNs serve genuine raster files as octet-stream. Trust
+  // a bounded decoder, never a URL extension or a permissive response header.
+  const decoder = sharp(bytes, { limitInputPixels: 40_000_000, failOn: "error" });
+  const metadata = await decoder.metadata();
+  if (!metadata.width || !metadata.height || !["jpeg", "png", "webp", "gif", "heif"].includes(metadata.format ?? "")) {
+    throw new Error("来源文件不是支持的位图图片");
+  }
+  await decoder.clone().resize(1, 1).toBuffer();
+  const converted = metadata.format === "heif";
+  if (converted) bytes = await decoder.clone().png().toBuffer();
+  const extension = converted ? ".png" : metadata.format === "jpeg" ? ".jpg" : `.${metadata.format}`;
+  const targetDirectory = path.join(options.mediaRoot ?? workflowMediaRoot, draftId);
   await mkdir(targetDirectory, { recursive: true });
-  const extension = extensionFor(contentType, response.url || image.url);
   const fileName = `${image.id}${extension}`;
   const localPath = path.join(targetDirectory, fileName);
   await writeFile(localPath, bytes);
   return {
     ...image,
+    width: metadata.width,
+    height: metadata.height,
+    ...(converted ? { modificationNote: [image.modificationNote, "将原始 AVIF/HEIF 位图转换为 PNG 以兼容编辑与交付"].filter(Boolean).join("；") } : {}),
     localPath,
     publicPath: `/media/${encodeURIComponent(draftId)}/${encodeURIComponent(fileName)}`,
     fingerprint: createHash("sha256").update(bytes).digest("hex"),

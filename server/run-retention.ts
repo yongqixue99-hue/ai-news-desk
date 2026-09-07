@@ -14,6 +14,15 @@ export const retainWorkflowRuns = (state: Pick<WorkflowState, "runs" | "drafts" 
     ...state.drafts.map((draft) => draft.runId),
     ...state.intakeReviews.flatMap((review) => review.runId ? [review.runId] : []),
   ]);
+  const retainedKnowledge = new Set<string>();
+  for (const run of state.runs) {
+    for (const candidate of run.candidates) {
+      if (candidate.selected || candidate.userFeedback === "interested") referencedRunIds.add(run.id);
+      if (!candidate.technicalArticle || retainedKnowledge.has(candidate.canonicalUrl || candidate.url)) continue;
+      retainedKnowledge.add(candidate.canonicalUrl || candidate.url);
+      referencedRunIds.add(run.id);
+    }
+  }
   state.runs = retainRecentAndReferencedRuns(state.runs, referencedRunIds, recentLimit);
   return state.runs;
 };

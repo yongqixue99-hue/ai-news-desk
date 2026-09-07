@@ -59,6 +59,7 @@ export interface AssignmentDecision {
 }
 
 export interface StorySignalView {
+  publicationDateKnown?: boolean;
   runId: string;
   candidateId: string;
   sourceName: string;
@@ -152,6 +153,8 @@ export interface ModelReleaseDossier {
 }
 
 export interface StoryView {
+  technicalArticle?: import("./technical-article.js").TechnicalArticlePolicy;
+  publicationDateKnown?: boolean;
   id: string;
   title: string;
   originalTitle: string;
@@ -168,6 +171,9 @@ export interface StoryView {
   publishedAt: string;
   ageHours: number;
   recommendationScore: number;
+  opportunity?: import("./newsworthiness.js").EditorialOpportunity;
+  preferenceAdjustment?: number;
+  preferenceReasons?: string[];
   evidenceStrength: EvidenceStrength;
   sourceCount: number;
   factSourceCount: number;
@@ -208,7 +214,7 @@ export interface TodayFunnel {
   visibleRecommendationCount: number;
   recommendationShortageCount: number;
   recommendationDropReasons: Array<{
-    code: "outside-window" | "already-drafted" | "evidence-blocked" | "ignored-or-published" | "below-display-limit";
+    code: "outside-window" | "already-drafted" | "evidence-blocked" | "ignored-or-published" | "below-display-limit" | "routine-update";
     label: string;
     count: number;
   }>;
@@ -225,9 +231,15 @@ export interface TodayFunnel {
 }
 
 export interface TodayView {
+  /** Official tutorials are retained separately from time-sensitive news. */
+  knowledge?: StoryView[];
   generatedAt: string;
+  /** Recent official announcements, including leads still awaiting the original page. */
+  releaseHighlights?: StoryView[];
   mustReads: StoryView[];
   secondary: StoryView[];
+  interesting?: StoryView[];
+  selectionMode?: "focused" | "balanced";
   backlog: StoryView[];
   watching: StoryView[];
   diagnostics: TodaySourceDiagnostic[];
@@ -251,6 +263,8 @@ export interface EvidenceClaim {
   sourceSignalIds: string[];
   sourceUrls?: string[];
   note?: string;
+  /** Exact source passages validated before the selected article is frozen. */
+  quotations?: Array<{ sourceUrl: string; text: string }>;
 }
 
 export interface DiscussionSample {
@@ -314,6 +328,7 @@ export interface ContentPackageSource {
  * verified fact.
  */
 export interface SourceMaterialSnapshot {
+  blocks?: import("./types.js").ExtractedPage["blocks"];
   signalId: string;
   sourceKind: "community-post" | "linked-page" | "article";
   sourceLabel: string;
@@ -330,6 +345,7 @@ export interface SourceMaterialSnapshot {
 }
 
 export interface ContentPackage {
+  technicalArticle?: import("./technical-article.js").TechnicalArticlePolicy;
   id: string;
   storyId: string;
   mode: Exclude<AssignmentMode, "watch" | "skip">;
@@ -346,6 +362,8 @@ export interface ContentPackage {
   sources: ContentPackageSource[];
   /** Present only when the editor explicitly asks for a source working copy. */
   sourceMaterials?: SourceMaterialSnapshot[];
+  /** Read-only evidence for news writing; does not authorize a source working copy. */
+  sourceEvidence?: SourceMaterialSnapshot[];
   imageIds: string[];
   assets: AssetCandidate[];
   uncertainties: string[];
@@ -353,4 +371,13 @@ export interface ContentPackage {
   communityEvidenceLabel: string;
   status: "ready" | "blocked";
   blockers: string[];
+}
+
+export interface PackageSourceEvidence {
+  facts: EvidenceClaim[];
+  sources: ContentPackageSource[];
+  snapshots: SourceMaterialSnapshot[];
+  uncertainties: string[];
+  /** Current article images; historical recommendations remain in their original records. */
+  imageUrls?: string[];
 }

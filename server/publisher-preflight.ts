@@ -1,3 +1,4 @@
+import { imagePostCapacity, normalizePublisherTopics } from "./xiaoheihe-format.js";
 import { randomUUID } from "node:crypto";
 
 export type PublisherAdapterMode = "chrome-extension" | "cdp";
@@ -262,6 +263,7 @@ export const evaluatePublisherPreflight = (
   const protocolVersion = versionFromRuntime(input.runtime);
   const protocolRequired = input.runtime.mode === "chrome-extension";
   const bodyText = textFromHtml(input.draft.bodyHtml);
+  const topics = normalizePublisherTopics(input.draft.topics);
   const capabilities: PublisherCapability[] = [
     {
       id: "transport",
@@ -362,7 +364,7 @@ export const evaluatePublisherPreflight = (
     {
       id: "images",
       label: "图片",
-      status: isImagePost && input.draft.images.length !== 1
+      status: isImagePost && (input.draft.images.length < 1 || input.draft.images.length > imagePostCapacity)
         ? "blocked"
         : input.draft.images.length === 0
           ? "warning"
@@ -370,20 +372,20 @@ export const evaluatePublisherPreflight = (
             ? "pass"
             : "blocked",
       required: isImagePost || input.draft.images.length > 0,
-      detail: isImagePost && input.draft.images.length !== 1
-        ? `图文稿必须恰好上传 1 张图片，当前为 ${input.draft.images.length} 张`
+      detail: isImagePost && (input.draft.images.length < 1 || input.draft.images.length > imagePostCapacity)
+        ? `工作台图文支持 1–18 张图片，当前为 ${input.draft.images.length} 张`
         : input.draft.images.length
           ? `${input.draft.images.filter((image) => image.available).length}/${input.draft.images.length} 张可读取`
           : "本稿未配置图片",
-      issueCode: isImagePost && input.draft.images.length !== 1
+      issueCode: isImagePost && (input.draft.images.length < 1 || input.draft.images.length > imagePostCapacity)
         ? "PREFLIGHT_IMAGE_POST_IMAGE_COUNT"
         : input.draft.images.length === 0
           ? "PREFLIGHT_IMAGES_EMPTY"
           : input.draft.images.every((image) => image.available)
             ? undefined
             : "PREFLIGHT_IMAGES_MISSING",
-      action: isImagePost && input.draft.images.length !== 1
-        ? "在图文稿正文中只保留 1 张待上传图片后重新检查。"
+      action: isImagePost && (input.draft.images.length < 1 || input.draft.images.length > imagePostCapacity)
+        ? "在图集选择 1–18 张原图，并确认顺序。"
         : input.draft.images.length === 0
           ? "建议从原文或已核验素材库补充至少一张配图。"
           : "重新下载缺失图片，或从正文中移除对应图片位置。",
@@ -413,32 +415,36 @@ export const evaluatePublisherPreflight = (
     {
       id: "topics",
       label: "关联话题",
-      status: input.draft.topics.length > 5
+      status: topics.length > 5
         ? "blocked"
-        : input.draft.topics.length > 0
+        : topics.length > 0
           ? "pass"
           : isImagePost
             ? "warning"
             : "blocked",
       required: !isImagePost,
-      detail: input.draft.topics.length > 5
-        ? `已选 ${input.draft.topics.length} 个，平台最多 5 个`
-        : input.draft.topics.length
-          ? `已选 ${input.draft.topics.length} 个`
+      detail: topics.length > 5
+        ? `已选 ${topics.length} 个，平台最多 5 个`
+        : topics.length
+          ? `已选 ${topics.length} 个`
           : isImagePost
-            ? "本篇未选择话题；图文测试不会自动生成标签"
+            ? "本篇未选择话题；不会自动生成标签"
             : "尚未选择话题",
-      issueCode: input.draft.topics.length > 5
+      issueCode: topics.length > 5
         ? "PREFLIGHT_TOPICS_TOO_MANY"
-        : input.draft.topics.length === 0 && !isImagePost
+        : topics.length === 0 && !isImagePost
           ? "PREFLIGHT_TOPICS_MISSING"
-          : input.draft.topics.length === 0
+          : topics.length === 0
             ? "PREFLIGHT_TOPICS_SKIPPED"
           : undefined,
       action: "选择 1–5 个已在小黑盒确认过的话题。",
     },
   ];
 
+  if (isImagePost && input.runtime.mode === "cdp") {
+    const protocol = capabilities.find(capability => capability.id === "protocol")!;
+    Object.assign(protocol, { label: "图文通道", status: "blocked", required: true, detail: "图文图集需要常用 Chrome 填入助手；CDP 备用通道仅支持文章", issueCode: "PREFLIGHT_IMAGE_POST_EXTENSION_REQUIRED", action: "切换到常用 Chrome 填入助手" });
+  }
   const blocking: PublisherPreflightIssue[] = capabilities
     .filter((capability) => capability.status === "blocked")
     .map((capability) => ({

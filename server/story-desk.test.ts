@@ -161,6 +161,44 @@ test("legacy fixed-field explanations remain readable but request a v2 editorial
   assert.equal(story?.explanation.readerBrief, "Acme 发布了 Model X，并开放 API。");
 });
 
+test("focused Today does not promote a high-score registration page to fill recommendation slots", () => {
+  const state = createDefaultState();
+  state.runs = [run("run-noise", [candidate("webinar", {
+    title: "Join our AI webinar: register now", excerpt: "A weekly workshop for founders.",
+    briefing: undefined, recommendationScore: 99, url: "https://acme.example/webinar", canonicalUrl: "https://acme.example/webinar",
+  })])];
+  const view = buildTodayView(state, "2026-08-30T02:00:00Z");
+  assert.equal([...view.mustReads, ...view.secondary].length, 0);
+  assert.ok(view.funnel.recommendationDropReasons.some((reason) => reason.code === "routine-update"));
+});
+
+test("focused observation also hides routine recruiting leads while broad browsing keeps them", () => {
+  const state = createDefaultState();
+  state.runs = [run("recruiting", [candidate("job", {
+    title: "Acme is hiring an engineer", briefing: undefined, excerpt: "Join our engineering team.",
+    sourceRole: "community", sourceType: "hackernews", sourceName: "Hacker News",
+    url: "https://news.ycombinator.com/item?id=jobs", canonicalUrl: undefined,
+  })])];
+  assert.equal(buildTodayView(state, "2026-08-30T02:00:00Z").watching.length, 0);
+  state.settings.recommendationMode = "balanced";
+  assert.equal(buildTodayView(state, "2026-08-30T02:00:00Z").watching.length, 1);
+});
+
+test("Today applies current feedback to order without changing factual or popularity scores", () => {
+  const state = createDefaultState();
+  const one = candidate("one", { title: "Orion reduces inference pricing by half", briefing: undefined, url: "https://acme.example/pricing", canonicalUrl: "https://acme.example/pricing" });
+  const two = candidate("two", { title: "Nebula releases offline coding software", briefing: undefined, url: "https://acme.example/coding", canonicalUrl: "https://acme.example/coding", recommendationScore: 79.5 });
+  state.runs = [run("preference", [one, two])];
+  state.candidateFeedback = [{ id: "feedback-two", runId: "preference", candidateId: "two", kind: "interested", sourceName: "Official", title: two.title, topicIds: ["ai"], keywords: [], createdAt: "2026-08-30T01:30:00Z" }];
+  const before = JSON.stringify(state.runs);
+  const enabled = buildStories(state, "2026-08-30T02:00:00Z");
+  assert.equal(enabled[0].originalTitle, two.title);
+  state.settings.personalizationEnabled = false;
+  const disabled = buildStories(state, "2026-08-30T02:00:00Z");
+  assert.equal(disabled[0].originalTitle, one.title);
+  assert.equal(JSON.stringify(state.runs), before);
+});
+
 test("StoryDesk merges a versioned model release across platform and community titles", () => {
   const state = createDefaultState();
   state.runs = [run("run-fable", [
@@ -409,6 +447,7 @@ test("an officially announced upcoming model stays a preview with unknown fields
 
 test("today excludes unhandled stories after the 48-hour editorial window", () => {
   const state = createDefaultState();
+  state.settings.recommendationMode = "balanced";
   state.runs = [run("run-1", [
     candidate("recent", {
       title: "Acme ships a recent model update",
@@ -471,6 +510,72 @@ test("today keeps a confirmed first-party model launch visible for a seven-day c
   assert.equal(visible[0]?.originalTitle, "Anthropic released Claude Fable 5.1");
   assert.equal(visible[0]?.releaseDossier?.releaseStatus, "released");
   assert.equal(today.backlog.length, 0);
+});
+
+test("older supporting documentation cannot age a fresh model launch out of Today", () => {
+  const state = createDefaultState();
+  const launch = candidate("astra-release", {
+    sourceName: "OpenAI", title: "OpenAI released GPT-6 Astra",
+    url: "https://openai.com/index/gpt-6-astra/", canonicalUrl: undefined,
+    publishedAt: "2026-09-03T18:00:00Z", fetchedAt: "2026-09-04T00:00:00Z",
+    excerpt: "OpenAI released GPT-6 Astra, available now through the API.",
+    briefing: { titleZh: "OpenAI 发布 GPT-6 Astra", summaryZh: "OpenAI 正式发布 GPT-6 Astra。", basis: "full-source", generatedAt: "2026-09-04T00:00:00Z", providerId: "test" },
+  });
+  const background = candidate("old-doc", {
+    sourceName: "OpenAI", title: "Getting started with ChatGPT", briefing: undefined,
+    url: "https://openai.com/academy/getting-started", canonicalUrl: undefined,
+    publishedAt: "2026-07-10T00:00:00Z", fetchedAt: "2026-09-04T01:00:00Z",
+    evidenceRelation: "research-material", evidenceGroupUrl: launch.url,
+  });
+  state.runs = [run("release", [launch]), run("research", [background])];
+  const today = buildTodayView(state, "2026-09-05T00:00:00Z");
+  assert.equal(today.mustReads[0]?.originalTitle, launch.title);
+  assert.equal(today.mustReads[0]?.publishedAt, "2026-09-03T18:00:00.000Z");
+  assert.ok(today.mustReads[0]?.signals.some((entry) => entry.candidateId === background.id));
+});
+
+test("a shared research page does not merge two unrelated events or change their identities", () => {
+  const state = createDefaultState();
+  const first = candidate("event-one", { title: "Acme opens a robotics lab", url: "https://acme.example/robotics", canonicalUrl: undefined, briefing: undefined });
+  const second = candidate("event-two", { title: "Zeta reduces cloud storage prices", url: "https://zeta.example/storage", canonicalUrl: undefined, briefing: undefined });
+  state.runs = [run("events", [first, second])];
+  const idsBefore = buildStories(state).map((story) => story.id).sort();
+  state.runs.push(run("research", [first, second].map((event, index) => candidate(`doc-${index}`, {
+    title: "A shared reference manual", briefing: undefined,
+    url: "https://docs.example/manual", canonicalUrl: undefined,
+    fetchedAt: "2026-08-30T02:00:00Z", publishedAt: "2026-07-01T00:00:00Z",
+    evidenceRelation: "research-material", evidenceGroupUrl: event.url,
+  }))));
+  const stories = buildStories(state);
+  assert.deepEqual(stories.map((story) => story.id).sort(), idsBefore);
+  for (const story of stories) {
+    assert.equal(story.signals.filter((signal) => signal.url === "https://docs.example/manual").length, 1);
+    assert.equal(story.signals.filter((signal) => /event-/.test(signal.candidateId)).length, 1);
+  }
+});
+
+test("recent official launch leads remain visible while original-link verification is pending", () => {
+  const state = createDefaultState();
+  state.runs = [run("discovery", [candidate("claude-launch", {
+    sourceName: "Anthropic", title: "Introducing Claude Fable 5.1 and Claude Mythos 5.1 - Anthropic",
+    url: "https://news.google.com/rss/articles/official-announcement", canonicalUrl: undefined,
+    publishedAt: "2026-09-01T18:00:00Z", fetchedAt: "2026-09-04T00:00:00Z",
+    briefing: { titleZh: "Anthropic 发布 Claude Fable 5.1 和 Mythos 5.1", summaryZh: "官方发布消息，原文待读取。", basis: "excerpt", providerId: "test", generatedAt: "2026-09-04T00:00:00Z" },
+  })])];
+  const today = buildTodayView(state, "2026-09-05T00:00:00Z");
+  assert.equal(today.releaseHighlights?.[0]?.originalTitle, state.runs[0]?.candidates[0]?.title);
+  assert.equal(today.releaseHighlights?.[0]?.releaseDossier?.facets[0]?.status, "partial");
+});
+
+test("release highlights exclude routine CLI builds and vendor articles that do not announce a model", () => {
+  const state = createDefaultState();
+  const recent = { publishedAt: "2026-09-04T12:00:00Z", fetchedAt: "2026-09-04T13:00:00Z", briefing: undefined, canonicalUrl: undefined };
+  state.runs = [run("routine", [
+    candidate("nightly", { ...recent, sourceName: "Gemini", title: "Gemini CLI released 0.60.0 nightly", url: "https://github.com/google-gemini/gemini-cli/releases/0.60.0" }),
+    candidate("same-build", { ...recent, sourceName: "Gemini", title: "Gemini CLI released 0.60.0", url: "https://github.com/google-gemini/gemini-cli/releases/0.60.0" }),
+    candidate("vendor-article", { ...recent, sourceName: "Anthropic", title: "Introducing Claude Commerce Agents", url: "https://www.anthropic.com/news/commerce-agents" }),
+  ])];
+  assert.equal(buildTodayView(state, "2026-09-05T00:00:00Z").releaseHighlights?.length, 0);
 });
 
 test("StoryDesk counts only existing local files and requires both platforms for publication readiness", () => {
@@ -552,6 +657,7 @@ test("StoryDesk counts only existing local files and requires both platforms for
 
 test("today recommendations show each available source before repeating one", () => {
   const state = createDefaultState();
+  state.settings.recommendationMode = "balanced";
   const storyCandidate = (id: string, sourceName: string, recommendationScore: number, publishedAt: string) => candidate(id, {
     sourceName,
     title: `Unique story ${id}`,
@@ -644,4 +750,63 @@ test("Story id remains stable when extraction adds a canonical URL", () => {
 
   assert.ok(before);
   assert.equal(after?.id, before.id);
+});
+
+for (const verb of ["launches", "announces", "introduces"]) test(`StoryDesk merges ${verb} coverage into its model announcement, preserving follow-up events`, () => {
+  const state = createDefaultState();
+  const official = candidate("official-astra", {
+    sourceName: "OpenAI", title: "Introducing Astra", briefing: undefined,
+    url: "https://openai.com/index/astra", canonicalUrl: undefined,
+  });
+  state.runs = [run("launch", [official])];
+  const originalId = buildStories(state)[0]!.id;
+  state.runs.push(run("coverage", [
+    candidate("media-astra", {
+      sourceName: "Tech newsroom", sourceRole: "verification",
+      title: `OpenAI ${verb} Astra, its powerful new model`, briefing: undefined,
+      url: "https://news.example/astra-launch", canonicalUrl: undefined, fetchedAt: "2026-08-30T01:30:00Z",
+    }),
+    candidate("follow-up", {
+      title: "Astra service outage locks out paying users", briefing: undefined,
+      url: "https://news.example/astra-outage", canonicalUrl: undefined, fetchedAt: "2026-08-30T02:00:00Z",
+    }),
+  ]));
+  const stories = buildStories(state, "2026-08-30T03:00:00Z");
+  assert.equal(stories.length, 2);
+  assert.equal(stories.find((story) => story.signals.some((signal) => signal.candidateId === "media-astra"))?.id, originalId);
+  assert.equal(stories.find((story) => story.signals.some((signal) => signal.candidateId === "follow-up"))?.signals.length, 1);
+});
+
+test("official guides and workshops cannot borrow launch priority from model availability in the body", () => {
+  const state = createDefaultState();
+  state.runs = [run("guides", [
+    candidate("guide", {
+      sourceName: "Anthropic", title: "Enterprise Readiness: A CISO's Guide to Deploying Claude - Anthropic",
+      briefing: undefined, excerpt: "Claude is generally available. This guide explains enterprise setup.",
+      url: "https://www.anthropic.com/enterprise-guide", canonicalUrl: undefined,
+    }),
+    candidate("workshop", {
+      sourceName: "Anthropic", title: "Join our Claude Fable 5.1 webinar", briefing: undefined,
+      excerpt: "Claude Fable 5.1 is generally available. Register for this workshop.",
+      url: "https://www.anthropic.com/webinar", canonicalUrl: undefined,
+    }),
+  ])];
+  const stories = buildStories(state, "2026-08-30T03:00:00Z");
+  assert.equal(stories.find((story) => story.originalTitle.includes("CISO"))?.opportunity?.lane, "interesting");
+  assert.equal(stories.find((story) => story.originalTitle.includes("webinar"))?.opportunity?.lane, "routine");
+});
+
+test("focused Today reserves a small discovery section without manufacturing heat or hiding filtered counts", () => {
+  const state = createDefaultState();
+  const titles = ["How I built an offline coding assistant", "Porting a 1993 Amiga game to Godot", "A hands-on benchmark of local inference", "复现老游戏里的守卫行为"];
+  state.runs = [run("useful", titles.map((title, index) => candidate(`useful-${index}`, {
+    title, briefing: undefined, url: `https://project-${index}.example/guide`, canonicalUrl: undefined,
+    excerpt: `Documented practice: ${title}`, heatScore: 0,
+  })))];
+  const today = buildTodayView(state, "2026-08-30T03:00:00Z");
+  assert.equal(today.interesting?.length, 2);
+  assert.ok(today.interesting?.every((story) => story.assignment.canDraft && story.signals.every((signal) => !signal.engagement)));
+  assert.ok(state.runs[0]!.candidates.every((entry) => entry.heatScore === 0));
+  assert.equal(today.funnel.visibleRecommendationCount, 2);
+  assert.equal(today.funnel.recommendationDropReasons.find((reason) => reason.code === "below-display-limit")?.count, 2);
 });

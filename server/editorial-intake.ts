@@ -105,12 +105,12 @@ export const inspectEditorialIntake = (
   const canAnalyzeCommunity = story.assignment.canDraft
     && story.factSourceCount > 0
     && story.communitySampleCount >= 5;
-  const recommendedIntent: EditorialIntent = sourceKind === "self-contained-community" ? "source" : "news";
-  const recommendationReason = sourceKind === "linked-community"
+  const recommendedIntent: EditorialIntent = story.technicalArticle || sourceKind === "self-contained-community" ? "source" : "news";
+  const recommendationReason = story.technicalArticle?.reason ?? (sourceKind === "linked-community"
     ? "这是一条带外部来源的社区线索；应先读取外部页面并把事件写清，评论只作补充。"
     : sourceKind === "self-contained-community"
       ? "主帖本身承载内容；优先保留作者叙事，只有明确选择时才分析评论。"
-      : "来源直接描述新闻事件；默认生成简洁、可回指证据的新闻稿。";
+      : "来源直接描述新闻事件；默认生成简洁、可回指证据的新闻稿。");
   const options = [
     option("news", newsModeFor(story), canWriteNews, canWriteNews
       ? "已有可建立事实主干的来源。"
@@ -168,8 +168,8 @@ export const createEditorialIntakeDesk = (overrides: Partial<EditorialIntakeDepe
     async createDraft(input: EditorialDraftRequest, progress?: EditorialProgressReporter): Promise<EditorialDraftResult> {
       progress?.(0.04, "识别来源与推荐稿型");
       let view = await open(input);
-      if (view.intake.sourceKind === "linked-community" && view.story.explanation.status !== "ready") {
-        progress?.(0.1, "读取社区帖子指向的原始来源");
+      if ((view.intake.sourceKind === "linked-community" || view.story.technicalArticle) && view.story.explanation.basis !== "full-source") {
+        progress?.(0.1, "读取原始来源正文");
         await dependencies.enrichExplanation(view.story.id);
         view = await open(input);
       }

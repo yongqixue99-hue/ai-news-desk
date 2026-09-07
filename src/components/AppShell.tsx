@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   Bot,
@@ -54,9 +54,10 @@ interface AppShellProps {
 const getInitialCollapsed = () => {
   try {
     const saved = window.localStorage.getItem(SHELL_PREFERENCE_KEY);
-    return saved ? Boolean((JSON.parse(saved) as { collapsed?: boolean }).collapsed) : true;
+    const preference = saved ? JSON.parse(saved) as { collapsed?: boolean } : undefined;
+    return typeof preference?.collapsed === "boolean" ? preference.collapsed : false;
   } catch {
-    return true;
+    return false;
   }
 };
 
@@ -74,7 +75,9 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(getInitialCollapsed);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
-  const automationActive = page === "schedule" || page === "runs";
+  const mobileMoreRef = useRef<HTMLDivElement>(null);
+  const mobileMoreButtonRef = useRef<HTMLButtonElement>(null);
+  const automationActive = page === "schedule";
   const mobileMoreActive = mobileMoreNavigation.some((item) => item.id === page);
   const unreadCount = unreadNotificationCount(notifications);
   const badgeCount = notificationsMuted ? 0 : unreadCount;
@@ -83,14 +86,18 @@ export function AppShell({
     : unreadCount ? `打开通知中心，${unreadCount} 条未读` : "打开通知中心，没有未读通知";
 
   useEffect(() => {
-    window.localStorage.setItem(SHELL_PREFERENCE_KEY, JSON.stringify({ collapsed }));
+    try {
+      window.localStorage.setItem(SHELL_PREFERENCE_KEY, JSON.stringify({ collapsed }));
+    } catch {
+      // Storage restrictions must not prevent reading or editing local articles.
+    }
   }, [collapsed]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "b") return;
       const target = event.target as HTMLElement | null;
-      if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+      if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
       event.preventDefault();
       setCollapsed((current) => !current);
     };
@@ -101,11 +108,23 @@ export function AppShell({
   useEffect(() => {
     if (!mobileMoreOpen) return;
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileMoreOpen(false);
+      if (event.key === "Escape") {
+        setMobileMoreOpen(false);
+        mobileMoreButtonRef.current?.focus();
+      }
+    };
+    const handleOutside = (event: PointerEvent) => {
+      if (!mobileMoreRef.current?.contains(event.target as Node)) setMobileMoreOpen(false);
     };
     window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
+    window.addEventListener("pointerdown", handleOutside);
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+      window.removeEventListener("pointerdown", handleOutside);
+    };
   }, [mobileMoreOpen]);
+
+  useEffect(() => { setMobileMoreOpen(false); }, [page]);
 
   const navigate = (nextPage: AppPage) => {
     setMobileMoreOpen(false);
@@ -141,7 +160,7 @@ export function AppShell({
             onClick={() => collapsed ? setCollapsed(false) : navigate("today")}
           >
             <span className="brand-mark" aria-hidden="true">{collapsed ? <PanelLeftOpen size={18} /> : <Newspaper size={20} />}</span>
-            <span>AI 新闻台</span>
+            <span className="brand-copy">AI 新闻台<small>NEWS DESK</small></span>
           </button>
           {!collapsed ? (
             <button
@@ -159,6 +178,7 @@ export function AppShell({
         </div>
 
         <nav className="main-nav" aria-label="主导航">
+          <span className="nav-section-label">每日编辑</span>
           {navigation.map((item) => {
             const Icon = item.icon;
             return (
@@ -193,9 +213,9 @@ export function AppShell({
             <button
               type="button"
               className={automationActive ? "nav-item active" : "nav-item"}
-              aria-label={page === "runs" ? "自动化，当前为运行记录" : "自动化"}
+              aria-label="自动化"
               aria-current={automationActive ? "page" : undefined}
-              title={collapsed ? (page === "runs" ? "自动化 · 运行记录" : "自动化") : undefined}
+              title={collapsed ? "自动化" : undefined}
               onClick={() => navigate("schedule")}
             >
               <Zap size={19} strokeWidth={1.8} />
@@ -203,12 +223,17 @@ export function AppShell({
             </button>
           </div>
 
-          <div className={`mobile-more-nav${mobileMoreOpen ? " open" : ""}`}>
+          <button type="button" className={page === "runs" ? "nav-item nav-item-runs active" : "nav-item nav-item-runs"} aria-label="运行记录" aria-current={page === "runs" ? "page" : undefined} title={collapsed ? "运行记录" : undefined} onClick={() => navigate("runs")}>
+            <History size={19} strokeWidth={1.8} /><span>运行记录</span>
+          </button>
+
+          <div ref={mobileMoreRef} className={`mobile-more-nav${mobileMoreOpen ? " open" : ""}`}>
             <button
+              ref={mobileMoreButtonRef}
               type="button"
               className={mobileMoreActive ? "nav-item active" : "nav-item"}
               aria-label="更多功能"
-              aria-haspopup="menu"
+              aria-controls="mobile-more-panel"
               aria-expanded={mobileMoreOpen}
               onClick={() => setMobileMoreOpen((current) => !current)}
             >
@@ -216,13 +241,12 @@ export function AppShell({
               <span>更多</span>
             </button>
             {mobileMoreOpen ? (
-              <div className="mobile-more-menu" role="menu" aria-label="更多功能">
+              <div id="mobile-more-panel" className="mobile-more-menu" aria-label="更多功能">
                 {mobileMoreNavigation.map((item) => {
                   const Icon = item.icon;
                   return (
                     <button
                       type="button"
-                      role="menuitem"
                       key={item.id}
                       className={page === item.id ? "active" : undefined}
                       aria-current={page === item.id ? "page" : undefined}

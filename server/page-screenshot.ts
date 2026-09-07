@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { chromium } from "playwright-core";
+import { chromium, type Page } from "playwright-core";
 import { validateRemoteUrl } from "./remote-url.js";
 import { workflowMediaRoot } from "./storage.js";
 import type { SourceImage } from "./types.js";
@@ -17,8 +17,6 @@ const browserCandidates = process.platform === "darwin"
       "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
     ]
     : ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
-
-const screenshotNoise = /logo|icon|avatar|emoji|tracking|pixel|spinner|loading|sprite|favicon|author|profile|badge|button|advert|banner/i;
 
 const browserExecutable = async () => {
   for (const candidate of browserCandidates) {
@@ -132,8 +130,8 @@ const saveScreenshot = async (
 ) => {
   const targetDirectory = path.join(workflowMediaRoot, draftId);
   await mkdir(targetDirectory, { recursive: true });
-  const id = `page_shot_${createHash("sha1")
-    .update(`${sourceUrl}:${index}:${bytes.byteLength}`)
+  const id = `page_shot_${createHash("sha256")
+    .update(sourceUrl).update(bytes)
     .digest("hex")
     .slice(0, 12)}`;
   const fileName = `${id}.png`;
@@ -150,25 +148,85 @@ const saveScreenshot = async (
     sourceUrl,
     width,
     height,
-    selected: true,
+    selected: index < 3,
+    fingerprint: createHash("sha256").update(bytes).digest("hex"),
+    editorialPriority: 2,
+    editorialOrigin: "article-screenshot",
     rights: "editorial-screenshot",
     evidenceNote: "自动渲染来源网页所得的评论性截图；发布前需确认引用范围并保留来源。",
     evidencePath: localPath,
   } satisfies SourceImage;
 };
 
+interface RenderedArticleFigure {
+  bytes: Buffer;
+  caption: string;
+  kind: "image" | "chart" | "table";
+  originalImageUrl?: string;
+  width: number;
+  height: number;
+}
+
+/** Crop the figure, including its legend/caption. Pure page seam for browser
+ * regression tests; navigation and public-network validation stay with callers. */
+export const captureArticleFigures = async (page: Page, options: { limit: number; chartsOnly?: boolean }): Promise<RenderedArticleFigure[]> => {
+  const targets = await page.evaluate(({ chartsOnly }) => {
+    const root = document.querySelector("article") || document.querySelector("main, [role='main']") || document.body;
+    const seen = new Set<Element>();
+    const results: Array<{ key: string; caption: string; kind: "image" | "chart" | "table"; originalImageUrl?: string }> = [];
+    const noise = /logo|icon|avatar|emoji|tracking|spinner|sprite|favicon|badge|advert/i;
+    for (const element of [...root.querySelectorAll("figure, table, svg, canvas, img, [data-chart], [role='img']")].slice(0, 240)) {
+      if (element.closest("nav, footer, aside, [role='navigation'], [aria-label*='Related'], [class*='related-'], [class*='recommendation']")) continue;
+      const target = element.closest("figure") || element;
+      if (seen.has(target)) continue;
+      const table = target.matches("table") || Boolean(target.querySelector("table"));
+      const box = target.getBoundingClientRect();
+      const chart = (target.matches("svg,canvas,[data-chart],[role='img']:not(img)") && box.width >= 320 && box.height >= 120)
+        || [...target.querySelectorAll("svg,canvas,[data-chart]")].some((node) => { const rect = node.getBoundingClientRect(); return rect.width >= 320 && rect.height >= 120; });
+      const img = target.matches("img") ? target as HTMLImageElement : target.querySelector("img");
+      if (!table && !chart && (!img || chartsOnly)) continue;
+      if (box.width < 320 || box.height < 120 || box.height > 2_400 || getComputedStyle(target).visibility === "hidden" || getComputedStyle(target).display === "none") continue;
+      const alt = img?.alt || "";
+      const src = img?.currentSrc || img?.src || "";
+      if (!table && !chart && noise.test(`${alt} ${src} ${target.getAttribute("class") || ""}`)) continue;
+      seen.add(target);
+      const key = `figure-${results.length}`;
+      target.setAttribute("data-desk-figure", key);
+      const caption = (target.querySelector("figcaption, caption")?.textContent
+        || target.getAttribute("aria-label") || img?.alt || target.querySelector("h2,h3,h4,svg title")?.textContent
+        || (table ? "原文评测表格" : chart ? "原文能力图表" : "原文配图"))
+        .replace(/\s+/g, " ").trim().slice(0, 240);
+      results.push({ key, caption, kind: table ? "table" : chart ? "chart" : "image", originalImageUrl: /^https?:/.test(src) ? src : undefined });
+    }
+    return results;
+  }, { chartsOnly: options.chartsOnly });
+  const figures: RenderedArticleFigure[] = [];
+  for (const target of targets) {
+    if (figures.length >= Math.max(0, Math.min(12, options.limit))) break;
+    const region = page.locator(`[data-desk-figure="${target.key}"]`);
+    try {
+      await region.scrollIntoViewIfNeeded({ timeout: 3_000 });
+      await page.waitForTimeout(120);
+      const bytes = await region.screenshot({ type: "png", animations: "disabled", timeout: 5_000 });
+      if (bytes.length < 500) continue;
+      figures.push({ ...target, bytes, width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
+    } catch { /* One lazy/removed figure must not discard the rest of the article. */ }
+  }
+  return figures;
+};
+
 /**
- * Renders a source page only when direct image extraction was insufficient.
- * Prefer screenshots of meaningful article images; fall back to one visible
- * article viewport so a private draft never silently becomes text-only.
+ * Renders real article figures and benchmark tables. A blocked/empty page
+ * returns no material; a site header or challenge screen is never a source image.
  */
 export const captureRenderedPageImages = async (
   rawUrl: string,
   draftId: string,
   requestedLimit = 3,
+  options: { chartsOnly?: boolean } = {},
 ): Promise<SourceImage[]> => {
   const sourceUrl = (await validateRemoteUrl(rawUrl)).toString();
-  const limit = Math.max(0, Math.min(4, Math.floor(requestedLimit)));
+  const limit = Math.max(0, Math.min(12, Math.floor(requestedLimit)));
   if (!limit) return [];
   const browser = await chromium.launch({
     executablePath: await browserExecutable(),
@@ -177,7 +235,7 @@ export const captureRenderedPageImages = async (
   });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 960 },
-    deviceScaleFactor: 1,
+    deviceScaleFactor: 1.5,
     javaScriptEnabled: true,
     serviceWorkers: "block",
   });
@@ -189,7 +247,8 @@ export const captureRenderedPageImages = async (
   });
 
   try {
-    await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    const response = await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    if (!response?.ok()) throw new Error(`来源网页截图失败：HTTP ${response?.status() ?? "unknown"}`);
     const finalUrl = (await validateRemoteUrl(page.url())).toString();
     await page.waitForTimeout(800);
     const scrollHeight = await page.evaluate(() => document.documentElement.scrollHeight);
@@ -199,54 +258,11 @@ export const captureRenderedPageImages = async (
     }
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
 
-    const locator = page.locator("article img, main img, [role='main'] img, body img");
-    const count = Math.min(80, await locator.count());
+    const figures = await captureArticleFigures(page, { limit, ...options });
     const images: SourceImage[] = [];
-    for (let index = 0; index < count && images.length < limit; index += 1) {
-      const image = locator.nth(index);
-      if (!await image.isVisible().catch(() => false)) continue;
-      const metadata = await image.evaluate((element) => ({
-        alt: element.getAttribute("alt") || "",
-        src: element.getAttribute("currentSrc") || element.getAttribute("src") || "",
-        className: element.getAttribute("class") || "",
-      })).catch(() => ({ alt: "", src: "", className: "" }));
-      if (screenshotNoise.test(`${metadata.alt} ${metadata.src} ${metadata.className}`)) continue;
-      const box = await image.boundingBox();
-      if (!box || box.width < 320 || box.height < 180) continue;
-      await image.scrollIntoViewIfNeeded().catch(() => undefined);
-      await page.waitForTimeout(120);
-      const bytes = await image.screenshot({ type: "png", animations: "disabled" }).catch(() => undefined);
-      if (!bytes || bytes.byteLength < 4_000) continue;
-      const caption = metadata.alt.trim().slice(0, 180) || `来源网页截图 ${images.length + 1}`;
-      images.push(await saveScreenshot(
-        bytes,
-        draftId,
-        images.length,
-        finalUrl,
-        caption,
-        Math.round(box.width),
-        Math.round(box.height),
-      ));
-    }
-
-    if (!images.length) {
-      await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-      const article = page.locator("article, main, [role='main']").first();
-      if (await article.count()) {
-        const box = await article.boundingBox().catch(() => undefined);
-        if (box) await page.evaluate((top) => window.scrollTo({ top, behavior: "instant" }), Math.max(0, box.y));
-      }
-      await page.waitForTimeout(150);
-      const bytes = await page.screenshot({ type: "png", fullPage: false, animations: "disabled" });
-      images.push(await saveScreenshot(
-        bytes,
-        draftId,
-        0,
-        finalUrl,
-        "来源网页首屏截图",
-        1440,
-        960,
-      ));
+    for (const figure of figures) {
+      const image = await saveScreenshot(figure.bytes, draftId, images.length, finalUrl, figure.caption, figure.width, figure.height);
+      images.push({ ...image, captureKind: figure.kind, originalImageUrl: figure.originalImageUrl });
     }
     return images;
   } finally {

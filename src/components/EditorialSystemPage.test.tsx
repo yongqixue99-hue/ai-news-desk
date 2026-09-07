@@ -8,6 +8,7 @@ import { EditorialSystemPage } from "./EditorialSystemPage.js";
 
 test("content strategy hands real-time selection off to the Today desk instead of duplicating candidate cards", () => {
   const state = createDefaultState();
+  state.aiSettings.completionProviderId = "";
   const now = new Date().toISOString();
   const view: EditorialSystemView = {
     profile: state.editorialSystem.profile,
@@ -69,6 +70,7 @@ test("content strategy hands real-time selection off to the Today desk instead o
   const markup = renderToStaticMarkup(createElement(EditorialSystemPage, {
     view,
     settings: state.settings,
+    aiSettings: state.aiSettings,
     busy: false,
     onSaveProfile: async () => undefined,
     onDecision: async () => undefined,
@@ -80,11 +82,13 @@ test("content strategy hands real-time selection off to the Today desk instead o
     onDeleteWritingMemory: async () => undefined,
   }));
 
-  assert.match(markup, /实时选题已统一到今日编辑台/u);
   assert.match(markup, /href="#today"/u);
-  assert.match(markup, />打开今日编辑台</u);
+  assert.match(markup, /去选今天的题/u);
   assert.doesNotMatch(markup, /A duplicated real-time candidate title/u);
   assert.doesNotMatch(markup, /当前值得处理的事件|>进入候选池</u);
-  assert.match(markup, /编辑质量基线/u);
-  assert.match(markup, /20\/20/u);
+  assert.match(markup, /规则检查/u);
+  assert.match(markup, /20 \/ 20/u);
+  assert.match(markup, /aria-label="应用写作档案"/u);
+  assert.match(markup, /aria-label="应用写作记忆"/u);
+  assert.match(markup, /请先在 AI 设置中选择一个 Tab 补全模型/u);
 });

@@ -9,9 +9,11 @@ import type {
   SourceMaterialSnapshot,
 } from "./product-types.js";
 import { loadSourceMaterialSnapshots } from "./source-material.js";
+import { storyById } from "./story-desk.js";
+import { preparePackageSourceEvidence } from "./package-source-evidence.js";
 import { getLocalDatabase, readState } from "./storage.js";
 import type { WorkflowState } from "./types.js";
-import { hydrateStoryAssets, type VisualHydrationResult } from "./visual-desk.js";
+import { hydrateStoryAssets, type VisualHydrationOptions, type VisualHydrationResult } from "./visual-desk.js";
 
 interface ContentPackageDeskDependencies {
   readState: () => Promise<WorkflowState>;
@@ -19,11 +21,12 @@ interface ContentPackageDeskDependencies {
   hydrateAssets: (
     storyId: string,
     minimumImages: number,
-    options: { progress?: (value: number, stage: string) => void },
+    options: VisualHydrationOptions,
   ) => Promise<VisualHydrationResult>;
   hydrateDiscussion: (storyId: string) => Promise<DiscussionSample[]>;
   loadSourceMaterials: (state: WorkflowState, storyId: string) => Promise<SourceMaterialSnapshot[]>;
   freezeAssets: typeof freezeContentPackageAssets;
+  prepareArticleEvidence: typeof preparePackageSourceEvidence;
 }
 
 export const createContentPackageDesk = (overrides: Partial<ContentPackageDeskDependencies> = {}) => {
@@ -34,6 +37,7 @@ export const createContentPackageDesk = (overrides: Partial<ContentPackageDeskDe
     hydrateDiscussion: hydrateStoryDiscussion,
     loadSourceMaterials: loadSourceMaterialSnapshots,
     freezeAssets: freezeContentPackageAssets,
+    prepareArticleEvidence: preparePackageSourceEvidence,
     ...overrides,
   };
 
@@ -46,21 +50,28 @@ export const createContentPackageDesk = (overrides: Partial<ContentPackageDeskDe
       editorial?: { intent: EditorialIntent; reason: string },
     ) {
       const initialState = await dependencies.readState();
+      const resolvedMode = requestedMode ?? storyById(initialState, storyId)?.assignment.mode;
+      const resolvedIntent = editorial?.intent ?? (resolvedMode === "community" ? "community" : resolvedMode === "curate" ? "source" : "news");
       const [visualResult, discussionSamples, sourceMaterials] = await Promise.all([
-        dependencies.hydrateAssets(storyId, minimumImages, { progress }),
+        dependencies.hydrateAssets(storyId, minimumImages, { progress, scope: "article" }),
         dependencies.hydrateDiscussion(storyId),
-        editorial?.intent === "source"
+        resolvedIntent === "source"
           ? dependencies.loadSourceMaterials(initialState, storyId)
           : Promise.resolve([]),
       ]);
+      const evidenceState = await dependencies.readState();
+      const articleEvidence = resolvedIntent === "news"
+        ? await dependencies.prepareArticleEvidence(evidenceState, storyId, progress)
+        : undefined;
       progress?.(0.88, "整理事实、社区证据与相关素材");
       const builtPackage = buildContentPackage(await dependencies.readState(), {
         storyId,
         mode: requestedMode,
-        intent: editorial?.intent,
+        intent: resolvedIntent,
         intakeReason: editorial?.reason,
         discussionSamples,
         sourceMaterials,
+        articleEvidence,
       });
       const database = await dependencies.getDatabase();
       database.recordWorkflowEvent({

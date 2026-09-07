@@ -30,6 +30,8 @@ export interface DraftRecoveryStorage {
 type DraftRecoveryContent = Pick<
   ArticleDraft,
   | "title"
+  | "contentFormat"
+  | "imagePostImageIds"
   | "paragraphs"
   | "take"
   | "bodyHtml"
@@ -55,6 +57,8 @@ const RECOVERY_KEY_PREFIX = "ai-news-desk:draft-recovery:v1:";
 export const draftRecoveryKey = (draftId: string) => `${RECOVERY_KEY_PREFIX}${draftId}`;
 
 export const editableDraftContent = (draft: ArticleDraft): DraftRecoveryContent => ({
+  contentFormat: draft.contentFormat,
+  imagePostImageIds: draft.imagePostImageIds,
   title: draft.title,
   paragraphs: draft.paragraphs,
   take: draft.take,

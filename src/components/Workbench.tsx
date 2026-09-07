@@ -237,7 +237,8 @@ export function Workbench({
     now: new Date().toISOString(),
     expiryHours: 48,
     secondaryCount: 4,
-  }), [recommendationRankedCandidates]);
+    recommendationMode: settings.recommendationMode,
+  }), [recommendationRankedCandidates, settings.recommendationMode]);
   const otherCandidateIds = useMemo(
     () => new Set(candidateHome.others.map((candidate) => candidate.id)),
     [candidateHome.others],

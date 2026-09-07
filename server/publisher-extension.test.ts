@@ -37,7 +37,7 @@ test("extension image jobs carry the native Xiaoheihe description", () => {
 });
 
 test("the app rejects extension versions from before reliable article routing", () => {
-  assert.equal(MINIMUM_EXTENSION_VERSION, "0.1.22");
+  assert.equal(MINIMUM_EXTENSION_VERSION, "0.1.23");
 });
 
 test("an article job targets Xiaoheihe's direct article editor instead of the content list", async () => {

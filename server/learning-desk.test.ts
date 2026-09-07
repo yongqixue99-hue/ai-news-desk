@@ -54,6 +54,11 @@ test("writing preferences stay dormant until five effective manual edits and rem
     assert.equal(promotional?.evidenceCount, 5);
     assert.equal(promotional?.applicable, true);
 
+    const paused = writingMemoryView(database, false);
+    assert.equal(paused.memories.some((memory) => memory.applicable), false);
+    assert.equal(paused.effectiveEditCount, 5);
+    assert.equal(paused.memories.find((memory) => memory.id === promotional!.id)?.enabled, true);
+
     database.setEditorialMemoryEnabled(promotional!.id, false);
     assert.equal(writingMemoryView(database).memories.find((memory) => memory.id === promotional!.id)?.applicable, false);
     assert.equal(database.deleteEditorialMemory(promotional!.id), true);

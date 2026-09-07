@@ -599,6 +599,19 @@ test("an applied repair binds newly used fact ids to their frozen source URLs", 
   }]), /素材包之外/);
 });
 
+test("a community discovery sharing the original signal cannot become a second factual source", () => {
+  const original = contentPackage().sources[0]!;
+  const community = { ...contentPackage().sources[1]!, signalId: original.signalId };
+  const packageData = contentPackage({ sources: [original, community] });
+  const claims = reconcileDraftFactEvidence(packageData, [{
+    id: "claim-1", claim: "原始项目由八个专职智能体组成。", factIds: ["fact-1"], status: "cross-confirmed",
+    sourceUrls: [original.url, community.url, "https://unfrozen.example/news"], capturedAt: "2026-09-05T00:00:00Z",
+  }]);
+  assert.deepEqual(claims[0]?.sourceUrls, [original.url]);
+  assert.equal(claims[0]?.sourceLabel, original.label);
+  assert.equal(claims[0]?.status, "full-source");
+});
+
 test("DraftDesk quality gate keeps a genuinely small one-fact brief concise", () => {
   const report = evaluateDraftPackageQuality({ contentPackage: contentPackage(), draft: draft() });
 

@@ -1,10 +1,12 @@
 import type { Candidate } from "./types.js";
 import { interleaveBySource } from "./source-diversity.js";
+import { candidateOpportunity, opportunityPriority } from "./newsworthiness.js";
 
 export interface CandidateHomeOptions {
   now?: string;
   expiryHours?: number;
   secondaryCount?: number;
+  recommendationMode?: "focused" | "balanced";
 }
 
 export interface CandidateHomeComposition {
@@ -35,19 +37,24 @@ export const composeCandidateHome = (
     const publishedAt = Date.parse(candidate.publishedAt);
     const stale = !Number.isFinite(publishedAt)
       || (Number.isFinite(nowMs) && nowMs - publishedAt > expiryMs);
-    if (!stale) current.push(candidate);
+    if (candidate.technicalArticle) protectedStale.push(candidate);
+    else if (!stale) current.push(candidate);
     else if (isEditoriallyActive(candidate)) protectedStale.push(candidate);
     else expired.push(candidate);
   }
 
   const secondaryCount = Math.max(0, Math.floor(options.secondaryCount ?? 4));
   const diversifiedCurrent = interleaveBySource(current, (candidate) => candidate.sourceName);
+  const focused = options.recommendationMode === "focused";
+  const chosen = focused ? [...current].filter((candidate) => candidateOpportunity(candidate).lane !== "routine" || candidate.selected || candidate.userFeedback === "interested")
+    .sort((left, right) => opportunityPriority(candidateOpportunity(right)) - opportunityPriority(candidateOpportunity(left))) : diversifiedCurrent;
+  const promoted = new Set(chosen.slice(0, secondaryCount + 1).map((candidate) => candidate.id));
   const active = [...diversifiedCurrent, ...protectedStale];
   return {
     active,
-    featured: diversifiedCurrent[0],
-    recommended: diversifiedCurrent.slice(1, secondaryCount + 1),
-    others: [...diversifiedCurrent.slice(secondaryCount + 1), ...protectedStale],
+    featured: chosen[0],
+    recommended: chosen.slice(1, secondaryCount + 1),
+    others: [...diversifiedCurrent.filter((candidate) => !promoted.has(candidate.id)), ...protectedStale],
     expired,
   };
 };

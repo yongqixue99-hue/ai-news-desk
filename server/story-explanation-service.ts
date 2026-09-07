@@ -2,7 +2,8 @@ import { buildCandidateBriefingEvidence } from "./candidate-briefing.js";
 import { extractPage } from "./extractor.js";
 import { enrichCandidateBriefings } from "./horizon.js";
 import { extractRenderedPageText } from "./page-screenshot.js";
-import { readState } from "./storage.js";
+import { readState, updateState } from "./storage.js";
+import { applyTechnicalSourceMetadata } from "./technical-article.js";
 import { storyById } from "./story-desk.js";
 import type { SourceRole } from "./types.js";
 
@@ -38,6 +39,10 @@ export const enrichStoryExplanation = async (storyId: string) => {
   const extractedSourceText = new Map<string, string>();
   try {
     const page = await extractPage(candidate.canonicalUrl || candidate.url, 0);
+    if (candidate.technicalArticle) await updateState(current => {
+      const target = current.runs.find(entry => entry.id === run.id)?.candidates.find(entry => entry.id === candidate.id);
+      if (target) applyTechnicalSourceMetadata(target, page);
+    });
     if (page.text.trim().length >= 80) extractedSourceText.set(candidate.id, page.text.slice(0, 12_000));
   } catch {
     try {

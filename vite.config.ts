@@ -14,7 +14,8 @@ export default defineConfig({
         codeSplitting: {
           minSize: 24_000,
           groups: [
-            { name: "react-core", test: /node_modules\/(?:react|react-dom|scheduler)\// },
+            { name: "react-core", test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/ },
+            { name: "article-editor", test: /node_modules[\\/](?:@tiptap[\\/]|prosemirror-|orderedmap[\\/]|rope-sequence[\\/]|w3c-keyname[\\/])/ },
           ],
         },
       },

@@ -10,6 +10,13 @@ test("collection readiness does not claim Chinese briefs are ready when generati
   });
 });
 
+test("official monitoring reports intentionally deferred briefs as successful collection", () => {
+  const result = collectionReadinessLog(18, 0, "official-monitor");
+  assert.equal(result.level, "success");
+  assert.match(result.message, /阅读时/u);
+  assert.doesNotMatch(result.message, /重试/u);
+});
+
 test("scheduled collection uses a 48-hour minimum without shrinking a larger imported window", () => {
   assert.equal(scheduledWindowHoursFor(24), 48);
   assert.equal(scheduledWindowHoursFor(48), 48);

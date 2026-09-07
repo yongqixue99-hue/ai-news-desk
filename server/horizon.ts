@@ -55,9 +55,13 @@ const briefingJobs = new Map<string, Promise<CandidateBriefingEnrichmentResult>>
 export const collectionReadinessLog = (
   candidateCount: number,
   briefingCount: number,
+  purpose?: WorkflowRun["collectionPurpose"],
 ): { message: string; level: "success" | "warning" } => {
   if (candidateCount <= 0) {
     return { message: "采集完成，但没有候选；请查看来源诊断", level: "warning" };
+  }
+  if (purpose === "official-monitor") {
+    return { message: `已收录 ${candidateCount} 条官方候选；阅读时补充正文、中文解读和原图`, level: "success" };
   }
   const completed = Math.max(0, Math.min(candidateCount, Math.floor(briefingCount)));
   if (completed === candidateCount) {
@@ -171,7 +175,7 @@ const probeImages = async (runId: string, signal?: AbortSignal) => {
     while (!signal?.aborted && cursor < topCandidates.length) {
       const candidate = topCandidates[cursor++];
       try {
-        const page = await extractPage(candidate.url, 8);
+        const page = await extractPage(candidate.canonicalUrl || candidate.url, 8);
         if (page.text.trim()) extractedSourceText.set(candidate.id, page.text.slice(0, 2_400));
         await updateState((current) => {
           const target = current.runs
@@ -296,6 +300,7 @@ export const enrichCandidateBriefings = (
 };
 
 interface CollectionRunOptions extends CollectionRequest {
+  officialMonitor?: boolean;
   scheduled?: boolean;
   scheduledDate?: string;
   windowHours?: number;
@@ -340,6 +345,7 @@ export const createCollectionRun = async (
       : requestedWindowHours;
     const keywords = options.keywords?.trim() || undefined;
     const next: WorkflowRun = {
+      ...(options.officialMonitor ? { collectionPurpose: "official-monitor" as const } : {}),
       id: `run_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomUUID().slice(0, 6)}`,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -363,7 +369,7 @@ export const createCollectionRun = async (
         stage: "等待启动",
         message: options.retryOfRunId
           ? `正在重试运行 ${options.retryOfRunId}`
-          : options.scheduled
+          : options.officialMonitor ? "官方来源增量检查：仅收录候选，阅读时再补正文与原图" : options.scheduled
             ? "定时心跳已触发"
             : `手动采集已进入队列${options.dateFrom && options.dateTo ? ` · ${options.dateFrom} 至 ${options.dateTo}` : ""}${keywords ? ` · 关键词：${keywords}` : ""}`,
         level: "info",
@@ -372,6 +378,7 @@ export const createCollectionRun = async (
     state.runs.unshift(next);
     retainWorkflowRuns(state);
     if (options.scheduledDate) state.settings.lastScheduledDate = options.scheduledDate;
+    if (options.officialMonitor) state.settings.lastOfficialPollAt = timestamp;
     created = true;
     return next;
   });
@@ -613,9 +620,9 @@ export const executeCollection = async (runId: string) => {
       `日期与关键词筛选后保留 ${filteredRawItems.length} 条，得到 ${candidates.length} 条${topicLabels(normalizeTopicIds(run.topicIds)).join("／")}候选`,
       candidates.length ? "success" : "warning",
     );
-    const extractedSourceText = await probeImages(runId, controller.signal);
+    const extractedSourceText = run.collectionPurpose === "official-monitor" ? new Map<string, string>() : await probeImages(runId, controller.signal);
     if (controller.signal.aborted) throw new Error("采集已取消");
-    if (candidates.length) {
+    if (candidates.length && run.collectionPurpose !== "official-monitor") {
       await patchRun(runId, { stage: "生成中文速读" });
       try {
         const briefingResult = await enrichCandidateBriefings(runId, { extractedSourceText, signal: controller.signal });
@@ -658,10 +665,10 @@ export const executeCollection = async (runId: string) => {
         }, { createdAt: completedAt });
       }
     });
-    const readinessLog = collectionReadinessLog(candidates.length, briefingCount);
+    const readinessLog = collectionReadinessLog(candidates.length, briefingCount, run.collectionPurpose);
     await appendLog(
       runId,
-      candidates.length ? "生成中文速读" : "提取来源原图",
+      run.collectionPurpose === "official-monitor" ? "官方来源检查" : candidates.length ? "生成中文速读" : "提取来源原图",
       readinessLog.message,
       readinessLog.level,
     );

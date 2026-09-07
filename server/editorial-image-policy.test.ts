@@ -3,6 +3,11 @@ import test from "node:test";
 
 import { eligibleEditorialImage, planEditorialImagePlacements, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 
+test("a wide, shallow source chart is retained without accepting badges", () => {
+  assert.equal(eligibleEditorialImage({ id: "latency", url: "https://example.com/latency.png", caption: "Latency comparison chart", width: 1200, height: 150 }), true);
+  assert.equal(eligibleEditorialImage({ id: "badge", url: "https://example.com/badge.png", caption: "Version badge", width: 1200, height: 150 }), false);
+});
+
 test("repository badges can never become editorial images", () => {
   assert.equal(eligibleEditorialImage({
     id: "license",
@@ -153,4 +158,32 @@ test("lower-priority model choices cannot displace original images, screenshots 
     "screenshot",
     "entity",
   ]);
+});
+
+test("explicit relevant source charts are not displaced or padded with unrelated article illustrations", () => {
+  const placements = planEditorialImagePlacements({
+    availableImages: [
+      { id: "radar", url: "https://publisher.example/radar.png", caption: "Magellan radar", editorialPriority: 1 },
+      { id: "altimetry", url: "https://publisher.example/altimetry.png", caption: "Altimetry footprint", editorialPriority: 1 },
+      { id: "cost", url: "/media/cost.png", caption: "Indexed cost of model usage", editorialPriority: 2 },
+    ],
+    modelSelections: [{ imageId: "cost", afterParagraph: 2, caption: "官方提供的任务成本对比，测试条件见原图。" }],
+    paragraphs: ["新模型上线。", "两种访问范围。", "缓存读取价格降低。", "企业客户可以申请。"],
+    imageLimit: 5,
+  });
+  assert.deepEqual(placements.map((image) => image.imageId), ["cost"]);
+  assert.equal(placements[0]?.afterParagraph, 2);
+});
+
+test("frozen package asset IDs resolve to source image IDs before ranking selected charts", () => {
+  const placements = planEditorialImagePlacements({
+    availableImages: [
+      { id: "radar", url: "https://publisher.example/radar.png", caption: "Magellan radar", editorialPriority: 1 },
+      { id: "cost", url: "/media/cost.png", caption: "Indexed cost of model usage", editorialPriority: 2 },
+    ],
+    imageAliases: { asset_cost: "cost" },
+    modelSelections: [{ imageId: "asset_cost", afterParagraph: 1, caption: "官方提供的缓存读取成本对比。" }],
+    paragraphs: ["发布两种模型。", "缓存读取降低了成本。", "接入条件。"], imageLimit: 4,
+  });
+  assert.deepEqual(placements, [{ imageId: "cost", afterParagraph: 1, caption: "官方提供的缓存读取成本对比。" }]);
 });

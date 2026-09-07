@@ -231,7 +231,7 @@ export const copyMaterialToDraft = async (material: ImageMaterial, draftId: stri
 export const copyLocalSourceImageToDraft = async (
   image: SourceImage,
   draftId: string,
-  options: { requireFingerprintMatch?: boolean } = {},
+  options: { requireFingerprintMatch?: boolean; mediaRoot?: string } = {},
 ): Promise<SourceImage> => {
   if (!image.localPath?.trim()) throw new Error("图片没有可复制的本地文件");
   const bytes = await readFile(image.localPath);
@@ -241,7 +241,7 @@ export const copyLocalSourceImageToDraft = async (
     if (!/^[a-f0-9]{64}$/u.test(expectedFingerprint)) throw new Error("图片缺少有效 SHA-256 指纹");
     if (actualFingerprint !== expectedFingerprint) throw new Error("图片指纹不一致，内容已变化");
   }
-  const directory = path.join(workflowMediaRoot, draftId);
+  const directory = path.join(options.mediaRoot ?? workflowMediaRoot, draftId);
   await mkdir(directory, { recursive: true });
   const extension = path.extname(image.localPath).toLowerCase();
   const safeExtension = [".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(extension)
@@ -252,7 +252,8 @@ export const copyLocalSourceImageToDraft = async (
   const localPath = path.join(directory, fileName);
   await writeFile(localPath, bytes);
   const publicPath = `/media/${encodeURIComponent(draftId)}/${encodeURIComponent(fileName)}`;
-  return { ...image, url: publicPath, localPath, publicPath, fingerprint: actualFingerprint };
+  return { ...image, originalImageUrl: image.originalImageUrl || (/^https?:\/\//iu.test(image.url) ? image.url : undefined),
+    url: publicPath, localPath, publicPath, fingerprint: actualFingerprint };
 };
 
 export const removeMaterialFile = async (material: ImageMaterial) => {

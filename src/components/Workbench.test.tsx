@@ -35,6 +35,7 @@ const candidate = (publishedAt: string): Candidate => ({
 
 test("candidate card keeps the original headline while the Chinese summary is being generated", () => {
   const state = createDefaultState();
+  state.settings.recommendationMode = "balanced";
   const now = new Date().toISOString();
   const run: WorkflowRun = {
     id: "run-generating-briefing",
@@ -86,6 +87,7 @@ test("candidate card keeps the original headline while the Chinese summary is be
 
 test("collection recommendations use candidate-level wording and only expose implemented draft modes", () => {
   const state = createDefaultState();
+  state.settings.recommendationMode = "balanced";
   const now = new Date().toISOString();
   const run: WorkflowRun = {
     id: "run-ready",

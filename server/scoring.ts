@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { normalizeTopicIds, topicDefinitionsFor } from "./topics.js";
 import { keywordTerms } from "./source-routing.js";
 import { personalizeCandidates } from "./personalization.js";
+import { technicalArticlePolicy } from "./technical-article.js";
 import type {
   Candidate,
   CandidateFeedback,
@@ -40,6 +41,7 @@ const engagementFor = (candidate: Candidate) => {
 };
 
 const freshnessFor = (candidate: Candidate) => {
+  if (candidate.technicalArticle) return 0;
   const published = Date.parse(candidate.publishedAt);
   if (!Number.isFinite(published)) return 0;
   const hours = Math.max(0, (Date.now() - published) / 3_600_000);
@@ -268,6 +270,10 @@ export const rawItemTimeRejectionReason = (
   options: RawItemSearchOptions = {},
 ): RawItemTimeRejectionReason | undefined => {
   const hasExplicitRange = Boolean(filters.dateFrom || filters.dateTo);
+  if (!hasExplicitRange && item.source_type === "documentation" && item.metadata?.content_kind === "technical") {
+    const date = Date.parse(item.published_at || "");
+    return Number.isFinite(date) && date > (options.now ?? Date.now()) ? "future-published-at" : undefined;
+  }
   if (!hasExplicitRange && options.windowHours === undefined) return undefined;
 
   const rawPublishedAt = item.published_at?.trim();
@@ -326,6 +332,8 @@ export const rawItemToCandidate = (
     sourceType: item.source_type,
     sourceName,
     sourceRole,
+    technicalArticle: technicalArticlePolicy({ url: item.url, title: item.title, excerpt: item.content, sourceRole }),
+    publicationDateKnown: item.source_type === "documentation" ? Boolean(item.published_at) : undefined,
     author: item.author,
     title: item.title,
     url: item.url,
@@ -363,11 +371,12 @@ export const sortCandidates = (
   personalizationEnabled = true,
 ) => {
   const eligible = candidates.filter(
-    (candidate) => candidate.score >= 7 && candidate.scoreBreakdown.relevance > 0,
+    (candidate) => Boolean(candidate.technicalArticle) || (candidate.score >= 7 && candidate.scoreBreakdown.relevance > 0),
   );
   const clusters: Candidate[][] = [];
   for (const candidate of eligible) {
-    const cluster = clusters.find((entries) => titleSimilarity(entries[0].title, candidate.title) >= 0.78);
+    const cluster = clusters.find((entries) => Boolean(entries[0].technicalArticle) === Boolean(candidate.technicalArticle)
+      && (candidate.technicalArticle ? entries[0].url === candidate.url : titleSimilarity(entries[0].title, candidate.title) >= 0.78));
     if (cluster) cluster.push(candidate);
     else clusters.push([candidate]);
   }
@@ -416,5 +425,6 @@ export const sortCandidates = (
       if (right.score !== left.score) return right.score - left.score;
       return Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
     });
-  return personalizeCandidates(baseRanking, feedback, personalizationEnabled).slice(0, 60);
+  const personalized = personalizeCandidates(baseRanking, feedback, personalizationEnabled);
+  return [...personalized.filter(candidate => !candidate.technicalArticle).slice(0, 60), ...personalized.filter(candidate => candidate.technicalArticle).slice(0, 54)];
 };

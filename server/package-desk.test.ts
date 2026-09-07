@@ -157,6 +157,31 @@ test("PackageDesk keeps a community discovery path out of a news fact ledger", (
   ]);
 });
 
+test("selected-article evidence replaces stale scan summaries and remains frozen with source quotations", () => {
+  const state = createDefaultState();
+  state.runs = [run([candidate("official")])];
+  const story = buildStories(state, "2026-08-30T02:00:00.000Z")[0]!;
+  const quote = "Cache reads cost one quarter of the previous rate; base input and output prices are unchanged.";
+  const source = { signalId: "run-1:official", label: "Acme 官方", url: "https://acme.example/model-x", role: "official" as const,
+    basis: "full-source" as const, publishedAt: "2026-08-30T01:00:00.000Z", isCommunity: false };
+  const snapshot = { signalId: source.signalId, sourceKind: "article" as const, sourceLabel: source.label,
+    url: source.url, originalTitle: "Acme releases Model X", originalText: quote, originalLanguage: "en" as const,
+    basis: "full-source" as const, capturedAt: "2026-08-30T01:59:00.000Z", truncated: false, rightsNotice: "保留出处" };
+  const fact = { id: "article-claim", text: "Acme 仅将缓存读取价格降至原来的四分之一，基础输入输出价格保持不变。",
+    status: "supported" as const, sourceSignalIds: [source.signalId], sourceUrls: [source.url],
+    quotations: [{ sourceUrl: source.url, text: quote }] };
+  const contentPackage = buildContentPackage(state, { storyId: story.id, mode: "brief", now: "2026-08-30T02:00:00.000Z",
+    articleEvidence: { facts: [fact], sources: [source], snapshots: [snapshot], uncertainties: [] } });
+  assert.deepEqual(contentPackage.facts.map((entry) => entry.text), [fact.text]);
+  assert.deepEqual(contentPackage.sourceEvidence?.[0]?.originalText, quote);
+  assert.equal(contentPackage.facts[0]?.quotations?.[0]?.text, quote);
+  assert.equal(contentPackage.sources[0]?.basis, "full-source");
+  snapshot.originalText = "Changed later";
+  fact.text = "Changed later";
+  assert.equal(contentPackage.sourceEvidence?.[0]?.originalText, quote);
+  assert.notEqual(contentPackage.facts[0]?.text, "Changed later");
+});
+
 test("PackageDesk keeps passive community redistribution wording out of a news fact ledger", () => {
   const state = createDefaultState();
   state.runs = [run([candidate("redistributed-community-source", {
