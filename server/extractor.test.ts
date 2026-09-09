@@ -14,6 +14,7 @@ import {
   extractPage,
   extractArticleBlocks,
 } from "./extractor.js";
+import { readQwenArticleSource } from "./qwen-article-source.js";
 
 test("table spans keep values aligned with both header levels and retain caption and footer conditions", async () => {
   const html = '<article><table><caption>Price per million tokens</caption><thead><tr><th rowspan="2">Model</th><th colspan="2">Price</th></tr><tr><th>Input</th><th>Output</th></tr></thead><tbody><tr><th rowspan="2">Nova</th><td>$1</td><td>$2</td></tr><tr><td>$3</td><td>$4</td></tr></tbody><tfoot><tr><td colspan="3">Introductory billing only.</td></tr></tfoot></table></article>';
@@ -120,28 +121,31 @@ test("module fallback text and blocks share the same explicit reading limit", as
 });
 
 test("Qwen article reads its exact official index record and retains its own title, date, query identity and tables", async () => {
-  const originalFetch = globalThis.fetch;
   const calls: string[] = [];
-  globalThis.fetch = async (input) => {
-    calls.push(String(input));
+  const fetcher = async (input: string) => {
+    calls.push(input);
     return new Response(JSON.stringify({ data: { articles: [
       { path: "selected-article", title: "Official model evaluation", extra: { date: "2026-09-03", author: "Publisher team" }, content: '<html><head><link rel="canonical" href="https://legacy.example/wrong"></head><body><article><p>Selected evidence.</p><table><tr><th>Budget</th><th>Score</th></tr><tr><td>10</td><td>50</td></tr></table><img src="https://cdn.example/selected.png"></article></body></html>' },
       { path: "other-article", title: "Other event", content: "<p>Unrelated $999.</p>" },
     ] } }), { headers: { "content-type": "application/json" } });
   };
-  try {
-    const page = await extractPage("https://qwen.ai/blog?id=selected-article&utm_source=test");
-    assert.equal(page.title, "Official model evaluation");
-    assert.equal(page.author, "Publisher team");
-    assert.equal(page.publishedAt, "2026-09-03T00:00:00.000Z");
-    assert.equal(page.canonicalUrl, "https://qwen.ai/blog?id=selected-article");
-    assert.equal(page.url, page.canonicalUrl);
-    assert.match(page.text, /10\t50/u);
-    assert.doesNotMatch(page.text, /Other event|\$999/u);
-    assert.equal(page.images[0]?.sourceUrl, page.canonicalUrl);
-    assert.equal(calls.length, 1);
-    assert.ok(!calls[0]?.startsWith("https://qwen.ai/blog"), "must fetch the fixed official index, not the unreadable SPA shell");
-  } finally { globalThis.fetch = originalFetch; }
+  // The article fixture must not depend on the current machine's DNS or proxy
+  // setup. Production callers still use the fail-closed validator and reader.
+  const page = await extractPage(
+    "https://qwen.ai/blog?id=selected-article&utm_source=test",
+    8,
+    { validateUrl: async (rawUrl) => new URL(rawUrl), readQwenArticle: (url) => readQwenArticleSource(url, { fetcher }) },
+  );
+  assert.equal(page.title, "Official model evaluation");
+  assert.equal(page.author, "Publisher team");
+  assert.equal(page.publishedAt, "2026-09-03T00:00:00.000Z");
+  assert.equal(page.canonicalUrl, "https://qwen.ai/blog?id=selected-article");
+  assert.equal(page.url, page.canonicalUrl);
+  assert.match(page.text, /10\t50/u);
+  assert.doesNotMatch(page.text, /Other event|\$999/u);
+  assert.equal(page.images[0]?.sourceUrl, page.canonicalUrl);
+  assert.equal(calls.length, 1);
+  assert.ok(!calls[0]?.startsWith("https://qwen.ai/blog"), "must fetch the fixed official index, not the unreadable SPA shell");
 });
 
 test("extractor binds update text, date, canonical URL and images to the selected event", async () => {

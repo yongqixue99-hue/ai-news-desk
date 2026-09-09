@@ -8,7 +8,7 @@ import { workflowMediaRoot } from "./storage.js";
 import { extractOfficialUpdateSection } from "./official-update-index.js";
 import { hasOfficialUpdateAnchor } from "./official-update-url.js";
 import { boundArticleBlocks, extractArticleStructure } from "./article-structure.js";
-import { readQwenArticleSource } from "./qwen-article-source.js";
+import { readQwenArticleSource, type QwenArticleSource } from "./qwen-article-source.js";
 import type { ExtractedPage, SourceImage } from "./types.js";
 
 const imageNoise = /logo|icon|avatar|emoji|tracking|pixel|spinner|loading|sprite|favicon|author|profile|badge|button/i;
@@ -279,9 +279,20 @@ export const fetchArticleDocument = (url: URL, options: { fetcher?: typeof fetch
     },
   });
 
-export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<ExtractedPage> => {
-  const requestedUrl = await validateRemoteUrl(rawUrl);
-  const qwenArticle = await readQwenArticleSource(requestedUrl.toString());
+export type ExtractPageOptions = {
+  /** Test seam only; production callers use the fail-closed URL validator. */
+  validateUrl?: (rawUrl: string | URL) => Promise<URL>;
+  /** Test seam only; production callers use the fixed official Qwen index. */
+  readQwenArticle?: (rawUrl: string) => Promise<QwenArticleSource | undefined>;
+};
+
+export const extractPage = async (
+  rawUrl: string,
+  imageLimit = 8,
+  options: ExtractPageOptions = {},
+): Promise<ExtractedPage> => {
+  const requestedUrl = await (options.validateUrl ?? validateRemoteUrl)(rawUrl);
+  const qwenArticle = await (options.readQwenArticle ?? readQwenArticleSource)(requestedUrl.toString());
   if (qwenArticle) {
     const articleUrl = new URL(qwenArticle.canonicalUrl);
     const page = await extractPageContent(qwenArticle.html, articleUrl, articleUrl, imageLimit);
