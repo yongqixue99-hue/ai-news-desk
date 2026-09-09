@@ -42,6 +42,7 @@ import { applyOptimizationChanges, applyOptimizationChangesToHtml } from "../opt
 import {
   clearDraftRecoverySnapshot,
   editableDraftContent,
+  mergeSavedDraftMetadata,
   persistDraftRecoverySnapshot,
   restoreDraftFromRecovery,
   switchDraftSafely,
@@ -424,22 +425,27 @@ export function DraftWorkspace({
     const current = editingRef.current;
     if (!current) return undefined;
     const versionAtStart = editVersionRef.current;
+    const requestContent = editableDraftContent(current);
+    const requestContentSnapshot = JSON.stringify(requestContent);
     setSaving(true);
     setSavingMode(mode);
     setSaveError("");
-    const operation = saveHandlerRef.current(current.id, editableDraftContent(current), mode);
+    const operation = saveHandlerRef.current(current.id, requestContent, mode);
     activeSaveRef.current = operation;
     try {
       const saved = await operation;
+      const latest = editingRef.current;
+      const requestStillCurrent = latest?.id === saved.id && editVersionRef.current === versionAtStart
+        && JSON.stringify(editableDraftContent(latest)) === requestContentSnapshot;
       setEditing((value) => {
-        if (value?.id !== saved.id) return value;
-        const next = { ...value, updatedAt: saved.updatedAt };
+        if (editVersionRef.current !== versionAtStart) return value;
+        const next = mergeSavedDraftMetadata(value, saved, requestContentSnapshot);
         editingRef.current = next;
         return next;
       });
       setLastSavedAt(saved.updatedAt);
       setLastSaveMode(mode);
-      if (editingRef.current?.id === saved.id && editVersionRef.current === versionAtStart) {
+      if (requestStillCurrent) {
         dirtyRef.current = false;
         setDirty(false);
         setRecoveryMessage("");
@@ -1536,7 +1542,7 @@ export function DraftWorkspace({
                     <>
                       <div className="agent-thread-meta">
                         <span>{activeAgentThread.providerName}</span>
-                        <span>{activeAgentThread.sourceSnapshot.method === "full-page" ? "已读取完整原文" : activeAgentThread.sourceSnapshot.method === "intake-text" ? "使用导入正文" : "仅有采集摘要"}</span>
+                        <span>{activeAgentThread.sourceSnapshot.method === "content-package" ? "使用冻结素材包" : activeAgentThread.sourceSnapshot.method === "full-page" ? "已读取原文文字" : activeAgentThread.sourceSnapshot.method === "intake-text" ? "使用导入正文" : "仅有采集摘要"}</span>
                         <button onClick={() => void runAgent(agentMode)} disabled={Boolean(agentBusy)}>{agentBusy === agentMode ? <LoaderCircle className="spin" size={13} /> : <RotateCcw size={13} />}重新运行</button>
                       </div>
 

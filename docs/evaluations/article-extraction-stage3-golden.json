@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "article-extraction-golden/v1",
+  "total": 12,
+  "passed": 12,
+  "results": [
+    {
+      "id": "rowspan",
+      "label": "合并行不会错列",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "colspan",
+      "label": "合并列表头保留上下文",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "table-notes",
+      "label": "表名和表尾条件保留",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "footnote",
+      "label": "正文明确引用的脚注保留",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "missing-footnote",
+      "label": "缺失脚注明确提示",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "sidebar",
+      "label": "侧栏推荐不混入正文",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "figure",
+      "label": "图注保留测试条件",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "code",
+      "label": "代码比较符不丢失",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "limit",
+      "label": "长文截断可见",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "event-section",
+      "label": "更新页不串到另一日期",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "invalid-event",
+      "label": "锚点失效不能退回整页",
+      "passed": true,
+      "problems": []
+    },
+    {
+      "id": "qwen-article",
+      "label": "官方接口只读取选中文章",
+      "passed": true,
+      "problems": []
+    }
+  ]
+}

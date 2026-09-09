@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectPortableStructuredSources, parsePortableFeed } from "./structured-collector.js";
+import { readFile } from "node:fs/promises";
+import { defaultSources } from "./defaults.js";
+import { createSourceRouteReader } from "./source-route-cache.js";
+import { collectPortableStructuredSources, parsePortableFeed, resolveOfficialFeedLinks } from "./structured-collector.js";
 import type { SourceConfig } from "./types.js";
+import { collectDiscoveryCandidates } from "./discovery-funnel.js";
+import { buildTodayView } from "./story-desk.js";
+import { createDefaultState } from "./defaults.js";
+import { extractOfficialUpdateSection } from "./official-update-index.js";
+import { rawItemToCandidate } from "./scoring.js";
 
 const source: SourceConfig = {
   id: "portable-feed",
@@ -15,6 +23,110 @@ const source: SourceConfig = {
   role: "official",
   discoveryOnly: false,
 };
+
+const claudeFeed = `<rss><channel><item>
+  <title>Claude Platform release notes — September 3, 2026</title>
+  <link>https://platform.claude.com/docs/en/release-notes/overview#september-3-2026</link>
+  <pubDate>Thu, 03 Sep 2026 00:00:00 GMT</pubDate><description>CLI maintenance update.</description>
+  </item><item><title>Claude Platform release notes — September 1, 2026</title>
+  <link>https://platform.claude.com/docs/en/release-notes/overview#september-1-2026</link>
+  <pubDate>Tue, 01 Sep 2026 00:00:00 GMT</pubDate>
+  <description><![CDATA[<ul><li>We've launched <strong>Claude Fable 5.1</strong> (<code>claude-fable-5-1</code>).</li></ul>]]></description>
+  </item></channel></rss>`;
+
+test("Claude's real dated feed reaches Today on reconnect when sitemap and search fail", async () => {
+  const anthropic = defaultSources.find((entry) => entry.id === "anthropic-official")!;
+  const clock = "2026-09-07T12:00:00.000Z";
+  const result = await collectPortableStructuredSources([anthropic], { topicIds: ["ai"] }, {
+    now: () => new Date(clock),
+    fetcher: async (url) => String(url) === "https://platform.claude.com/docs/en/release-notes/feed.xml"
+      ? new Response(claudeFeed) : new Response(null, { status: 503 }),
+  });
+  const { candidates } = collectDiscoveryCandidates(result.items, { windowHours: 48, topicIds: ["ai"], now: Date.parse(clock) });
+  const release = candidates.find((entry) => entry.title.includes("Fable 5.1"));
+  assert.ok(release, "the dated launch must be discovered without sitemap dates or an AI rewrite");
+  assert.equal(release.publishedAt, "2026-09-01T00:00:00.000Z");
+  assert.equal(release.technicalArticle, undefined);
+  assert.equal(release.publicationEvidence?.precision, "day");
+  assert.equal(release.publicationEvidence?.originalFeedTitle, "Claude Platform release notes — September 1, 2026");
+  const state = createDefaultState();
+  state.runs = [{ id: "reconnect", createdAt: clock, updatedAt: clock, status: "ready", stage: "完成", windowHours: 48,
+    sourceIds: [anthropic.id], scheduled: false, rawCount: result.items.length, candidates, logs: [] }];
+  const view = buildTodayView(state, clock);
+  assert.ok(view.releaseHighlights?.some((story) => story.originalTitle.includes("Fable 5.1")));
+  assert.equal(result.failures[anthropic.id], undefined);
+});
+
+test("Claude date links freeze only that day's evidence, excluding neighbouring changes", () => {
+  const html = `<main><article id="content-container"><div class="docs-prose">
+    <h3 id="september-3-2026">September 3, 2026<button>Copy</button></h3><ul><li>Unrelated CLI update.</li></ul>
+    <h3 id="september-1-2026">September 1, 2026<button>Copy</button></h3><ul><li>We've launched Claude Fable 5.1.</li></ul>
+    <h3 id="august-27-2026">August 27, 2026</h3><p>Unrelated account change.</p>
+    </div></article></main>`;
+  const section = extractOfficialUpdateSection(html, "https://platform.claude.com/docs/en/release-notes/overview#september-1-2026");
+  assert.equal(section?.publishedAt, "2026-09-01T00:00:00.000Z");
+  assert.match(section!.html, /Fable 5.1/u);
+  assert.doesNotMatch(section!.html, /Unrelated/u);
+});
+
+test("official RSS publication wins over the same announcement's later search-index date", () => {
+  const openai = defaultSources.find((entry) => entry.id === "openai-official")!;
+  const parse = (feedUrl: string, link: string, date: string) => parsePortableFeed(
+    `<rss><channel><item><title>GPT-6 Astra: A new generation of intelligence - OpenAI</title><link>${link}</link><pubDate>${date}</pubDate></item></channel></rss>`,
+    { feedUrl, feedName: openai.name, sourceId: openai.id, sourceRole: "official", category: openai.category, fetchedAt: "2026-09-08T12:00:00Z" },
+  )[0];
+  const original = parse("https://openai.com/news/rss.xml", "https://openai.com/index/gpt-6-astra", "Thu, 03 Sep 2026 11:00:00 GMT");
+  const indexed = parse("https://news.google.com/rss/search?q=OpenAI", "https://news.google.com/rss/articles/index-copy?oc=5", "Tue, 08 Sep 2026 09:00:00 GMT");
+  const resolved = resolveOfficialFeedLinks([original, indexed], openai)[1];
+  assert.equal(resolved.published_at, original.published_at);
+  assert.equal(resolved.metadata?.indexed_at, indexed.published_at);
+  assert.equal(resolved.metadata?.date_source_url, original.url);
+  const candidate = rawItemToCandidate(resolved, 48, ["ai"], Date.parse("2026-09-08T12:00:00Z"));
+  assert.equal(candidate.publicationEvidence?.indexedAt, "2026-09-08T09:00:00.000Z");
+  assert.equal(candidate.publicationEvidence?.sourceUrl, original.url);
+  assert.equal(indexed.published_at, "2026-09-08T09:00:00.000Z");
+});
+
+test("conflicting original publication records cannot silently overwrite the index date", () => {
+  const openai = defaultSources.find((entry) => entry.id === "openai-official")!;
+  const original = { id: "one", source_type: "rss", title: "GPT-6 Astra: A new generation of intelligence",
+    url: "https://openai.com/index/gpt-6-astra", published_at: "2026-09-03T11:00:00Z", metadata: { date_basis: "feed-published" } };
+  const index = { ...original, id: "index", url: "https://news.google.com/rss/articles/indexed", published_at: "2026-09-08T00:00:00Z", metadata: { date_basis: "news-index" } };
+  const result = resolveOfficialFeedLinks([original, { ...original, id: "conflict", published_at: "2026-09-04T11:00:00Z" }, index], openai)[2];
+  assert.equal(result.published_at, index.published_at);
+  assert.equal(result.metadata?.indexed_at, undefined);
+});
+
+test("an invalid publication claim cannot borrow a valid modification time", () => {
+  const [entry] = parsePortableFeed('<feed><entry><title>Introducing a model</title><link href="https://example.com/model"/><published>not-a-date</published><updated>2026-09-08T12:00:00Z</updated></entry></feed>', {
+    feedUrl: "https://example.com/feed", feedName: "Example", sourceId: "example", sourceRole: "official", category: "AI", fetchedAt: "2026-09-08T13:00:00Z",
+  });
+  assert.equal(entry.published_at, undefined);
+  assert.equal(entry.metadata?.modified_at, "2026-09-08T12:00:00.000Z");
+});
+
+test("DeepSeek dated updates survive index failure and reuse a validated 304 without losing dates", async () => {
+  const deepseek = defaultSources.find((entry) => entry.id === "deepseek-official")!;
+  const content = await readFile(new URL("./fixtures/official-update-deepseek-updates.html", import.meta.url), "utf8");
+  let reads = 0;
+  const reader = createSourceRouteReader({ fetcher: async (url, init) => {
+    if (url.includes("news.google.com")) return new Response(null, { status: 503, headers: { "retry-after": "300" } });
+    reads += 1;
+    if (reads === 2) {
+      assert.equal(new Headers(init.headers).get("if-none-match"), '"dated"');
+      return new Response(null, { status: 304 });
+    }
+    return new Response(content, { headers: { etag: '"dated"' } });
+  } });
+  const first = await collectPortableStructuredSources([deepseek], { topicIds: ["ai"] }, { routeReader: reader });
+  const second = await collectPortableStructuredSources([deepseek], { topicIds: ["ai"] }, { routeReader: reader });
+  assert.ok(first.items.length > 1);
+  assert.deepEqual(second.items.map((item) => [item.url, item.published_at]), first.items.map((item) => [item.url, item.published_at]));
+  assert.equal(second.routeResults[0]?.cacheStatus, "not-modified");
+  assert.equal(second.routeResults[1]?.errorCode, "backoff");
+  assert.ok(second.routeResults[1]?.retryAt);
+  assert.deepEqual(second.failures, {});
+});
 
 test("portable collector parses RSS and namespaced content without Mac-only helpers", () => {
   const items = parsePortableFeed(`
@@ -257,4 +369,50 @@ test("Hacker News Ask/Show posts preserve the original self text as source mater
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0]?.content, "I built this after testing three approaches. The important tradeoff is latency.");
   assert.equal(result.items[0]?.url, "https://news.ycombinator.com/item?id=42");
+});
+
+test("a working feed cannot hide a failed discovery route for the same publisher", async () => {
+  const publisher = { ...source, routes: [
+    { topicId: "ai" as const, label: "Feed", homepageUrl: "https://example.com", url: "https://example.com/feed.xml" },
+    { topicId: "ai" as const, label: "Index", homepageUrl: "https://example.com", url: "https://example.com/sitemap.xml" },
+  ] };
+  const result = await collectPortableStructuredSources([publisher], { topicIds: ["ai"] }, {
+    fetcher: async (url) => new Response(String(url).includes("sitemap") ? "down"
+      : "<rss><channel><item><title>Healthy</title><link>https://example.com/news</link></item></channel></rss>",
+    { status: String(url).includes("sitemap") ? 503 : 200 }),
+  });
+  assert.equal(result.items.length, 1);
+  assert.equal(result.failures[source.id], undefined);
+  assert.deepEqual(result.routeResults?.map(({ status, rawCount }) => ({ status, rawCount })), [
+    { status: "success", rawCount: 1 }, { status: "error", rawCount: 0 },
+  ]);
+  assert.match(result.routeResults?.[1]?.detail ?? "", /503/);
+});
+
+test("HTML challenges and unsupported sitemap indexes are errors, while an empty RSS feed is valid", async () => {
+  for (const body of ["<html><body>Please verify you are human</body></html>", "<sitemapindex><sitemap><loc>https://example.com/child.xml</loc></sitemap></sitemapindex>"]) {
+    const result = await collectPortableStructuredSources([source], { topicIds: ["ai"] }, { fetcher: async () => new Response(body) });
+    assert.ok(result.failures[source.id], "a 200 response alone does not establish successful feed parsing");
+  }
+  const empty = await collectPortableStructuredSources([source], { topicIds: ["ai"] }, {
+    fetcher: async () => new Response("<rss><channel></channel></rss>"),
+  });
+  assert.deepEqual(empty.failures, {});
+});
+
+test("passing a collection cancellation signal does not disable feed and HN request deadlines", async () => {
+  const controller = new AbortController();
+  const signals: AbortSignal[] = [];
+  await collectPortableStructuredSources([source, { ...source, id: "hn", kind: "hackernews" }], {
+    topicIds: ["ai"], signal: controller.signal,
+  }, { fetcher: async (url, init) => {
+    signals.push(init.signal!);
+    if (String(url).includes("topstories")) return new Response("[42]");
+    if (String(url).includes("item/42")) return new Response(JSON.stringify({ id: 42, title: "AI news", type: "story" }));
+    return new Response("<rss><channel></channel></rss>");
+  } });
+  assert.equal(signals.length, 3);
+  assert.ok(signals.every((signal) => signal !== controller.signal), "each request needs a deadline combined with cancellation");
+  controller.abort();
+  assert.ok(signals.every((signal) => signal.aborted));
 });

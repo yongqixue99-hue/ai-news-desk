@@ -1,3 +1,4 @@
+import { packageUncertaintiesFor } from "./package-reading-status.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -346,7 +347,8 @@ const assetsFor = (
     role: index === 0 ? "cover" : imageRoleFor(sourceImage),
     width: sourceImage.width,
     height: sourceImage.height,
-    recommendedAfterClaimId: claims[index % Math.max(1, claims.length)]?.id,
+    // Image order does not prove support for a fact; decide placement against
+    // the actual draft paragraphs, without manufacturing a fact association.
     origin: sourceImage.id.startsWith("library:") ? "library" : "source",
     editorialPriority,
     editorialOrigin,
@@ -510,7 +512,7 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
   if (requestedIntent !== "source" && !facts.some((claim) => claim.status === "supported" || claim.status === "partially-supported")) {
     blockers.push("没有可用于写作的正文级事实");
   }
-  const uncertainties = [
+  const pendingUncertainties = [
     ...(requestedIntent === "source"
       ? ["这是来源派生的私有编辑工作副本；正文事实、引用范围、转载或翻译权限均需发布前复核。"]
       : [
@@ -518,9 +520,11 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
         ...(articleEvidence ? articleEvidence.uncertainties : story.explanation.unknowns.map((item) => `仍未知：${item}`)),
         ...facts.filter((claim) => claim.status === "unverified").map((claim) => `待核验：${claim.text}`),
       ]),
-    ...sourceMaterials.filter((material) => material.truncated).map(() => "原始材料过长，素材包仅冻结了前 48000 个字符。"),
+    ...sourceMaterials.filter((material) => material.truncated).map(() => "读取范围：原始材料已截断，素材包仅冻结已保存部分，未读内容不能视为原文未披露。"),
+    ...sourceMaterials.flatMap((material) => (material.extractionWarnings ?? []).map((warning) => `读取范围：${material.sourceLabel} — ${warning}`)),
     ...sourceMaterials.filter((material) => material.fromCache).map((material) => `原文使用 ${material.capturedAt} 的本地快照；发布前建议刷新来源。`),
   ];
+  const uncertainties = packageUncertaintiesFor({ facts, sources: articleEvidence?.sources ?? packageSourcesFor(story), uncertainties: pendingUncertainties });
   if (assets.some((asset) => asset.rightsDecision === "warning")) uncertainties.push("部分图片需要人工确认权利状态");
   if (assets.some((asset) => asset.rightsDecision === "blocked")) uncertainties.push("部分原图可进入私人编辑草稿，但公众号同步前会被预检拦截，需确认权利或替换");
   const sourceFingerprint = story.signals.map((signal) => `${signal.runId}:${signal.candidateId}:${signal.fetchedAt}`).sort().join("|");
@@ -533,6 +537,7 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
       technicalArticle: story.technicalArticle,
       facts: facts.map((claim) => ({ text: claim.text, status: claim.status, sources: claim.sourceUrls, quotations: claim.quotations })),
       sourceEvidence: articleEvidence?.snapshots,
+      uncertainties,
       explanationGeneratedAt: story.explanation.generatedAt,
       explanationUnknowns: story.explanation.unknowns,
       discussionSamples: discussionSamples.map((sample) => ({
@@ -550,6 +555,9 @@ export const buildContentPackage = (state: WorkflowState, input: BuildContentPac
       capturedAt: material.capturedAt,
       originalText: material.originalText,
       blocks: material.blocks,
+      truncated: material.truncated,
+      extractionWarnings: material.extractionWarnings,
+      author: material.author,
       rightsNotice: material.rightsNotice,
     }))))
     .digest("hex");

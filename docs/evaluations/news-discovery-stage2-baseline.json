@@ -1,0 +1,229 @@
+{
+  "scope": "offline-primary-event-replay; synthetic-RSS-envelope; no-live-fetch-or-AI-quality-claim",
+  "total": 70,
+  "passed": 43,
+  "failed": 27,
+  "positive": {
+    "total": 20,
+    "parsed": 20,
+    "dateAccepted": 20,
+    "candidate": 17,
+    "story": 17,
+    "recommended": 9,
+    "releaseHighlight": 2
+  },
+  "negative": {
+    "total": 50,
+    "passed": 34,
+    "importantFalsePositives": 11,
+    "releaseFalsePositives": 8,
+    "duplicateChecksPassed": 0
+  },
+  "categoryCounts": {
+    "model": 12,
+    "price-and-access": 1,
+    "product": 4,
+    "security-research": 1,
+    "policy": 1,
+    "protocol": 1,
+    "stale": 5,
+    "future": 5,
+    "missing-date": 5,
+    "invalid-date": 5,
+    "promotion": 5,
+    "digest": 5,
+    "minor-update": 5,
+    "rumor": 5,
+    "duplicate": 5,
+    "keyword-mismatch": 5
+  },
+  "failingCases": [
+    {
+      "id": "gpt-4o",
+      "failures": [
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "gpt-4o-mini",
+      "failures": [
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "deep-research",
+      "failures": [
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "operator",
+      "failures": [
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "claude-3-7",
+      "failures": [
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "constitutional-classifiers",
+      "failures": [
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "gemini-1-5",
+      "failures": [
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "gemini-2-5",
+      "failures": [
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "deepseek-r1",
+      "failures": [
+        "重要事件未进入候选",
+        "重要事件未形成 Story",
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "deepseek-v3",
+      "failures": [
+        "重要事件未进入候选",
+        "重要事件未形成 Story",
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "qwen-2-5",
+      "failures": [
+        "重要事件未进入候选",
+        "重要事件未形成 Story",
+        "重要事件未进入今日精选"
+      ]
+    },
+    {
+      "id": "promotion-5",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻误入近期重要发布",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "digest-1",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "digest-3",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻误入近期重要发布",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "minor-1",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "minor-2",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "minor-3",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻误入近期重要发布",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "rumor-1",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻误入近期重要发布",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "rumor-2",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻误入近期重要发布",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "rumor-3",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻误入近期重要发布",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "rumor-4",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻误入近期重要发布",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "rumor-5",
+      "failures": [
+        "普通动态或传闻被升格为重要事件",
+        "普通动态或传闻误入近期重要发布",
+        "普通动态或传闻占用重要推荐位"
+      ]
+    },
+    {
+      "id": "duplicate-1",
+      "failures": [
+        "重复入口未保持一条：候选 1 / Story 1 / 精选 0"
+      ]
+    },
+    {
+      "id": "duplicate-2",
+      "failures": [
+        "重复入口未保持一条：候选 1 / Story 1 / 精选 0"
+      ]
+    },
+    {
+      "id": "duplicate-3",
+      "failures": [
+        "重复入口未保持一条：候选 1 / Story 1 / 精选 0"
+      ]
+    },
+    {
+      "id": "duplicate-4",
+      "failures": [
+        "重复入口未保持一条：候选 1 / Story 1 / 精选 0"
+      ]
+    },
+    {
+      "id": "duplicate-5",
+      "failures": [
+        "重复入口未保持一条：候选 1 / Story 1 / 精选 0"
+      ]
+    }
+  ]
+}

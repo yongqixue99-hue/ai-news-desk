@@ -139,6 +139,25 @@ test("a Sony Music AI lawsuit does not receive a generated image matched only by
   ), []);
 });
 
+test("owned generic AI artwork is not relevant evidence merely because reuse is allowed", () => {
+  const generic = material("owned-generic", { title: "抽象科技背景", tags: ["通用", "AI", "科技"] });
+  assert.deepEqual(recommendMaterialFallbacks([generic], story()), []);
+  assert.deepEqual(recommendMaterialCandidates([generic], story()), []);
+  generic.entityTags = ["AI", "科技"];
+  assert.deepEqual(recommendMaterialFallbacks([generic], story()), []);
+  assert.deepEqual(recommendMaterialCandidates([generic], story()), []);
+});
+
+test("a publisher name in source metadata does not make its stock image relevant to the event", () => {
+  const externalEvent = story();
+  externalEvent.title = "一家芯片厂商公布新芯片";
+  externalEvent.originalTitle = "Chip maker introduces a processor";
+  externalEvent.summary = "A chip maker has announced a processor.";
+  externalEvent.signals[0]!.title = externalEvent.originalTitle;
+  const publisherLogo = material("publisher-openai", { tags: ["OpenAI"], entityTags: ["OpenAI"] });
+  assert.deepEqual(recommendMaterialFallbacks([publisherLogo], externalEvent), []);
+});
+
 test("official, unverified and partially licensed files are never automatic fallbacks", () => {
   const results = recommendMaterialFallbacks([
     material("official", { rights: "official", sourceUrl: "https://example.com/press", allowedPlatforms: ["*"] }),
@@ -149,7 +168,7 @@ test("official, unverified and partially licensed files are never automatic fall
       attribution: "Example / CC BY-SA 4.0",
       evidenceNote: undefined,
     }),
-    material("owned"),
+    material("owned", { tags: ["OpenAI"], entityTags: ["OpenAI"] }),
   ], story(), 4, "2026-08-31T01:00:00.000Z");
 
   assert.deepEqual(results.map((image) => image.id), ["library:owned"]);

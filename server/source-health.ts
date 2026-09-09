@@ -1,9 +1,33 @@
-import type { Candidate, RawHorizonItem, SourceConfig, SourceRunResult } from "./types.js";
+import type { Candidate, CollectionSummary, RawHorizonItem, SourceConfig, SourceRouteResult, SourceRunResult, WorkflowRun } from "./types.js";
+
+export const latestSourceCollection = (runs: WorkflowRun[]): CollectionSummary | undefined => {
+  const completed = runs.flatMap((run) => {
+    if ((run.origin && run.origin !== "collection") || !run.sourceResults?.length) return [];
+    const collectedAt = run.collectedAt
+      ?? run.logs.find((log) => log.stage === "采集原始条目" && /^已保留 \d+ 条原始记录/u.test(log.message))?.at
+      ?? (["ready", "complete"].includes(run.status) ? run.completedAt ?? run.updatedAt : undefined);
+    if (!collectedAt || !Number.isFinite(Date.parse(collectedAt))) return [];
+    return [{ run, collectedAt }];
+  }).sort((a, b) => Date.parse(b.collectedAt) - Date.parse(a.collectedAt));
+  const latest = completed[0];
+  if (!latest) return undefined;
+  const { run, collectedAt } = latest;
+  return {
+    runId: run.id, collectedAt,
+    sourceCount: run.sourceResults!.length,
+    failedSourceCount: run.sourceResults!.filter((source) => source.status === "error").length,
+    partialSourceCount: run.sourceResults!.filter((source) => source.status !== "error"
+      && source.routes?.some((route) => route.status === "error")).length,
+    rawCount: run.rawCount,
+    candidateCount: run.candidates.length,
+  };
+};
 
 const feedNameFor = (item: RawHorizonItem) =>
   typeof item.metadata?.feed_name === "string" ? item.metadata.feed_name : undefined;
 
 const belongsToSource = (item: RawHorizonItem, source: SourceConfig) => {
+  if (typeof item.metadata?.source_id === "string") return item.metadata.source_id === source.id;
   const feedName = feedNameFor(item);
   if (feedName) return feedName === source.name;
   if (source.kind === "hackernews") return item.source_type === "hackernews";
@@ -19,6 +43,7 @@ export const sourceResultsForRun = (
   rawItems: RawHorizonItem[],
   candidates: Candidate[],
   failures: Record<string, string> = {},
+  routeResults: SourceRouteResult[] = [],
 ): SourceRunResult[] => {
   const candidateRawIds = new Set(candidates.map((candidate) => candidate.rawId));
   return sources.map((source) => {
@@ -26,6 +51,9 @@ export const sourceResultsForRun = (
     const candidateCount = sourceItems.filter((item) => candidateRawIds.has(item.id)).length;
     const rawCount = sourceItems.length;
     const failure = failures[source.id];
+    const routes = routeResults.filter((route) => route.sourceId === source.id);
+    const failedRoutes = routes.filter((route) => route.status === "error");
+    const partial = failedRoutes.length > 0 && routes.some((route) => route.status === "success");
     const yieldedCandidate = candidateCount > 0;
     const consecutiveZeroYield = Boolean(
       source.lastCheckedAt
@@ -36,9 +64,15 @@ export const sourceResultsForRun = (
     // `healthImpact=success` means the connector itself succeeded, while the
     // warning status reports editorial zero-yield rather than an outage.
     const healthImpact = failure ? "failure" : "success";
-    const status = failure ? "error" : yieldedCandidate ? "healthy" : "warning";
+    const status = failure ? "error" : partial ? "warning" : yieldedCandidate ? "healthy" : "warning";
     const detail = failure
       ? `来源连接或解析失败：${failure}`
+      : partial
+        ? `部分读取路线失败（${routes.length - failedRoutes.length}/${routes.length} 条成功）；已读取 ${rawCount} 条，保留 ${candidateCount} 条候选，覆盖仍有缺口：${failedRoutes.map((route) => {
+          let label = "来源路线";
+          try { const url = new URL(route.url); label = `${url.hostname}${url.pathname}`; } catch { /* Keep a safe label. */ }
+          return `${label}：${route.detail || "读取失败"}`;
+        }).join("；").slice(0, 700)}`
       : rawCount === 0
         ? consecutiveZeroYield
           ? "来源连接完成且未报告解析错误，但连续多轮没有窗口内候选；可能是来源近期未更新，或当前主题/频道路由没有命中，不判为连接故障"
@@ -56,6 +90,7 @@ export const sourceResultsForRun = (
       rawCount,
       candidateCount,
       detail,
+      ...(routes.length ? { routes } : {}),
     };
   });
 };

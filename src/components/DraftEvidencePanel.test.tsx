@@ -67,3 +67,15 @@ test("the evidence panel explains automatic work without turning internal notes 
   assert.match(markup, /发布时再处理/u);
   assert.doesNotMatch(markup, /2 项待确认|已人工核验|事实级证据/u);
 });
+
+test("read scope shows truncation and table counts without claiming all image text was checked", () => {
+  const markup = renderToStaticMarkup(createElement(DraftEvidencePanel, {
+    draft: { ...draft, writingBrief: { ...draft.writingBrief!, sourceReads: [{ label: "来源原文", url: "https://example.com/article", characters: 1234,
+      tableCount: 2, capturedAt: "2026-09-08T00:00:00Z", fromCache: true, truncated: true, warnings: ["一个脚注引用没有找到正文。"] }] } },
+    onUpdateFactClaim: () => undefined, onResolveFactUncertainty: () => undefined,
+  }));
+  for (const text of ["原文读取范围", "1,234", "2", "张文字表格", "正文已截断", "使用缓存快照", "图中文字", "脚注引用"]) {
+    assert.ok(markup.includes(text), text);
+  }
+  assert.doesNotMatch(markup, /已读取完整原文/u);
+});

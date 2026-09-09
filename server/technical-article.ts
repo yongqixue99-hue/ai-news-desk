@@ -1,5 +1,6 @@
 import type { SourceRole } from "./types.js";
 import type { Candidate, ExtractedPage } from "./types.js";
+import { hasOfficialUpdateAnchor } from "./official-update-url.js";
 
 export const applyTechnicalSourceMetadata = (candidate: Candidate, page: ExtractedPage) => {
   if (!candidate.technicalArticle) return;
@@ -23,6 +24,7 @@ export interface TechnicalArticlePolicy {
 export const technicalArticlePolicy = (input: { url: string; title: string; excerpt?: string; sourceRole?: SourceRole }): TechnicalArticlePolicy | undefined => {
   let url: URL;
   try { url = new URL(input.url); } catch { return undefined; }
+  if (hasOfficialUpdateAnchor(url)) return undefined;
   const hostname = url.hostname.replace(/^www\./u, "");
   const known = ["openai.com", "developers.openai.com", "cookbook.openai.com", "anthropic.com", "platform.claude.com", "docs.claude.com", "claude.com", "ai.google.dev", "developers.googleblog.com", "huggingface.co"];
   if (!known.includes(hostname) || !["official", "research"].includes(input.sourceRole || "")) return undefined;

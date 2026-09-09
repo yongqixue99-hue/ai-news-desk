@@ -1,3 +1,4 @@
+import { chooseWorkbenchRun } from "./workbench-run";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { completionAvailability } from "../server/editorial-controls.js";
 import { AppShell } from "./components/AppShell";
@@ -57,6 +58,7 @@ function App() {
   const [state, setState] = useState<WorkflowState>();
   const [editorialSystem, setEditorialSystem] = useState<EditorialSystemView>();
   const { page, navigate } = useHashPageNavigation();
+  const [homeStoryId, setHomeStoryId] = useState<string>();
   const [activeRunId, setActiveRunId] = useState<string>();
   const [activeDraftId, setActiveDraftId] = useState<string>();
   const [notice, setNotice] = useState<NoticeState>(null);
@@ -79,7 +81,7 @@ function App() {
       notificationsMuted: next.settings.notificationsMuted,
       activeRunCount: next.runs.filter((run) => ["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status)).length,
     });
-    setActiveRunId((current) => current ?? next.runs[0]?.id);
+    setActiveRunId((current) => chooseWorkbenchRun(next.runs, current)?.id);
     setActiveDraftId((current) => current ?? next.drafts[0]?.id);
     return next;
   }, []);
@@ -163,7 +165,7 @@ function App() {
   }, [page, refreshPublisherStatus, state?.settings.publisherMode]);
 
   const activeRun = useMemo(
-    () => state?.runs.find((run) => run.id === activeRunId) ?? state?.runs[0],
+    () => chooseWorkbenchRun(state?.runs ?? [], activeRunId),
     [state?.runs, activeRunId],
   );
   const activeProvider = state?.aiSettings.providers.find((provider) => provider.id === state.aiSettings.activeProviderId)
@@ -303,13 +305,15 @@ function App() {
         onOpenNotification={openShellNotification}
       >
         <Notice notice={notice} onClose={() => setNotice(null)} />
-        <ProductJobCenter onOpenDraft={openDraftById} />
+        <ProductJobCenter onOpenDraft={openDraftById} onOpenStory={(storyId) => { setHomeStoryId(storyId); navigate("today"); }} />
         <PageBoundary key={page}>
         <TodayPage
           onNavigate={navigate}
           onNotice={(kind, message) => setNotice({ kind, message })}
           onOpenDraft={openDraftById}
           onSearch={searchNews}
+          requestedStoryId={homeStoryId}
+          onRequestedStoryHandled={() => setHomeStoryId(undefined)}
         />
         </PageBoundary>
       </AppShell>
@@ -1308,7 +1312,7 @@ function App() {
       onOpenNotification={openNotification}
     >
       <Notice notice={notice} onClose={() => setNotice(null)} />
-      <ProductJobCenter onOpenDraft={openDraftById} />
+      <ProductJobCenter onOpenDraft={openDraftById} onOpenStory={(storyId) => { setHomeStoryId(storyId); navigate("today"); }} />
       <PageBoundary key={page}>
       <Suspense fallback={<PageLoading />}>
       {page === "today" ? (
@@ -1317,6 +1321,8 @@ function App() {
           onNotice={(kind, message) => setNotice({ kind, message })}
           onOpenDraft={openDraftById}
           onSearch={searchNews}
+          requestedStoryId={homeStoryId}
+          onRequestedStoryHandled={() => setHomeStoryId(undefined)}
         />
       ) : null}
       {page === "workbench" ? (

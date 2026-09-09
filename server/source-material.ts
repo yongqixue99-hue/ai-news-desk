@@ -1,5 +1,6 @@
 import type { SourceMaterialSnapshot, StoryView } from "./product-types.js";
 import { readSourceWithSnapshot, type SourceSnapshotReadResult } from "./source-snapshot.js";
+import { sourceReadingContent } from "./source-reading-content.js";
 import { storyById } from "./story-desk.js";
 import type { Candidate, WorkflowState } from "./types.js";
 
@@ -102,10 +103,10 @@ export const loadSourceMaterialSnapshots = async (
   if (!candidate) throw new Error("原始来源候选已经不存在");
   const requestedUrl = candidate.canonicalUrl || candidate.url;
   const read = await readExternalSource({ url: requestedUrl, imageLimit: 0 });
-  const sourceBlocks = read.page.blocks ?? [];
-  // Extracted text is already decoded. Stripping angle brackets would corrupt code.
-  const originalText = sourceBlocks.length ? sourceBlocks.map((block) => block.text).join("\n\n") : read.page.text.trim();
-  if (originalText.length < 240) throw new Error("原始来源正文过短，不能生成忠实整理工作副本");
+  const reading = sourceReadingContent(read.page);
+  const sourceBlocks = reading.blocks ?? [];
+  const originalText = reading.text;
+  if (originalText.trim().length < 240) throw new Error("原始来源正文过短，不能生成忠实整理工作副本");
   const snapshot = clipped(originalText);
   const url = read.page.canonicalUrl || read.page.url || requestedUrl;
   return [{
@@ -113,6 +114,7 @@ export const loadSourceMaterialSnapshots = async (
     sourceKind: primarySignal.linkedSource ? "linked-page" : "article",
     sourceLabel: sourceLabelFor(url, primarySignal.sourceName),
     url,
+    author: read.page.author || primarySignal.author,
     originalTitle: read.page.title || candidate.title,
     originalText: snapshot.text,
     blocks: sourceBlocks.length ? structuredClone(sourceBlocks).filter((_block, index) => sourceBlocks.slice(0, index + 1).reduce((size, block) => size + block.text.length + 2, 0) <= maximumSourceCharacters) : undefined,
@@ -120,7 +122,8 @@ export const loadSourceMaterialSnapshots = async (
     basis: "full-source",
     capturedAt: read.capturedAt,
     fromCache: read.fromCache,
-    truncated: snapshot.truncated,
+    truncated: snapshot.truncated || Boolean(read.page.textTruncated),
+    extractionWarnings: reading.extractionWarnings,
     rightsNotice: "来源正文仅作为私有编辑工作副本；发布前需核对作者、引用范围及转载或翻译权限。",
   }];
 };

@@ -448,3 +448,22 @@ test("reading the page again cannot erase decoded local image dimensions", () =>
   assert.equal(merged[0]?.width, 2000);
   assert.equal(merged[0]?.height, 1200);
 });
+
+test("localizing or rereading a chart cannot erase its source caption and benchmark conditions", () => {
+  const original = image("benchmark", { caption: "Latency benchmark; H100; batch size 1; 1K input tokens; median of 5 runs." });
+  const reread = image("benchmark", { caption: "来源页面配图", localPath: imageFixture("benchmark.jpg"), publicPath: "/media/benchmark.jpg" });
+  const [merged] = mergeVisualImages([original], [reread]);
+  assert.equal(merged.caption, original.caption);
+  assert.equal(merged.localPath, reread.localPath);
+});
+
+test("a known generic placeholder may be enriched with a real source caption", () => {
+  const placeholder = image("benchmark", { caption: "原文图表 1" });
+  const actual = image("benchmark", { caption: "GPT-4.1 latency benchmark; batch size 1." });
+  assert.equal(mergeVisualImages([placeholder], [actual])[0].caption, actual.caption);
+});
+
+test("short source captions with test conditions are never treated as placeholders", () => {
+  const original = image("benchmark", { caption: "batch=1" });
+  assert.equal(mergeVisualImages([original], [image("benchmark", { caption: "Benchmark results" })])[0].caption, "batch=1");
+});

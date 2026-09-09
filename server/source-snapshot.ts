@@ -2,21 +2,30 @@ import { extractPage } from "./extractor.js";
 import { getLocalDatabase } from "./storage.js";
 import type { LocalDatabase } from "./local-database.js";
 import type { ExtractedPage } from "./types.js";
+import { hasOfficialUpdateAnchor } from "./official-update-url.js";
 
 const sevenDaysMs = 7 * 24 * 60 * 60 * 1_000;
 
 export const sourceSnapshotKey = (value: string) => {
   try {
     const url = new URL(value);
-    url.hash = "";
+    if (!hasOfficialUpdateAnchor(url)) url.hash = "";
     url.pathname = url.pathname.replace(/\/+$/u, "") || "/";
     for (const key of [...url.searchParams.keys()]) {
-      if (/^(?:utm_.+|ref|source|spm|from)$/iu.test(key)) url.searchParams.delete(key);
+      if (/^utm_.+/iu.test(key)) url.searchParams.delete(key);
     }
-    return url.toString().toLocaleLowerCase();
+    return url.toString();
   } catch {
-    return value.trim().toLocaleLowerCase();
+    return value.trim();
   }
+};
+
+const matchesRequestedEvent = (requestedUrl: string, page: ExtractedPage) => {
+  try {
+    if (!hasOfficialUpdateAnchor(new URL(requestedUrl))) return true;
+    const expected = sourceSnapshotKey(requestedUrl);
+    return sourceSnapshotKey(page.url) === expected && sourceSnapshotKey(page.canonicalUrl) === expected;
+  } catch { return false; }
 };
 
 export interface SourceSnapshotReadResult {
@@ -45,6 +54,7 @@ export const readSourceWithSnapshot = async ({
   const urlKey = sourceSnapshotKey(url);
   try {
     const page = await extractor(url, imageLimit);
+    if (!matchesRequestedEvent(url, page)) throw new Error("来源正文与请求的更新事件不一致，未写入快照");
     if (page.text.trim().length < 80) throw new Error("来源正文过短，未写入快照");
     const capturedAt = now().toISOString();
     store.saveSourceSnapshot({
@@ -58,7 +68,8 @@ export const readSourceWithSnapshot = async ({
   } catch (error) {
     const cached = store.getSourceSnapshot<ExtractedPage>(urlKey);
     const cacheAge = cached ? now().getTime() - Date.parse(cached.capturedAt) : Number.POSITIVE_INFINITY;
-    if (cached && Number.isFinite(cacheAge) && cacheAge >= 0 && cacheAge <= maximumCacheAgeMs) {
+    if (cached && Number.isFinite(cacheAge) && cacheAge >= 0 && cacheAge <= maximumCacheAgeMs
+      && matchesRequestedEvent(url, cached.page)) {
       return {
         page: cached.page,
         capturedAt: cached.capturedAt,

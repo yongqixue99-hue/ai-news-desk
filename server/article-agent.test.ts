@@ -7,6 +7,7 @@ import {
   parseArticleAnalysis,
   parseArticleOptimization,
   runObservedArticleAgentTask,
+  runQualityRepairWithCorrection,
 } from "./article-agent.js";
 import type { ContentPackage } from "./product-types.js";
 import type { AiProviderConfig, ArticleAgentThread, ArticleDraft } from "./types.js";
@@ -213,6 +214,7 @@ test("quality repair is generated at most once for an unchanged draft revision",
     role: "optimization",
     purpose: "quality-repair",
     draftRevision: "2026-09-02T08:00:00.000Z",
+    optimization: { changes: [{ factCheckPassed: true }] },
   } as ArticleAgentThread;
   const ordinary = {
     id: "ordinary-thread",
@@ -232,6 +234,105 @@ test("quality repair is generated at most once for an unchanged draft revision",
     "draft-1",
     "2026-09-02T08:01:00.000Z",
   ), undefined);
+  assert.equal(reusableQualityRepairThread([
+    { ...repair, optimization: { ...repair.optimization!, changes: [{ ...repair.optimization!.changes[0]!, factCheckPassed: false }] } },
+  ], "draft-1", "2026-09-02T08:00:00.000Z"), undefined);
+});
+
+const repairContext = {
+  title: "产品发布",
+  paragraphs: ["公司已经发布产品。当前版本支持文本处理。"],
+  take: "",
+  factClaimIds: ["fact-unused"],
+  qualityRepair: true,
+};
+const repairPayload = {
+  draftSnapshot: { blocks: { paragraphs: [{ blockId: "paragraph:0", text: repairContext.paragraphs[0] }] } },
+  factLedger: [{ id: "fact-unused", claim: "目前只向企业客户开放。" }],
+  qualityRepairTargets: { allowedUnusedFactIds: ["fact-unused"] },
+};
+const repairResponse = (before = repairContext.paragraphs[0]!) => ({
+  strategy: "brief", editMode: "targeted", diagnosis: ["补充开放范围"], improvements: ["补入企业限制"], diagnostics: [],
+  changes: [{ id: "repair-1", blockId: "paragraph:0", before, after: `${repairContext.paragraphs[0]}目前只向企业客户开放。`, reason: "补充冻结事实", affectedFactIds: ["fact-unused"] }],
+  preservedBlockIds: ["title"], factCheckPassed: true, rollbackRecommended: false, factWarnings: [] as string[],
+});
+const observedRepair = (response: ReturnType<typeof repairResponse>) => runObservedArticleAgentTask({
+  taskKind: "article-optimization", subjectId: "repair-test", provider, skills: [],
+  execute: async () => JSON.stringify(response), parse: (rendered) => parseArticleOptimization(rendered, repairContext),
+});
+
+test("quality repair rejects multiple changes to the same block and fact-free wording patches", () => {
+  const response = repairResponse();
+  response.changes.push({ ...response.changes[0]!, id: "repair-2", affectedFactIds: [], reason: "仅调整措辞" });
+  const result = parseArticleOptimization(JSON.stringify(response), repairContext);
+  assert.equal(result.changes.length, 2);
+  assert.ok(result.changes.every((change) => change.factCheckPassed === false));
+  assert.match(result.changes[0]!.factWarnings.join(""), /同一正文块最多一个补丁/u);
+  assert.match(result.changes[1]!.factWarnings.join(""), /实际新增/u);
+});
+
+test("quality repair corrects one locally rejected proposal with complete blocks, facts and exact warnings", async () => {
+  const calls: Array<{ payload: Record<string, unknown>; attempt: number }> = [];
+  const result = await runQualityRepairWithCorrection({ payload: repairPayload, run: async (payload, attempt) => {
+    calls.push({ payload, attempt });
+    return observedRepair(repairResponse(attempt === 0 ? "公司已经发布产品。" : undefined));
+  } });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map((call) => call.attempt), [0, 1]);
+  assert.deepEqual(calls[1]!.payload.draftSnapshot, repairPayload.draftSnapshot);
+  assert.deepEqual(calls[1]!.payload.factLedger, repairPayload.factLedger);
+  assert.deepEqual(calls[1]!.payload.qualityRepairTargets, repairPayload.qualityRepairTargets);
+  assert.match(JSON.stringify(calls[1]!.payload.qualityRepairCorrection), /原文片段与当前草稿不一致/u);
+  assert.equal(result.value.changes[0]!.factCheckPassed, true);
+  assert.equal(result.trace.status, "succeeded");
+});
+
+test("quality repair accepts a locally valid first proposal without another model call", async () => {
+  let calls = 0;
+  const result = await runQualityRepairWithCorrection({ payload: repairPayload, run: async () => {
+    calls++; return observedRepair(repairResponse());
+  } });
+  assert.equal(calls, 1);
+  assert.equal(result.value.changes[0]!.factCheckPassed, true);
+});
+
+test("quality repair preserves the second rejected proposal and trace without looping", async () => {
+  let calls = 0;
+  const result = await runQualityRepairWithCorrection({ payload: repairPayload, run: async () => {
+    calls++; return observedRepair(repairResponse("公司已经发布产品。"));
+  } });
+  assert.equal(calls, 2);
+  assert.equal(result.value.changes[0]!.before, "公司已经发布产品。");
+  assert.equal(result.value.changes[0]!.factCheckPassed, false);
+  assert.equal(result.value.rollbackRecommended, true);
+  assert.ok(result.trace.id);
+});
+
+test("quality repair never retries a provider or network failure", async () => {
+  let calls = 0;
+  const error = new Error("HTTP 503 provider unavailable");
+  await assert.rejects(() => runQualityRepairWithCorrection({ payload: repairPayload, run: async () => {
+    calls++; throw error;
+  } }), (failure: unknown) => failure === error);
+  assert.equal(calls, 1);
+});
+
+test("source limitation warnings alone do not trigger a quality repair correction", async () => {
+  let calls = 0;
+  const result = await runQualityRepairWithCorrection({ payload: repairPayload, run: async () => {
+    calls++;
+    return observedRepair({ ...repairResponse(), factWarnings: ["结果来自官方测试，需保留归属。"] });
+  } });
+  assert.equal(calls, 1);
+  assert.equal(result.value.changes[0]!.factCheckPassed, true);
+});
+
+test("ordinary optimization keeps its existing validation behavior", () => {
+  const response = repairResponse();
+  response.changes = response.changes.map((change) => ({ ...change, affectedFactIds: [] }));
+  response.changes.push({ ...response.changes[0]!, id: "ordinary-2" });
+  const result = parseArticleOptimization(JSON.stringify(response), { ...repairContext, qualityRepair: false });
+  assert.ok(result.changes.every((change) => change.factCheckPassed));
 });
 
 test("quality repair cannot spend an unused fact on a title or take patch", () => {

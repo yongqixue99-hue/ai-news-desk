@@ -41,6 +41,16 @@ test("source passage references preserve exact punctuation without model transcr
     "story", [source], [snapshot]), /片段/);
 });
 
+test("evidence passages preserve table cell boundaries and keep nearby footnote conditions", () => {
+  const body = "Pricing during preview\n\nModel\tInput per million tokens\tOutput per million tokens\nModel X\t$0.2\t$0.8\n\n[1] Preview prices apply only through September 30, 2026.";
+  const passages = sourceEvidencePassages(body);
+  assert.equal(passages.join("\n\n"), body);
+  const result = parsePackageSourceFacts(JSON.stringify({ facts: [{
+    text: "预览价格仅适用至 2026 年 9 月 30 日。", sourceIndex: 0, passageIndexes: [0],
+  }] }), "story", [source], [{ ...snapshot, originalText: body }]);
+  assert.ok(result.facts[0]?.quotations?.[0]?.text.includes("Model X\t$0.2\t$0.8"));
+});
+
 test("a percentage invented while summarizing a valid source passage is rejected", () => {
   const exact = "On analyses like these, the optimized models cut estimated GPU costs by 30–60%.";
   assert.throws(() => parsePackageSourceFacts(JSON.stringify({ facts: [{

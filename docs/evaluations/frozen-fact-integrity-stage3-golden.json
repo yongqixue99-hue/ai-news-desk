@@ -1,0 +1,581 @@
+{
+  "scope": "synthetic typed-quantity/date and explicit-scope regression; not semantic entailment or model accuracy",
+  "total": 40,
+  "passed": 40,
+  "failed": 0,
+  "acceptedValid": 24,
+  "validTotal": 24,
+  "rejectedContradictions": 16,
+  "contradictionTotal": 16,
+  "categoryCounts": {
+    "unit": {
+      "total": 21,
+      "passed": 21,
+      "validExpressions": 14,
+      "contradictedExpressions": 7
+    },
+    "date": {
+      "total": 4,
+      "passed": 4,
+      "validExpressions": 3,
+      "contradictedExpressions": 1
+    },
+    "quantity": {
+      "total": 5,
+      "passed": 5,
+      "validExpressions": 2,
+      "contradictedExpressions": 3
+    },
+    "identity": {
+      "total": 1,
+      "passed": 1,
+      "validExpressions": 1,
+      "contradictedExpressions": 0
+    },
+    "source": {
+      "total": 4,
+      "passed": 4,
+      "validExpressions": 2,
+      "contradictedExpressions": 2
+    },
+    "scope": {
+      "total": 5,
+      "passed": 5,
+      "validExpressions": 2,
+      "contradictedExpressions": 3
+    }
+  },
+  "failures": [],
+  "results": [
+    {
+      "id": "safe-01",
+      "label": "中文参数前后序",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-02",
+      "label": "参数数量中英等值",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-03",
+      "label": "连字符参数",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-04",
+      "label": "token中文尺度",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-05",
+      "label": "token紧凑尺度",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-06",
+      "label": "内存全称翻译",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-07",
+      "label": "十进制存储单位",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-08",
+      "label": "二进制存储单位",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-09",
+      "label": "时长等值",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-10",
+      "label": "毫秒等值",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-11",
+      "label": "英文原始日期",
+      "category": "date",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-12",
+      "label": "中文日期省年份",
+      "category": "date",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-13",
+      "label": "中文汉字日期",
+      "category": "date",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-14",
+      "label": "货币格式",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-15",
+      "label": "等值计费表达",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-16",
+      "label": "中文百分比",
+      "category": "quantity",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-17",
+      "label": "英文百分比",
+      "category": "quantity",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-18",
+      "label": "原始型号不误判数量",
+      "category": "identity",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-19",
+      "label": "正确归属",
+      "category": "source",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-20",
+      "label": "预览未商用",
+      "category": "scope",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-21",
+      "label": "自测不等于独立验证",
+      "category": "source",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-22",
+      "label": "未知缓存价",
+      "category": "scope",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-23",
+      "label": "美元尺度换算",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "safe-24",
+      "label": "中文金额尺度",
+      "category": "unit",
+      "expectedPass": true,
+      "actualPass": true,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-01",
+      "label": "数字变更",
+      "category": "quantity",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“32 GB”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-02",
+      "label": "单位变更",
+      "category": "unit",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“16 MB”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-03",
+      "label": "时长单位变更",
+      "category": "unit",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“7 小时”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-04",
+      "label": "计费分母变更",
+      "category": "unit",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“0.2 美元”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-05",
+      "label": "计费货币变更",
+      "category": "unit",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“0.2 元”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-06",
+      "label": "计费方向变更",
+      "category": "unit",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“0.2 美元”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-07",
+      "label": "日期变更",
+      "category": "date",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "date-not-supported",
+          "message": "日期“2026 年 9 月 8 日”不符合本段引用的冻结事实。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-08",
+      "label": "凭空增加数量",
+      "category": "quantity",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“16 GB”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-09",
+      "label": "共享百分比单位的区间下界变更",
+      "category": "quantity",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 2,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“70.5%”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-10",
+      "label": "自测变第三方",
+      "category": "source",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "scope-contradiction",
+          "message": "冻结事实只有官方自测，正文不能改称第三方或独立验证。"
+        }
+      ],
+      "warnings": [
+        {
+          "code": "attribution-missing",
+          "message": "本段量化结果来自官方自测，建议在上下文保留测试方归属。"
+        }
+      ]
+    },
+    {
+      "id": "unsafe-11",
+      "label": "缓存命中变未命中",
+      "category": "scope",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "scope-contradiction",
+          "message": "冻结事实描述缓存命中价格，正文不能改成未命中价格。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-12",
+      "label": "预览变商用",
+      "category": "scope",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 0,
+      "errors": [
+        {
+          "code": "scope-contradiction",
+          "message": "冻结事实仍是预览或测试阶段，正文不能升格为正式商用。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-13",
+      "label": "未独立验证不能变独立结论",
+      "category": "source",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "scope-contradiction",
+          "message": "冻结事实只有官方自测，正文不能改称第三方或独立验证。"
+        }
+      ],
+      "warnings": [
+        {
+          "code": "attribution-missing",
+          "message": "本段量化结果来自官方自测，建议在上下文保留测试方归属。"
+        }
+      ]
+    },
+    {
+      "id": "unsafe-14",
+      "label": "未商用不能因存在商用二字获背书",
+      "category": "scope",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 0,
+      "errors": [
+        {
+          "code": "scope-contradiction",
+          "message": "冻结事实仍是预览或测试阶段，正文不能升格为正式商用。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-15",
+      "label": "美元尺度变更",
+      "category": "unit",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“1 billion dollars”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "unsafe-16",
+      "label": "人民币尺度变更",
+      "category": "unit",
+      "expectedPass": false,
+      "actualPass": false,
+      "passed": true,
+      "checkedQuantities": 1,
+      "errors": [
+        {
+          "code": "quantity-not-supported",
+          "message": "数量或计量条件“1 万元”无法回到本段引用的冻结事实，请核对数值、单位和计费分母。"
+        }
+      ],
+      "warnings": []
+    }
+  ]
+}

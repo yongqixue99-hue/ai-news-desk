@@ -6,7 +6,7 @@ import {
 } from "./editorial-visual-generator.js";
 import { captureRenderedPageImages } from "./page-screenshot.js";
 import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
-import { eligibleEditorialImage, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
+import { eligibleEditorialImage, isPlaceholderEditorialCaption, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import { searchLicensedEditorialImages } from "./online-image-search.js";
 import { readState, updateState, workflowMediaRoot } from "./storage.js";
 import { storyById } from "./story-desk.js";
@@ -116,6 +116,8 @@ const mergeEstablishedImage = (existing: SourceImage, incoming: SourceImage): So
   ...incoming,
   id: existing.id,
   url: existing.url,
+  caption: isPlaceholderEditorialCaption(existing.caption) && incoming.caption.trim()
+    && !isPlaceholderEditorialCaption(incoming.caption) ? incoming.caption : existing.caption || incoming.caption,
   localPath: incoming.localPath?.trim() ? incoming.localPath : existing.localPath,
   publicPath: incoming.publicPath?.trim() ? incoming.publicPath : existing.publicPath,
   width: incoming.localPath ? incoming.width ?? existing.width : existing.width ?? incoming.width,

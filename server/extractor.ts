@@ -5,29 +5,15 @@ import * as cheerio from "cheerio";
 import sharp from "sharp";
 import { fetchRemote, readResponseBuffer, validateRemoteUrl } from "./remote-url.js";
 import { workflowMediaRoot } from "./storage.js";
+import { extractOfficialUpdateSection } from "./official-update-index.js";
+import { hasOfficialUpdateAnchor } from "./official-update-url.js";
+import { boundArticleBlocks, extractArticleStructure } from "./article-structure.js";
+import { readQwenArticleSource } from "./qwen-article-source.js";
 import type { ExtractedPage, SourceImage } from "./types.js";
 
 const imageNoise = /logo|icon|avatar|emoji|tracking|pixel|spinner|loading|sprite|favicon|author|profile|badge|button/i;
 
-export const extractArticleBlocks = (html: string): NonNullable<ExtractedPage["blocks"]> => {
-  const $ = cheerio.load(html);
-  $("script, style, nav, footer, aside, form, noscript, svg").remove();
-  const root = $("article").first().length ? $("article").first() : $("main").first().length ? $("main").first() : $("body");
-  const blocks: NonNullable<ExtractedPage["blocks"]> = [];
-  root.find("h2, h3, h4, p, blockquote, li, pre, table").each((_index, element) => {
-    const node = $(element);
-    const tag = element.tagName?.toLowerCase();
-    if (node.parents("pre, table").length || (tag === "p" && node.parents("blockquote, li").length) || (tag === "li" && node.parents("li").length)) return;
-    const text = tag === "pre" ? node.text().replace(/\r\n?/gu, "\n")
-      : tag === "table" ? node.find("tr").map((_row, row) => $(row).find("th, td").map((_cell, cell) => normalizedText($(cell).text())).get().join("\t")).get().join("\n")
-      : normalizedText(node.text());
-    if (!text.trim() || blocks.at(-1)?.text === text) return;
-    blocks.push({ kind: /^h[234]$/u.test(tag) ? "heading" : tag === "pre" ? "code" : tag === "table" ? "table" : tag === "blockquote" ? "quote" : tag === "li" ? "list-item" : "paragraph", text,
-      ...(tag === "pre" ? { language: (node.find("code").attr("class") ?? node.attr("class") ?? "").match(/language-([a-z0-9+-]+)/iu)?.[1] } : {}),
-    });
-  });
-  return blocks;
-};
+export const extractArticleBlocks = (html: string): NonNullable<ExtractedPage["blocks"]> => extractArticleStructure(html).blocks;
 
 const absoluteUrl = (raw: string | undefined, base: URL) => {
   if (!raw || raw.startsWith("data:") || raw.startsWith("blob:")) return undefined;
@@ -145,6 +131,8 @@ const matchingObjectEnd = (source: string, start: number) => {
 export interface ModuleArticleContent {
   title?: string;
   blocks: NonNullable<ExtractedPage["blocks"]>;
+  extractionWarnings?: string[];
+  textTruncated?: boolean;
 }
 
 /**
@@ -172,13 +160,14 @@ export const extractArticleFromModuleSource = (source: string): ModuleArticleCon
           : tag === "li"
             ? "list-item"
             : "paragraph",
-      text: text.slice(0, 8_000),
+      text,
     });
   }
   const renderSource = source.slice(Math.max(0, source.lastIndexOf("createRoot")));
   const titleMatch = renderSource.match(/\btitle\s*:\s*`((?:\\.|[^`]){2,240})`/u);
   const title = titleMatch ? normalizedText(decodeModuleText(titleMatch[1]!)) : undefined;
-  return { title, blocks: blocks.slice(0, 120) };
+  const bounded = boundArticleBlocks(blocks);
+  return { title, blocks: bounded.blocks, extractionWarnings: bounded.extractionWarnings, textTruncated: bounded.textTruncated };
 };
 
 const moduleFallbackForClientShell = async (
@@ -188,6 +177,8 @@ const moduleFallbackForClientShell = async (
 ) => {
   const images: string[] = [];
   const blocks: NonNullable<ExtractedPage["blocks"]> = [];
+  const extractionWarnings: string[] = [];
+  let textTruncated = false;
   let title: string | undefined;
   for (const moduleUrl of moduleUrls.slice(0, 3)) {
     try {
@@ -210,6 +201,8 @@ const moduleFallbackForClientShell = async (
       const article = extractArticleFromModuleSource(source);
       title ??= article.title;
       blocks.push(...article.blocks);
+      extractionWarnings.push(...article.extractionWarnings ?? []);
+      textTruncated ||= article.textTruncated ?? false;
       if (images.length >= imageLimit && blocks.length >= 3 && title) break;
     } catch {
       // Module probing is a best-effort fallback. A failed asset must not make
@@ -217,15 +210,19 @@ const moduleFallbackForClientShell = async (
     }
   }
   const seenBlocks = new Set<string>();
+  const bounded = boundArticleBlocks(blocks.filter((block) => {
+    const key = `${block.kind}:${block.text}`;
+    if (seenBlocks.has(key)) return false;
+    seenBlocks.add(key);
+    return true;
+  }));
   return {
     images: [...new Set(images)].slice(0, Math.max(0, imageLimit)),
     title,
-    blocks: blocks.filter((block) => {
-      const key = `${block.kind}:${block.text}`;
-      if (seenBlocks.has(key)) return false;
-      seenBlocks.add(key);
-      return true;
-    }).slice(0, 120),
+    blocks: bounded.blocks,
+    text: bounded.text,
+    extractionWarnings: [...new Set([...extractionWarnings, ...bounded.extractionWarnings])],
+    textTruncated: textTruncated || bounded.textTruncated,
   };
 };
 
@@ -244,6 +241,8 @@ export const extractArticleImageCandidates = (html: string, pageUrl: string): Ar
   const images: ArticleImageCandidate[] = [];
   $("nav, footer, aside, form, [role='navigation'], [aria-label*='Related'], [class*='related-'], [class*='recommendation'], [class*='author-'], [class*='authorBio'], [class*='byline'], [class*='most-read'], [class*='MostRead']").remove();
   const root = $("article").first().length ? $("article").first() : $("main, [role='main']").first().length ? $("main, [role='main']").first() : $("body");
+  // These are typography fragments in an inaccessible animated heading, not article figures.
+  root.find('[aria-hidden="true"] [data-letter-index]').remove();
   root.find("img").each((index, element) => {
     const node = $(element);
     const pictureSets = node.closest("picture").find("source").map((_i, source) => $(source).attr("srcset") || $(source).attr("data-srcset") || "").get().join(",");
@@ -270,16 +269,29 @@ export const extractArticleImageCandidates = (html: string, pageUrl: string): Ar
   return images;
 };
 
-export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<ExtractedPage> => {
-  const requestedUrl = await validateRemoteUrl(rawUrl);
-  const response = await fetchRemote(requestedUrl, {
+export const fetchArticleDocument = (url: URL, options: { fetcher?: typeof fetchRemote; language?: string } = {}) =>
+  (options.fetcher ?? fetchRemote)(url, {
     signal: AbortSignal.timeout(18_000),
     headers: {
-      "user-agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 AI-News-Desk/0.1",
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
       accept: "text/html,application/xhtml+xml",
+      ...(options.language ? { "accept-language": options.language } : {}),
     },
   });
+
+export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<ExtractedPage> => {
+  const requestedUrl = await validateRemoteUrl(rawUrl);
+  const qwenArticle = await readQwenArticleSource(requestedUrl.toString());
+  if (qwenArticle) {
+    const articleUrl = new URL(qwenArticle.canonicalUrl);
+    const page = await extractPageContent(qwenArticle.html, articleUrl, articleUrl, imageLimit);
+    return { ...page, url: qwenArticle.canonicalUrl, canonicalUrl: qwenArticle.canonicalUrl,
+      title: qwenArticle.title, author: qwenArticle.author, publishedAt: qwenArticle.publishedAt };
+  }
+  const fetchUrl = new URL(requestedUrl);
+  const geminiUpdate = fetchUrl.origin === "https://ai.google.dev" && /^\/gemini-api\/docs\/changelog\/?$/u.test(fetchUrl.pathname);
+  if (geminiUpdate) fetchUrl.searchParams.set("hl", "en");
+  const response = await fetchArticleDocument(fetchUrl, { language: geminiUpdate ? "en-US,en;q=0.9" : undefined });
   if (!response.ok) throw new Error(`页面读取失败：HTTP ${response.status}`);
   const finalUrl = new URL(response.url || requestedUrl.toString());
   const contentType = response.headers.get("content-type") ?? "";
@@ -287,10 +299,21 @@ export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<Extra
     throw new Error(`不支持的页面类型：${contentType || "unknown"}`);
   }
   const html = (await readResponseBuffer(response, 4_000_000)).toString("utf8");
+  return extractPageContent(html, finalUrl, requestedUrl, imageLimit);
+};
+
+/** Parse a fetched page; official history pages must resolve to one dated event. */
+export const extractPageContent = async (content: string, finalUrl: URL, requestedUrl = finalUrl, imageLimit = 8): Promise<ExtractedPage> => {
+  if (hasOfficialUpdateAnchor(requestedUrl)
+    && (requestedUrl.origin !== finalUrl.origin || requestedUrl.pathname.replace(/\/$/u, "") !== finalUrl.pathname.replace(/\/$/u, ""))) {
+    throw new Error("官方更新永久链接重定向到其他页面，无法确认事件正文");
+  }
+  const section = extractOfficialUpdateSection(content, requestedUrl.toString());
+  const html = section ? `<article>${section.html}</article>` : content;
   const $ = cheerio.load(html);
-  const canonicalUrl =
+  const canonicalUrl = section ? requestedUrl.toString() :
     absoluteUrl($("link[rel='canonical']").attr("href"), finalUrl) ?? finalUrl.toString();
-  let title = normalizedText(
+  let title = section?.title ?? normalizedText(
     $("meta[property='og:title']").attr("content") || $("title").text() || "",
   );
   const publishedValue =
@@ -299,9 +322,9 @@ export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<Extra
     || $("meta[name='pub_date']").attr("content")
     || $("time[datetime]").first().attr("datetime");
   const publishedDate = publishedValue ? new Date(publishedValue) : undefined;
-  const publishedAt = publishedDate && Number.isFinite(publishedDate.getTime())
+  const publishedAt = section?.publishedAt ?? (publishedDate && Number.isFinite(publishedDate.getTime())
     ? publishedDate.toISOString()
-    : undefined;
+    : undefined);
 
   const moduleUrls = $("script[type='module'][src]")
     .map((_index, element) => absoluteUrl($(element).attr("src"), finalUrl))
@@ -309,14 +332,11 @@ export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<Extra
     .filter((value): value is string => Boolean(value))
     .filter((value) => new URL(value).origin === finalUrl.origin);
 
-  $("script, style, nav, footer, aside, form, noscript, svg").remove();
-  const articleRoot = $("article").first().length
-    ? $("article").first()
-    : $("main").first().length
-      ? $("main").first()
-      : $("body");
-  const blocks = extractArticleBlocks(html);
-  let text = normalizedText(articleRoot.text()).slice(0, 30_000);
+  const structure = extractArticleStructure(html, canonicalUrl);
+  let blocks = structure.blocks;
+  let text = structure.text;
+  let textTruncated = structure.textTruncated;
+  const extractionWarnings = [...structure.extractionWarnings];
 
   const imageCandidates: ArticleImageCandidate[] = [];
 
@@ -334,9 +354,12 @@ export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<Extra
   if (moduleUrls.length && (articleImageCount === 0 || blocks.length === 0 || text.length < 80 || !title)) {
     const moduleFallback = await moduleFallbackForClientShell(moduleUrls, finalUrl, imageLimit);
     title ||= moduleFallback.title || "";
-    if (!blocks.length && moduleFallback.blocks.length) blocks.push(...moduleFallback.blocks);
     if (text.length < 80 && moduleFallback.blocks.length) {
-      text = normalizedText(moduleFallback.blocks.map((block) => block.text).join(" ")).slice(0, 30_000);
+      blocks = moduleFallback.blocks;
+      text = moduleFallback.text;
+      textTruncated ||= moduleFallback.textTruncated;
+      extractionWarnings.push(...moduleFallback.extractionWarnings);
+      extractionWarnings.push("正文通过客户端模块的有限结构提取恢复，未解析的动态内容仍需核对。");
     }
     moduleFallback.images.forEach((url, index) => {
       imageCandidates.push({
@@ -369,7 +392,8 @@ export const extractPage = async (rawUrl: string, imageLimit = 8): Promise<Extra
       rights: "check-required",
     }));
 
-  return { url: finalUrl.toString(), canonicalUrl, title, publishedAt, text, blocks, images };
+  return { url: section ? requestedUrl.toString() : finalUrl.toString(), canonicalUrl, title, publishedAt, text, blocks, images,
+    extractionWarnings, textTruncated };
 };
 
 export const downloadSourceImage = async (

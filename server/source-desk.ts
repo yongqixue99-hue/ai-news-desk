@@ -4,9 +4,13 @@ import type {
   CollectionTopicId,
   RawHorizonItem,
   SourceConfig,
+  SourceRouteResult,
 } from "./types.js";
 import { sourceRoleFor, sourceSupportsTopics } from "./source-routing.js";
+import { hasOfficialUpdateAnchor } from "./official-update-url.js";
 import type { XAccountObservation } from "./x-official.js";
+export { createZhihuHotlist } from "./zhihu-hotlist.js";
+export { buildTopicFeed, communityPlatforms, retainZhihuTopic } from "./topic-feeds.js";
 
 export interface SignalBatch {
   items: RawHorizonItem[];
@@ -15,6 +19,7 @@ export interface SignalBatch {
   horizonRunId?: string;
   sourceCursors?: Record<string, string>;
   xAccountObservations?: Record<string, XAccountObservation[]>;
+  routeResults?: SourceRouteResult[];
 }
 
 export interface SourceCollectRequest {
@@ -24,10 +29,30 @@ export interface SourceCollectRequest {
   signal?: AbortSignal;
 }
 
+export const deduplicateDiscoveryItems = (items: RawHorizonItem[]) => {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    let key = item.url;
+    try {
+      const url = new URL(item.url);
+      if (!hasOfficialUpdateAnchor(url)) url.hash = "";
+      for (const parameter of [...url.searchParams.keys()]) {
+        if (/^(?:utm_.+|fbclid|gclid)$/iu.test(parameter)) url.searchParams.delete(parameter);
+      }
+      url.searchParams.sort();
+      key = url.href;
+    } catch { /* Preserve unrecognized identities; validation belongs to the adapter. */ }
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 interface StructuredCollectionResult {
   items: RawHorizonItem[];
   horizonRunId?: string;
   failures?: Record<string, string>;
+  routeResults?: SourceRouteResult[];
 }
 
 interface SourceDeskDependencies {
@@ -102,7 +127,7 @@ export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
     const communitySources = request.sources.filter(isCommunityAdapter);
     const xSources = request.sources.filter((source) => source.kind === "x");
     const failures: Record<string, string> = {};
-    const structuredPromise = structuredSources.length
+    const structuredPromise: Promise<StructuredCollectionResult> = structuredSources.length
       ? dependencies.collectStructured(structuredSources, request).catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         for (const source of structuredSources) failures[source.id] = message;
@@ -147,6 +172,7 @@ export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
       failures,
       adapterCounts,
       horizonRunId: structured.horizonRunId,
+      routeResults: structured.routeResults ?? [],
       sourceCursors: xOfficial.cursors,
       xAccountObservations: xOfficial.accountObservations,
     };

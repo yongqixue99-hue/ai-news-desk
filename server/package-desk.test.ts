@@ -79,6 +79,15 @@ const run = (candidates: Candidate[]): WorkflowRun => ({
   logs: [],
 });
 
+test("asset fact placement is not manufactured from its position in the image list", () => {
+  const state = createDefaultState();
+  state.runs = [run([candidate("official")])];
+  const story = buildStories(state, "2026-08-30T02:00:00.000Z")[0]!;
+  const contentPackage = buildContentPackage(state, { storyId: story.id, mode: "brief", now: "2026-08-30T02:00:00.000Z" });
+  assert.ok(contentPackage.assets.length);
+  assert.equal(contentPackage.assets[0]?.recommendedAfterClaimId, undefined);
+});
+
 test("PackageDesk freezes claims, community quotations and governed images", () => {
   const state = createDefaultState();
   state.runs = [run([
@@ -159,7 +168,7 @@ test("PackageDesk keeps a community discovery path out of a news fact ledger", (
 
 test("selected-article evidence replaces stale scan summaries and remains frozen with source quotations", () => {
   const state = createDefaultState();
-  state.runs = [run([candidate("official")])];
+  state.runs = [run([candidate("official", { briefing: undefined })])];
   const story = buildStories(state, "2026-08-30T02:00:00.000Z")[0]!;
   const quote = "Cache reads cost one quarter of the previous rate; base input and output prices are unchanged.";
   const source = { signalId: "run-1:official", label: "Acme 官方", url: "https://acme.example/model-x", role: "official" as const,
@@ -176,6 +185,10 @@ test("selected-article evidence replaces stale scan summaries and remains frozen
   assert.deepEqual(contentPackage.sourceEvidence?.[0]?.originalText, quote);
   assert.equal(contentPackage.facts[0]?.quotations?.[0]?.text, quote);
   assert.equal(contentPackage.sources[0]?.basis, "full-source");
+  assert.doesNotMatch(contentPackage.uncertainties.join(" "), /原文待读取/u);
+  const changedUnknowns = buildContentPackage(state, { storyId: story.id, mode: "brief", now: "2026-08-30T02:00:00.000Z",
+    articleEvidence: { facts: [fact], sources: [source], snapshots: [snapshot], uncertainties: ["价格生效范围仍需核对"] } });
+  assert.notEqual(changedUnknowns.id, contentPackage.id, "a different evidence limit receives a new immutable package identity");
   snapshot.originalText = "Changed later";
   fact.text = "Changed later";
   assert.equal(contentPackage.sourceEvidence?.[0]?.originalText, quote);
@@ -364,15 +377,15 @@ test("PackageDesk adds a governed local library fallback and versions the packag
   const genericPath = packageFixture("generic-ai.png");
   state.materials = [{
     id: "material-generic-ai",
-    title: "通用 AI 信息流",
+    title: "Acme 产品资料图",
     fileName: "generic-ai.png",
     localPath: genericPath,
     publicPath: "/materials/generic-ai.png",
     attribution: "AI News Desk",
-    tags: ["通用", "示意图", "AI"],
+    tags: ["Acme", "资料图"],
     rights: "owned",
     allowedPlatforms: ["*"],
-    entityTags: [],
+    entityTags: ["Acme"],
     fingerprint: fileFingerprint(genericPath),
     createdAt: "2026-08-30T01:00:00.000Z",
   }];
@@ -386,7 +399,7 @@ test("PackageDesk adds a governed local library fallback and versions the packag
   assert.equal(withLibrary.assets[0]?.origin, "library");
   assert.equal(withLibrary.assets[0]?.localReady, true);
   assert.equal(withLibrary.assets[0]?.rightsDecision, "allowed");
-  assert.match(withLibrary.assets[0]?.caption || "", /非事件现场/u);
+  assert.match(withLibrary.assets[0]?.caption || "", /资料图.*Acme/u);
   assert.equal(withLibrary.assets[0]?.sourceImage.localPath, state.materials[0]?.localPath);
   assert.equal(withLibrary.assets[0]?.sourceImage.publicPath, state.materials[0]?.publicPath);
   assert.equal(withLibrary.assets[0]?.sourceImage.attribution, "AI News Desk");
@@ -437,15 +450,15 @@ test("PackageDesk rejects a local file that no longer matches its recorded finge
   writeFileSync(localPath, Buffer.from("tampered-after-catalog"));
   state.materials = [{
     id: "material-tampered",
-    title: "通用 AI 资料图",
+    title: "Acme 资料图",
     fileName: "tampered.png",
     localPath,
     publicPath: "/materials/tampered.png",
     attribution: "AI News Desk",
-    tags: ["通用", "AI"],
+    tags: ["Acme"],
     rights: "owned",
     allowedPlatforms: ["*"],
-    entityTags: [],
+    entityTags: ["Acme"],
     fingerprint: recordedFingerprint,
     createdAt: "2026-08-30T01:00:00.000Z",
   }];
@@ -463,15 +476,15 @@ test("a frozen package survives source deletion and rejects replaced package byt
   const originalPath = packageFixture("durable.png");
   state.materials = [{
     id: "material-durable",
-    title: "通用 AI 资料图",
+    title: "Acme 资料图",
     fileName: "durable.png",
     localPath: originalPath,
     publicPath: "/materials/durable.png",
     attribution: "AI News Desk",
-    tags: ["通用", "AI"],
+    tags: ["Acme"],
     rights: "owned",
     allowedPlatforms: ["*"],
-    entityTags: [],
+    entityTags: ["Acme"],
     fingerprint: fileFingerprint(originalPath),
     createdAt: "2026-08-30T01:00:00.000Z",
   }];

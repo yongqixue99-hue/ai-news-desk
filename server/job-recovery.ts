@@ -1,0 +1,10 @@
+import type { LocalDatabase } from "./local-database.js";
+
+/** Retrying source preparation never invokes draft delivery or publication. */
+export const retryPackageJob = (database: LocalDatabase, jobId: string, storyTitle?: string) => {
+  const failed = database.getJob(jobId);
+  if (!failed || failed.status !== "failed" || failed.type !== "build-content-package") throw new Error("这个任务不能从这里重试");
+  if (!failed.payload || typeof failed.payload !== "object" || !("storyId" in failed.payload) || typeof failed.payload.storyId !== "string") throw new Error("任务缺少原选题");
+  return database.enqueueJob({ type: failed.type, idempotencyKey: `recovery:${failed.id}`,
+    payload: { ...failed.payload, ...(storyTitle ? { storyTitle } : {}), retryOf: failed.id }, maxAttempts: 2 });
+};

@@ -10,6 +10,19 @@ import {
   sourceSupportsTopics,
 } from "./source-routing.js";
 
+test("Gemini and Qwen retain a first-party route when Google News is unreachable", () => {
+  for (const topic of ["ai", "technology"] as const) {
+    const gemini = defaultSources.find((source) => source.id === "gemini-official")!;
+    assert.ok(routedFeedsForSource(gemini, [topic]).some((feed) => feed.url === "https://blog.google/products-and-platforms/products/gemini/rss/"));
+  }
+  const qwen = defaultSources.find((source) => source.id === "qwen-official")!;
+  assert.ok(routedFeedsForSource(qwen, ["ai"]).some((feed) => feed.format === "qwen-json" && new URL(feed.url).hostname === "qwen.ai"));
+  const deepseek = defaultSources.find((source) => source.id === "deepseek-official")!;
+  assert.equal(routedFeedsForSource(deepseek, ["ai"])[0]?.format, "deepseek-updates");
+  assert.ok(routedFeedsForSource(defaultSources.find((source) => source.id === "gemini-official")!, ["ai"])
+    .some((feed) => feed.format === "gemini-changelog"));
+});
+
 test("model-version discovery expands compact search terms without requiring exact punctuation", () => {
   const compact = buildDiscoveryQuery("artificial intelligence", { keywords: "GPT6" });
   const hyphenated = buildDiscoveryQuery("artificial intelligence", { keywords: "GPT-6" });

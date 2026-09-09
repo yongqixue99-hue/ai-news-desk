@@ -3,6 +3,10 @@ import { normalizeTopicIds, topicDefinitionsFor } from "./topics.js";
 import { keywordTerms } from "./source-routing.js";
 import { personalizeCandidates } from "./personalization.js";
 import { technicalArticlePolicy } from "./technical-article.js";
+import { areDistinctOfficialUpdates, hasOfficialUpdateAnchor } from "./official-update-url.js";
+import { isModelAnnouncementText, modelLaunchCatchupHours } from "./model-announcement.js";
+import { firstPartyModelVendorFor } from "./model-release-research.js";
+import { mayShareEditorialEvent } from "./newsworthiness.js";
 import type {
   Candidate,
   CandidateFeedback,
@@ -98,8 +102,9 @@ const normalizeSearchSeparators = (value: string) => value
 
 export const topicRelevance = (text: string, topicIds: CollectionTopicId[]) => {
   const definitions = topicDefinitionsFor(normalizeTopicIds(topicIds));
+  const searchable = text.normalize("NFKC").replace(/(?<=[a-z])(?=\d)/giu, " ");
   const matchedTopics = definitions.filter((topic) =>
-    topic.keywords.some((keyword) => keywordMatches(text, keyword)),
+    topic.keywords.some((keyword) => keywordMatches(searchable, keyword)),
   );
   return matchedTopics.length ? Math.min(2, 1 + matchedTopics.length) : 0;
 };
@@ -109,12 +114,19 @@ export const candidateScore = (
   sourceName: string,
   windowHours: number,
   topicIds: CollectionTopicId[] = ["ai"],
+  now = Date.now(),
 ): { total: number; breakdown: ScoreBreakdown; evidence: string } => {
   const text = `${item.title} ${item.content ?? ""}`;
   const ageHours = item.published_at
-    ? Math.max(0, (Date.now() - Date.parse(item.published_at)) / 3_600_000)
+    ? Math.max(0, (now - Date.parse(item.published_at)) / 3_600_000)
     : windowHours;
-  const relevance = topicRelevance(text, topicIds);
+  // These adapters read dated AI API entries, including newly named models
+  // that a keyword dictionary cannot know yet. Generic publisher feeds do
+  // not get this exception, and other selected topics still use their words.
+  const datedAiIndex = item.metadata?.source_role === "official"
+    && ["gemini-changelog", "deepseek-updates", "claude-changelog"].includes(String(item.metadata?.source_format))
+    && (() => { try { return hasOfficialUpdateAnchor(new URL(item.url)); } catch { return false; } })();
+  const relevance = Math.max(topicRelevance(text, topicIds), datedAiIndex && topicIds.includes("ai") ? 2 : 0);
   const consequence = consequencePattern.test(text) ? 4 : relevance ? 2 : 1;
   const novelty = /launch|release|announc|new |first |introduc/i.test(text) ? 3 : 2;
   const evidence = officialPattern.test(sourceName)
@@ -290,7 +302,16 @@ export const rawItemTimeRejectionReason = (
     return undefined;
   }
 
-  const windowHours = Math.max(1, options.windowHours ?? 1);
+  // A source-backed announcement may be discovered on wake/startup several
+  // days later. Index timestamps and sitemap modification dates cannot earn
+  // this exception; explicit date ranges above always remain authoritative.
+  const catchup = item.metadata?.source_role === "official"
+    && (item.metadata?.date_verification === "verified" || (
+      !["news-index", "feed-updated", "sitemap-lastmod"].includes(String(item.metadata?.date_basis))
+      && item.metadata?.source_format !== "sitemap"))
+    && Boolean(firstPartyModelVendorFor({ url: item.url }))
+    && isModelAnnouncementText(item.title, item.content);
+  const windowHours = Math.max(1, options.windowHours ?? 1, catchup ? modelLaunchCatchupHours : 0);
   return publishedAt < currentTime - windowHours * 3_600_000 ? "outside-window" : undefined;
 };
 
@@ -310,10 +331,11 @@ export const rawItemToCandidate = (
   item: RawHorizonItem,
   windowHours: number,
   topicIds: CollectionTopicId[] = ["ai"],
+  now = Date.now(),
 ): Candidate => {
   const sourceName = sourceNameFor(item);
   const sourceRole = sourceRoleForItem(item);
-  const scored = candidateScore(item, sourceName, windowHours, topicIds);
+  const scored = candidateScore(item, sourceName, windowHours, topicIds, now);
   const xPoints = item.source_type === "x"
     ? Math.min(Number.MAX_SAFE_INTEGER, ["like_count", "retweet_count", "quote_count"]
       .reduce((total, key) => total + (finiteMetadataNumber(item.metadata?.[key]) ?? 0), 0))
@@ -334,6 +356,14 @@ export const rawItemToCandidate = (
     sourceRole,
     technicalArticle: technicalArticlePolicy({ url: item.url, title: item.title, excerpt: item.content, sourceRole }),
     publicationDateKnown: item.source_type === "documentation" ? Boolean(item.published_at) : undefined,
+    ...(item.metadata?.date_basis || item.metadata?.date_verification === "verified" ? { publicationEvidence: {
+      basis: String(item.metadata.date_verification === "verified" ? "verified-publication" : item.metadata.date_basis),
+      sourceUrl: typeof item.metadata.date_source_url === "string" ? item.metadata.date_source_url : item.url,
+      precision: (item.metadata.date_precision === "day" || item.metadata.date_publication_precision === "day" ? "day" : "timestamp") as "day" | "timestamp",
+      ...(typeof item.metadata.indexed_at === "string" ? { indexedAt: item.metadata.indexed_at } : {}),
+      ...(typeof item.metadata.modified_at === "string" ? { modifiedAt: item.metadata.modified_at } : {}),
+      ...(typeof item.metadata.feed_original_title === "string" ? { originalFeedTitle: item.metadata.feed_original_title } : {}),
+    } } : {}),
     author: item.author,
     title: item.title,
     url: item.url,
@@ -342,8 +372,8 @@ export const rawItemToCandidate = (
     // enough of the discussion for a separate community synthesis instead of
     // squeezing it into the news-summary-sized 360-character window.
     excerpt: cleanExcerpt(item.content, sourceRole === "community" ? 2_400 : 360),
-    publishedAt: item.published_at ?? item.fetched_at ?? new Date().toISOString(),
-    fetchedAt: item.fetched_at ?? new Date().toISOString(),
+    publishedAt: item.published_at ?? item.fetched_at ?? new Date(now).toISOString(),
+    fetchedAt: item.fetched_at ?? new Date(now).toISOString(),
     score: scored.total,
     scoreBreakdown: scored.breakdown,
     heatScore: 0,
@@ -365,7 +395,7 @@ export const rawItemToCandidate = (
   };
 };
 
-export const sortCandidates = (
+export const rankCandidatesWithDiagnostics = (
   candidates: Candidate[],
   feedback: CandidateFeedback[] = [],
   personalizationEnabled = true,
@@ -375,7 +405,9 @@ export const sortCandidates = (
   );
   const clusters: Candidate[][] = [];
   for (const candidate of eligible) {
-    const cluster = clusters.find((entries) => Boolean(entries[0].technicalArticle) === Boolean(candidate.technicalArticle)
+    const cluster = clusters.find((entries) => !entries.some((entry) => areDistinctOfficialUpdates(entry.url, candidate.url))
+      && entries.every((entry) => mayShareEditorialEvent(entry.title, candidate.title))
+      && Boolean(entries[0].technicalArticle) === Boolean(candidate.technicalArticle)
       && (candidate.technicalArticle ? entries[0].url === candidate.url : titleSimilarity(entries[0].title, candidate.title) >= 0.78));
     if (cluster) cluster.push(candidate);
     else clusters.push([candidate]);
@@ -426,5 +458,12 @@ export const sortCandidates = (
       return Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
     });
   const personalized = personalizeCandidates(baseRanking, feedback, personalizationEnabled);
-  return [...personalized.filter(candidate => !candidate.technicalArticle).slice(0, 60), ...personalized.filter(candidate => candidate.technicalArticle).slice(0, 54)];
+  const selected = [...personalized.filter(candidate => !candidate.technicalArticle).slice(0, 60), ...personalized.filter(candidate => candidate.technicalArticle).slice(0, 54)];
+  return { candidates: selected, eligibleCount: eligible.length, clusterCount: clusters.length,
+    scoreRejected: candidates.length - eligible.length, mergedCount: eligible.length - clusters.length,
+    limitRejected: clusters.length - selected.length };
 };
+
+export const sortCandidates = (
+  candidates: Candidate[], feedback: CandidateFeedback[] = [], personalizationEnabled = true,
+) => rankCandidatesWithDiagnostics(candidates, feedback, personalizationEnabled).candidates;

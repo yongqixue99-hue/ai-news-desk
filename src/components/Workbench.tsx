@@ -21,6 +21,8 @@ import {
   Plus,
   RefreshCw,
   ScanText,
+  SlidersHorizontal,
+  MoreHorizontal,
   Search,
   RotateCcw,
   ThumbsDown,
@@ -29,7 +31,6 @@ import {
   X,
   TriangleAlert,
 } from "lucide-react";
-import { WorkflowStepper } from "./WorkflowStepper";
 import { QuickDraftModal } from "./QuickDraftModal";
 import { CommunityDraftModal, type CommunityDraftMode } from "./CommunityDraftModal";
 import { collectionTopics } from "../../server/topics.js";
@@ -201,7 +202,6 @@ export function Workbench({
   const [keywords, setKeywords] = useState("");
   const [candidateSort, setCandidateSort] = useState<CandidateSortMode>("recommended");
   const [quickDraftOpen, setQuickDraftOpen] = useState(false);
-  const [sourcesOpen, setSourcesOpen] = useState(false);
   const [runRailOpen, setRunRailOpen] = useState(true);
   const [rankingHelpOpen, setRankingHelpOpen] = useState(false);
   const [feedbackBusy, setFeedbackBusy] = useState<string>();
@@ -369,15 +369,15 @@ export function Workbench({
       <header className="page-header workbench-header">
         <div>
           <h1>新闻工作台</h1>
-          <p>只看媒体与官方来源；社区热点已移到独立的社区广场。</p>
+          <p>找到新闻，核对来源，整理成你的下一篇文章。</p>
         </div>
         <div className="header-meta">
           <span><CalendarDays size={17} />{formatDate(new Date())}</span>
-          <span className="next-run"><Clock3 size={17} />下次采集 {settings.scheduleTime}</span>
+          <span className="next-run"><Clock3 size={17} />{settings.scheduleEnabled ? `下次采集 ${settings.scheduleTime}` : "定时采集已关闭"}</span>
         </div>
       </header>
 
-      <WorkflowStepper active={activeStep} />
+      <nav className="workbench-route" aria-label="写作流程">{["采集新闻", "选择题目", "生成草稿", "编辑与发布"].map((label, index) => <span key={label} aria-current={activeStep === index + 1 ? "step" : undefined}><small>{String(index + 1).padStart(2, "0")}</small>{label}{index < 3 ? <ArrowRight size={13} /> : null}</span>)}</nav>
 
       <div className={`workbench-grid ${runRailOpen ? "" : "run-rail-collapsed-layout"}`}>
         <section className="workflow-surface" aria-label="采集控制台">
@@ -401,40 +401,27 @@ export function Workbench({
                   value={keywords}
                   maxLength={120}
                   onChange={(event) => setKeywords(event.target.value)}
-                  placeholder="如：OpenAI、苹果、政策"
+                  placeholder="搜索公司、模型或事件"
                 />
               </span>
-              <small>多个关键词用逗号分隔，匹配其中任意一个</small>
+              <small>选填 · 多个关键词用逗号分隔</small>
             </label>
-            <label className="field-control">
-              <span className="control-label">成稿模式</span>
-              <span className="select-wrap">
-                <select value="separate" disabled aria-label="成稿模式：分别成稿">
-                  <option value="separate">分别成稿</option>
-                </select>
-                <ChevronDown size={16} />
-              </span>
-              <small>每条待写候选独立生成一篇草稿</small>
-            </label>
-            <label className="field-control image-policy-control">
-              <span className="control-label">图片策略</span>
-              <span className="select-wrap">
-                <select
-                  value={settings.imagePolicy}
-                  onChange={(event) =>
-                    onSettings({ imagePolicy: event.target.value as Settings["imagePolicy"] })
-                  }
-                >
-                  <option value="source">优先官方／来源原图</option>
-                  <option value="screenshot">网页截图</option>
-                  <option value="none">不配图</option>
-                </select>
-                <ChevronDown size={16} />
-              </span>
-            </label>
+              <div className="collect-actions">
+                {collectionIsActive ? (
+                  <button className="secondary-button danger-button" onClick={onCancel} disabled={busy}>
+                    <X size={16} />取消
+                  </button>
+                ) : null}
+                <button className="primary-button" onClick={startCollection} disabled={runIsActive || !selectedSourceCount || invalidDateRange || busy}>
+                  {collectionIsActive ? <LoaderCircle className="spin" size={17} /> : <RefreshCw size={17} />}
+                  {collectionIsActive ? "正在采集" : run?.status === "generating" ? "正在成稿" : "开始采集"}
+                </button>
+              </div>
           </div>
 
-          <div className="source-selector">
+          <details className="collection-settings">
+            <summary><span><SlidersHorizontal size={15} />采集设置<small>{activeChannel === "all" ? "综合" : collectionTopics.find((topic) => topic.id === activeChannel)?.label} · {selectedSourceCount} 个来源</small></span><ChevronDown size={16} /></summary>
+            <div className="source-selector">
             <div className="topic-selector">
               <div className="section-inline-heading">
                 <span>搜寻频道</span>
@@ -475,18 +462,7 @@ export function Workbench({
                   : "Google News 补充搜索未开启：不影响已选官网采集；需要扩大范围时，可在下方来源中勾选。"}
               </p>
             </div>
-            <div className="source-collapse-heading">
-              <button
-                className="source-collapse-trigger"
-                aria-expanded={sourcesOpen}
-                onClick={() => setSourcesOpen((open) => !open)}
-              >
-                <span><strong>采集来源</strong><small>已选择 {selectedSourceCount} / {visibleSources.length}</small></span>
-                <ChevronDown size={16} />
-              </button>
-              <button className="text-button" onClick={onAddSource}><Plus size={15} />管理新闻源</button>
-            </div>
-            {sourcesOpen ? (
+            <div className="source-collapse-heading"><strong>采集来源 <small>已选 {selectedSourceCount} / {visibleSources.length}</small></strong><button type="button" className="text-button" onClick={onAddSource}><Plus size={15} />管理新闻源</button></div>
               <div className="source-options source-options-collapsible">
                 {visibleSources.map((source) => (
                   <label key={source.id} className={source.selected ? "source-option selected" : "source-option"}>
@@ -502,36 +478,47 @@ export function Workbench({
                     </span>
                   </label>
                 ))}
-              </div>
-            ) : (
-              <div className="source-collapsed-summary">
-                <span>{selectedSources.slice(0, 5).map((source) => source.name).join("、") || "尚未选择来源"}</span>
-                {selectedSources.length > 5 ? <small>等 {selectedSources.length} 个来源</small> : null}
-              </div>
-            )}
-            <div className="collect-row">
-              <p>{sourcesOpen ? "官网链接用于人工查看；RSS 与新闻索引仅在后台采集。采集后会去重、评分并读取来源原图。" : "来源已收起；展开后可增减官网或开启 Google News 补充搜索。"}</p>
-              <div className="collect-actions">
-                {collectionIsActive ? (
-                  <button className="secondary-button danger-button" onClick={onCancel} disabled={busy}>
-                    <X size={16} />取消
-                  </button>
-                ) : null}
-                <button className="primary-button" onClick={startCollection} disabled={runIsActive || !selectedSourceCount || invalidDateRange || busy}>
-                  {collectionIsActive ? <LoaderCircle className="spin" size={17} /> : <RefreshCw size={17} />}
-                  {collectionIsActive ? "正在采集" : run?.status === "generating" ? "正在成稿" : "开始采集"}
-                </button>
-              </div>
+              </div>            <div className="collection-image-setting">
+            <label className="field-control image-policy-control">
+              <span className="control-label">图片策略</span>
+              <span className="select-wrap">
+                <select
+                  aria-label="图片策略"
+                  value={settings.imagePolicy}
+                  onChange={(event) =>
+                    onSettings({ imagePolicy: event.target.value as Settings["imagePolicy"] })
+                  }
+                >
+                  <option value="source">优先官方／来源原图</option>
+                  <option value="screenshot">网页截图</option>
+                  <option value="none">不配图</option>
+                </select>
+                <ChevronDown size={16} />
+              </span>
+            </label>              <p>优先保留与事件相关的原图；成稿后可以调整。</p>
             </div>
-          </div>
+            </div>
+          </details>
 
           <div className="candidate-region">
             <div className="table-heading">
               <div className="candidate-heading-copy">
                 <h2>候选新闻</h2>
-                <span>{run ? `${run.rawCount} 条原始记录${run.filteredRawCount !== undefined ? ` · ${run.filteredRawCount} 条符合搜索条件` : ""} · ${candidates.length} 条候选` : "尚未启动今日采集"}</span>
+                <span>{run ? `${candidates.length} 条 · ${run.rawCount} 条原始记录` : "选择来源，开始第一次采集"}</span>
               </div>
               <div className="candidate-toolbar">
+                <label className="candidate-sort" title="只有公开互动或多家独立跟进才算传播证据；没有数据不会被判为低热度">
+                  <ArrowDownUp size={14} />
+                  <select value={candidateSort} onChange={(event) => setCandidateSort(event.target.value as CandidateSortMode)}>
+                    <option value="recommended">综合推荐</option>
+                    <option value="heat">公开传播优先</option>
+                    <option value="value">价值优先</option>
+                    <option value="latest">最新发布</option>
+                  </select>
+                  <ChevronDown size={13} />
+                </label>
+                <button className="secondary-button compact quick-draft-trigger" onClick={() => setQuickDraftOpen(true)}><ScanText size={15} />截图／链接成稿</button>
+                <details className="candidate-more"><summary><MoreHorizontal size={16} />更多操作</summary><div className="candidate-more-content">
                 <span className="candidate-shortcuts" title="键盘快捷键：J/K 浏览，A 或空格加入待写，G 生成，/ 搜索">J/K 浏览 · A 加入 · G 生成</span>
                 <label className="personalization-toggle" title="只调整综合推荐顺序，不改新闻价值或公开传播证据">
                   <input
@@ -552,16 +539,7 @@ export function Workbench({
                     }
                   }}
                 ><RotateCcw size={13} />清空偏好</button>
-                <label className="candidate-sort" title="只有公开互动或多家独立跟进才算传播证据；没有数据不会被判为低热度">
-                  <ArrowDownUp size={14} />
-                  <select value={candidateSort} onChange={(event) => setCandidateSort(event.target.value as CandidateSortMode)}>
-                    <option value="recommended">综合推荐</option>
-                    <option value="heat">公开传播优先</option>
-                    <option value="value">价值优先</option>
-                    <option value="latest">最新发布</option>
-                  </select>
-                  <ChevronDown size={13} />
-                </label>
+
                 <button
                   className={rankingHelpOpen ? "ranking-help-button active" : "ranking-help-button"}
                   aria-expanded={rankingHelpOpen}
@@ -576,7 +554,7 @@ export function Workbench({
                     onClick={() => void onBriefCandidates()}
                   >{busy ? <LoaderCircle className="spin" size={14} /> : <Languages size={14} />}补全中文摘要</button>
                 ) : null}
-                <button className="secondary-button compact quick-draft-trigger" onClick={() => setQuickDraftOpen(true)}><ScanText size={15} />截图／链接成稿</button>
+
                 <button
                   className="candidate-clear-button"
                   disabled={!candidates.length || runIsActive || busy}
@@ -590,6 +568,7 @@ export function Workbench({
                 {run?.status === "complete" ? (
                   <button className="secondary-button compact" onClick={onOpenDrafts}>查看草稿</button>
                 ) : null}
+                </div></details>
               </div>
             </div>
             {rankingHelpOpen ? (
@@ -662,7 +641,7 @@ export function Workbench({
                           </div>
                           <h4>{candidateDisplayTitle(candidate)}</h4>
                           <p>{candidateDisplaySummary(candidate)}</p>
-                          <small lang={containsChinese(candidate.title) ? "zh-CN" : "en"}>原题 · {candidate.title}</small>
+                          {candidateDisplayTitle(candidate) !== candidate.title ? <small lang={containsChinese(candidate.title) ? "zh-CN" : "en"}>原题 · {candidate.title}</small> : null}
                           <footer>
                             <span>价值 {candidate.score}/15 · {formatTime(candidate.publishedAt)}</span>
                             <div>
@@ -801,12 +780,12 @@ export function Workbench({
                         <div className="candidate-title">
                           <strong>{candidateDisplayTitle(candidate)}</strong>
                           <span>{candidateDisplaySummary(candidate)}</span>
-                          <small lang={containsChinese(candidate.title) ? "zh-CN" : "en"}>原题 · {candidate.title}</small>
+                          {candidateDisplayTitle(candidate) !== candidate.title ? <small lang={containsChinese(candidate.title) ? "zh-CN" : "en"}>原题 · {candidate.title}</small> : null}
                         </div>
                       </td>
                       <td><time dateTime={candidate.publishedAt}>{formatTime(candidate.publishedAt)}</time></td>
                       <td>
-                        <span className="image-count"><ImageIcon size={15} />{candidate.imageCount === null ? "选中后读取" : `${candidate.imageCount} 张`}</span>
+                        <span className={candidate.imageCount === null ? "image-count pending" : "image-count"} title={candidate.imageCount === null ? "加入待写后读取来源图片" : undefined}><ImageIcon size={14} />{candidate.imageCount === null ? "待读取" : `${candidate.imageCount} 张`}</span>
                       </td>
                       <td>
                         <div className="candidate-feedback-actions">
@@ -884,31 +863,7 @@ export function Workbench({
 
         {runRailOpen ? (
         <aside className="run-rail">
-          <div className="run-rail-heading"><h2>本次运行</h2><button aria-label="收起本次运行" title="收起本次运行" onClick={() => setRunRailOpen(false)}><PanelRightClose size={16} /></button></div>
-          <div className="run-stage-list">
-            <div className={!run ? "run-stage current" : "run-stage complete"}>
-              <span className="run-stage-node">{run ? <Check size={14} /> : null}</span>
-              <div><strong>{run ? "已启动" : "等待启动"}</strong><span>{run ? formatTime(run.createdAt) : "等待你或定时心跳"}</span></div>
-            </div>
-            {quickIntakeRun ? ["接收素材", "识别正文与图片", "生成可编辑草稿"].map((stage, index) => {
-              const complete = index < quickStagePosition;
-              const current = run?.status === "generating" && index === quickStagePosition;
-              return (
-                <div className={`run-stage ${complete ? "complete" : current ? "current" : "waiting"}`} key={stage}>
-                  <span className="run-stage-node">{complete ? <Check size={14} /> : current ? <LoaderCircle className="spin" size={14} /> : null}</span>
-                  <div><strong>{stage}</strong><span>{complete ? "已完成" : current ? "进行中" : "等待"}</span></div>
-                </div>
-              );
-            }) : stageNames.map((stage, index) => {
-              const state = runStageState(run, stage, index);
-              return (
-                <div className={`run-stage ${state}`} key={stage}>
-                  <span className="run-stage-node">{state === "complete" ? <Check size={14} /> : state === "current" ? <LoaderCircle className="spin" size={14} /> : null}</span>
-                  <div><strong>{stageDisplayLabel(stage)}</strong><span>{state === "complete" ? "已完成" : state === "current" ? "进行中" : runHasNoResults && index >= 2 ? "无候选，未执行" : "等待"}</span></div>
-                </div>
-              );
-            })}
-          </div>
+          <div className="run-rail-heading"><h2 id="selection-summary-title">待写选题 <small>{selected.length}</small></h2><button aria-label="收起待写选题" title="收起待写选题" onClick={() => setRunRailOpen(false)}><PanelRightClose size={16} /></button></div>
           {runHasNoResults ? (
             <div className="run-empty-warning" role="status">
               <TriangleAlert size={17} />
@@ -916,11 +871,8 @@ export function Workbench({
             </div>
           ) : null}
           {run?.error ? <div className="run-error">{run.error}</div> : null}
+          <div className="workbench-run-status" role="status">{runIsActive ? <LoaderCircle className="spin" size={14} /> : <Clock3 size={14} />}<span>{runIsActive ? run?.stage || "正在处理" : run?.error ? "本次采集有异常" : run ? `最近采集 ${formatTime(run.createdAt)}` : "等待采集"}</span></div>
           <section className="selection-summary" aria-labelledby="selection-summary-title">
-            <header className="selection-summary-heading">
-              <strong id="selection-summary-title">选型总结</strong>
-              <span>已加入 {selected.length} 条待写</span>
-            </header>
             {selected.length ? (
               <ol className="selection-summary-list">
                 {selected.map((candidate) => (
@@ -949,7 +901,7 @@ export function Workbench({
                 ))}
               </ol>
             ) : (
-              <p className="selection-summary-empty">还没有待写候选。可从左侧优先候选或表格中加入。</p>
+              <p className="selection-summary-empty">选中左侧新闻，集中在这里准备成稿。</p>
             )}
           </section>
           <div className="run-rail-actions">
@@ -959,25 +911,51 @@ export function Workbench({
               disabled={!run || !["ready", "complete"].includes(run.status) || !selected.length || busy}
             >
               {busy || run?.status === "generating" ? <LoaderCircle className="spin" size={17} /> : null}
-              {run?.status === "generating" ? `正在生成 ${selected.length} 篇草稿` : `生成 ${selected.length} 篇草稿`}
+              {run?.status === "generating" ? `正在生成 ${selected.length} 篇草稿` : selected.length ? `生成 ${selected.length} 篇草稿` : "先选择一个题目"}
             </button>
           </div>
+          <details className="workbench-run-details"><summary>运行详情<ChevronDown size={14} /></summary>
+          <div className="run-stage-list">
+            <div className={!run ? "run-stage current" : "run-stage complete"}>
+              <span className="run-stage-node">{run ? <Check size={14} /> : null}</span>
+              <div><strong>{run ? "已启动" : "等待启动"}</strong><span>{run ? formatTime(run.createdAt) : "等待你或定时心跳"}</span></div>
+            </div>
+            {quickIntakeRun ? ["接收素材", "识别正文与图片", "生成可编辑草稿"].map((stage, index) => {
+              const complete = index < quickStagePosition;
+              const current = run?.status === "generating" && index === quickStagePosition;
+              return (
+                <div className={`run-stage ${complete ? "complete" : current ? "current" : "waiting"}`} key={stage}>
+                  <span className="run-stage-node">{complete ? <Check size={14} /> : current ? <LoaderCircle className="spin" size={14} /> : null}</span>
+                  <div><strong>{stage}</strong><span>{complete ? "已完成" : current ? "进行中" : "等待"}</span></div>
+                </div>
+              );
+            }) : stageNames.map((stage, index) => {
+              const state = runStageState(run, stage, index);
+              return (
+                <div className={`run-stage ${state}`} key={stage}>
+                  <span className="run-stage-node">{state === "complete" ? <Check size={14} /> : state === "current" ? <LoaderCircle className="spin" size={14} /> : null}</span>
+                  <div><strong>{stageDisplayLabel(stage)}</strong><span>{state === "complete" ? "已完成" : state === "current" ? "进行中" : runHasNoResults && index >= 2 ? "无候选，未执行" : "等待"}</span></div>
+                </div>
+              );
+            })}
+          </div>
+          </details>
         </aside>
         ) : (
-          <aside className="run-rail-mini" aria-label="本次运行已收起">
-            <button aria-label="展开本次运行" title="展开本次运行" onClick={() => setRunRailOpen(true)}><PanelRightOpen size={17} /><span>运行</span></button>
+          <aside className="run-rail-mini" aria-label="待写选题已收起">
+            <button aria-label="展开待写选题" title="展开待写选题" onClick={() => setRunRailOpen(true)}><PanelRightOpen size={17} /><span>待写 {selected.length}</span></button>
             {runIsActive ? <LoaderCircle className="spin" size={15} /> : run ? <Check size={15} /> : null}
           </aside>
         )}
       </div>
 
-      <footer className="run-provenance">
+      <details className="workbench-provenance"><summary>采集记录与来源追溯 <ChevronDown size={14} /></summary><footer className="run-provenance">
         <div><span>运行 ID</span><strong>{run?.id ?? "尚未创建"}</strong></div>
         <div><span>搜索范围</span><strong>{run?.dateFrom && run.dateTo ? `${run.dateFrom} 至 ${run.dateTo}` : `定时任务 · 过去 ${run?.windowHours ?? settings.windowHours} 小时`}</strong></div>
         <div><span>关键词</span><strong>{run?.keywords || "未限定"}</strong></div>
         <div><span>来源追溯</span><strong>已开启（保留原始链接与 Horizon Run ID）</strong></div>
         <div><span>频道快照</span><strong>{collectionTopics.filter((topic) => (run?.topicIds ?? settings.collectionTopics).includes(topic.id)).map((topic) => topic.label).join("／")}</strong></div>
-      </footer>
+      </footer></details>
       {quickDraftOpen ? (
         <QuickDraftModal
           provider={activeProvider}

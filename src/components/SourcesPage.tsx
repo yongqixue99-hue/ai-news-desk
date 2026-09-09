@@ -472,9 +472,14 @@ export function SourcesPage({
               <div className="managed-source-name"><strong>{source.name}</strong><span>{topicSummary}{source.note ? ` · ${source.note}` : ""}</span></div>
               <span className="source-kind">{source.kind === "documentation" ? "技术目录" : source.kind === "rss" ? "RSS" : source.kind === "hackernews" ? "HN" : source.kind === "zhihu" ? "知乎 CLI" : source.kind === "last30days" ? "30 天社区" : source.kind === "github" ? "GitHub" : source.kind === "x" ? "X 官方" : "新闻检索"}</span>
               <span className={`source-role-badge ${role}`}>{sourceRoleLabels[role]}</span>
-              <span className={`source-health ${health}`} title={source.lastHealthDetail}>
-                {healthIcon}<span><strong>{healthLabel} · 检查 {formatTimestamp(source.lastCheckedAt, "尚未")}</strong><small>最后成功 {formatTimestamp(source.lastSuccessfulAt, "尚无")}{failureCount ? ` · 连续失败 ${failureCount} 次` : ""}</small></span>
-              </span>
+              <div className={`source-health ${health}`}>
+                {healthIcon}<div><strong>{healthLabel} · 检查 {formatTimestamp(source.lastCheckedAt, "尚未")}</strong><small>最后成功 {formatTimestamp(source.lastSuccessfulAt, "尚无")}{failureCount ? ` · 连续失败 ${failureCount} 次` : ""}</small>
+                  {source.lastHealthDetail ? <details className="source-health-detail">
+                    <summary aria-label={`${source.name} 的读取结果`}>查看读取结果</summary>
+                    <p>{source.lastHealthDetail}</p>
+                  </details> : null}
+                </div>
+              </div>
               <div className="row-actions">
                 <button type="button" className="source-test-button" onClick={() => testSource(source.id)} disabled={Boolean(testingSourceId) || (zeroCost && source.kind === "x")} title={zeroCost && source.kind === "x" ? "零成本模式不调用 X API" : "只测试这个来源"}>{testing ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}<span>测试</span></button>
                 {homepageUrl ? <a className="source-homepage-link" href={homepageUrl} target="_blank" rel="noreferrer" title="打开官方网站"><Globe2 size={15} /><span>官网</span></a> : null}

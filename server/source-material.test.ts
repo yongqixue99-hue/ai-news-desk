@@ -130,3 +130,26 @@ test("linked community source mode freezes the external article, not the discuss
   assert.match(materials[0]?.originalText ?? "", /external article body/u);
   assert.doesNotMatch(materials[0]?.originalText ?? "", /cached discussion/u);
 });
+
+test("a cached partial block list cannot discard complete source text or its pricing conditions", async () => {
+  const linked = candidate({ sourceType: "rss", sourceRole: "official", sourceName: "Publisher", engagement: undefined,
+    url: "https://example.com/original-report", canonicalUrl: "https://example.com/original-report" });
+  const state = createDefaultState();
+  state.runs = [run(linked)];
+  const story = buildStories(state, now)[0]!;
+  const introduction = "The source explains how the model tools operate and how they are configured. ".repeat(5);
+  const text = `${introduction}\n\nPreview pricing ends on December 31, 2026. Production use requires a separate license.`;
+  for (const blockText of [introduction, "Original report"]) {
+    const materials = await loadSourceMaterialSnapshots(state, story.id, {
+      readExternalSource: async ({ url }) => ({
+        page: { url, canonicalUrl: url, title: "Original report", text,
+          blocks: [{ kind: "paragraph", text: blockText }], images: [] },
+        capturedAt: now, fromCache: true,
+      }),
+    });
+    assert.equal(materials[0]?.originalText, text);
+    assert.equal(materials[0]?.blocks, undefined);
+    assert.equal(materials[0]?.truncated, false, "the complete text was retained");
+    assert.match(materials[0]?.extractionWarnings?.join(" ") ?? "", /结构/u);
+  }
+});

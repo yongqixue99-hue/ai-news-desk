@@ -8,7 +8,7 @@
   <array>
     <string>__NODE_PATH__</string>
     <string>__PROJECT_PATH__/node_modules/tsx/dist/cli.mjs</string>
-    <string>__PROJECT_PATH__/server/index.ts</string>
+    <string>__PROJECT_PATH__/server/start.ts</string>
   </array>
   <key>WorkingDirectory</key>
   <string>__PROJECT_PATH__</string>

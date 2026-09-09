@@ -29,6 +29,19 @@ test("LearningDesk infers only explainable changes from an edit", () => {
   assert.ok(kinds.includes("shorter-introduction"));
 });
 
+test("writing memory learns image density from inserted images rather than the research tray", () => {
+  const image = (id: string): DraftRevisionSnapshot["images"][number] => ({
+    id, afterParagraph: 0, caption: id,
+    image: { id, url: `https://example.com/${id}.png`, caption: id, attribution: "Official", sourceUrl: "https://example.com/news", selected: true, rights: "check-required" },
+  });
+  const before = snapshot("正文。", { bodyHtml: '<p>正文。</p><img data-media-id="one" />', images: [image("one")] });
+  const trayOnly = { ...before, images: [...before.images, image("two"), image("three")] };
+  assert.equal(inferWritingPreferences(before, trayOnly).some((preference) => preference.kind === "higher-image-density"), false);
+  const inserted = { ...trayOnly, bodyHtml: `${before.bodyHtml}<img data-media-id="two" /><img data-media-id="two" />` };
+  const preference = inferWritingPreferences(trayOnly, inserted).find((entry) => entry.kind === "higher-image-density");
+  assert.equal(preference?.summary, "正文图片由 1 张增加到 2 张。");
+});
+
 test("writing preferences stay dormant until five effective manual edits and remain user-controllable", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-learning-"));
   const legacyStatePath = path.join(root, "state.json");

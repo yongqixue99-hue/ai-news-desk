@@ -172,6 +172,25 @@ test("candidate briefing catches model-facing words that leaked into editor copy
   assert.ok(parsed[0]?.briefing.explanation?.qualityFlags?.includes("robot-evidence-shell"));
 });
 
+test("partial-source unknowns describe reading limits instead of claiming that the publisher omitted facts", () => {
+  for (const basis of ["title", "excerpt"] as const) {
+    const parsed = parseCandidateBriefings(JSON.stringify({ items: [{
+      candidateId: "partial", titleZh: "某公司发布新模型", summaryZh: "某公司发布了新模型。",
+      whatHappenedZh: "某公司发布了新模型。", readerBriefZh: "某公司发布了新模型，细节仍需核对。",
+      keyPointsZh: ["新模型已发布。"], editorNoteZh: "价格还没公布，先观察。",
+      unknownsZh: ["官方文章尚未说明价格与使用条件。"],
+    }] }), [{ candidateId: "partial", basis, text: "available source fragment" }], {
+      generatedAt: "2026-09-08T00:00:00Z", providerId: "codex-cli",
+    });
+    const explanation = parsed[0]!.briefing.explanation!;
+    assert.deepEqual(explanation.unknownsZh, [basis === "title"
+      ? "目前只读到标题，细节仍需打开原文核对。"
+      : "目前只读到来源摘要，未覆盖的正文内容仍需核对。"]);
+    assert.equal(explanation.editorNoteZh, undefined);
+    assert.equal(parsed[0]!.briefing.basis, basis);
+  }
+});
+
 test("community briefing keeps event facts separate from discussion viewpoints", () => {
   const community = candidate("thread", "--- Top Comments --- [reader]: I tested it for a week and the latency is still the main problem.");
   community.sourceType = "hackernews";

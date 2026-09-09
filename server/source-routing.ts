@@ -90,6 +90,7 @@ export interface RoutedFeed {
   url: string;
   category: string;
   profile: "tech-news";
+  format?: SourceRoute["format"];
 }
 
 export const routedFeedsForSource = (
@@ -130,6 +131,7 @@ export const routedFeedsForSource = (
       url,
       category: route.category ?? source.category,
       profile: "tech-news" as const,
+      ...(route.format && !route.query ? { format: route.format } : {}),
     }];
   });
 };

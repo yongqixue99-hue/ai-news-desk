@@ -5,8 +5,8 @@ export const collectionTopics: CollectionTopicDefinition[] = [
     id: "ai",
     label: "AI",
     description: "模型、产品、算力与人工智能公司",
-    query: '("artificial intelligence" OR AI OR OpenAI OR Anthropic OR ChatGPT OR Claude OR Gemini OR 人工智能 OR 大模型)',
-    keywords: ["ai", "artificial intelligence", "openai", "chatgpt", "anthropic", "claude", "gemini", "deepmind", "llm", "大模型", "人工智能", "生成式 ai"],
+    query: '("artificial intelligence" OR AI OR OpenAI OR Anthropic OR ChatGPT OR Claude OR Gemini OR DeepSeek OR Qwen OR 人工智能 OR 大模型)',
+    keywords: ["ai", "artificial intelligence", "openai", "chatgpt", "anthropic", "claude", "gemini", "deepmind", "deepseek", "qwen", "gpt", "grok", "mistral", "llm", "通义千问", "深度求索", "大模型", "人工智能", "生成式 ai"],
   },
   {
     id: "technology",

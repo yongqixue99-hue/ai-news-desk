@@ -41,3 +41,16 @@ for (const [title, expected] of cases) test(`editorial selection: ${title}`, () 
 test("a loud registration page cannot borrow importance from its excerpt", () => {
   assert.equal(assessEditorialOpportunity("Join our AI webinar", "Major model release, API prices, a data breach").lane, "routine");
 });
+
+test("a client patch for a complete CVE identifier is consequential despite its small version", () => {
+  assert.equal(assessEditorialOpportunity("OpenAI API client v1.2.3 patches CVE-2026-12345").lane, "important");
+});
+
+test("a monthly news recap cannot promote model releases mentioned in its body", () => {
+  assert.equal(assessEditorialOpportunity("The latest AI news we announced in August 2026", "Google released Gemini models and API pricing updates.", { official: true }).lane, "routine");
+});
+
+test("confirmed security incidents are not rumors merely because data leaked", () => {
+  assert.equal(assessEditorialOpportunity("OpenAI patches vulnerability that leaked ChatGPT user data").lane, "important");
+  assert.equal(assessEditorialOpportunity("OpenAI confirms data breach after leaked API keys").lane, "important");
+});

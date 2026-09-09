@@ -46,8 +46,9 @@ export interface SourceRoute {
   label: string;
   /** The section page a person should open on the publisher's official site. */
   homepageUrl?: string;
-  /** A direct RSS/Atom endpoint used only by the collector. */
+  /** A direct feed or supported official index, used only by the collector. */
   url?: string;
+  format?: "qwen-json" | "deepseek-updates" | "gemini-changelog" | "claude-changelog";
   /** A site-scoped discovery query converted to a Google News RSS endpoint at run time. */
   query?: string;
   category?: string;
@@ -303,6 +304,7 @@ export interface WeChatConnectionResult {
 }
 
 export interface Settings {
+  homeLayout?: import("./home-layout.js").HomeLayout;
   windowHours: number;
   collectionTopics: CollectionTopicId[];
   /** Hard user-owned boundary for connectors and providers that can charge per request. */
@@ -414,9 +416,21 @@ export interface SourceImage {
   editorialOrigin?: "article-image" | "article-screenshot" | "entity-library" | "related-library" | "generated-fallback";
 }
 
+export interface PublicationEvidence {
+  basis: string;
+  sourceUrl: string;
+  precision: "day" | "timestamp";
+  indexedAt?: string;
+  modifiedAt?: string;
+  originalFeedTitle?: string;
+}
+
 export interface Candidate {
+  /** Discovery observation, never the event's publication date or factual score. */
+  hotlist?: { rank: number; heat?: string; observedAt: string };
   technicalArticle?: import("./technical-article.js").TechnicalArticlePolicy;
   publicationDateKnown?: boolean;
+  publicationEvidence?: PublicationEvidence;
   id: string;
   rawId: string;
   sourceType: string;
@@ -525,6 +539,19 @@ export interface RunLog {
   level: "info" | "success" | "warning" | "error";
 }
 
+export interface SourceRouteResult {
+  sourceId: string;
+  url: string;
+  status: "success" | "error";
+  rawCount: number;
+  detail?: string;
+  cacheStatus?: "fresh" | "not-modified";
+  lastSuccessfulAt?: string;
+  retryAt?: string;
+  httpStatus?: number;
+  errorCode?: string;
+}
+
 export interface SourceRunResult {
   sourceId: string;
   sourceName: string;
@@ -534,6 +561,30 @@ export interface SourceRunResult {
   rawCount: number;
   candidateCount: number;
   detail: string;
+  /** Individual discovery routes, including failures beside a successful feed. */
+  routes?: SourceRouteResult[];
+}
+
+export interface CollectionSummary {
+  runId: string;
+  collectedAt: string;
+  sourceCount: number;
+  failedSourceCount: number;
+  partialSourceCount: number;
+  rawCount: number;
+  candidateCount: number;
+}
+
+export interface CollectionFunnel {
+  rawCount: number;
+  dateAcceptedCount: number;
+  matchedCount: number;
+  uniqueUrlCount: number;
+  eligibleCount: number;
+  clusterCount: number;
+  candidateCount: number;
+  rejections: Array<{ code: string; label: string; count: number }>;
+  publicationDateChecks?: { verified: number; unavailable: number; deferred: number };
 }
 
 export interface WorkflowRun {
@@ -543,6 +594,8 @@ export interface WorkflowRun {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  /** When source collection finished, independent of later AI work and view refreshes. */
+  collectedAt?: string;
   status: RunStatus;
   stage: string;
   windowHours: number;
@@ -551,6 +604,8 @@ export interface WorkflowRun {
   dateTo?: string;
   keywords?: string;
   filteredRawCount?: number;
+  /** Immutable counts from this collection, before later candidate edits. */
+  collectionFunnel?: CollectionFunnel;
   sourceIds: string[];
   scheduled: boolean;
   retryOfRunId?: string;
@@ -913,6 +968,17 @@ export interface DraftQualityWarning {
 }
 
 export interface DraftWritingBrief {
+  /** Observed HTML read scope, copied from immutable package snapshots. */
+  sourceReads?: Array<{
+    label: string;
+    url: string;
+    characters: number;
+    tableCount: number;
+    capturedAt: string;
+    fromCache: boolean;
+    truncated: boolean;
+    warnings: string[];
+  }>;
   /** Frozen editorial angles copied from the ContentPackage. */
   suggestedAngles: string[];
   /** Useful discussion themes; never promoted to factual claims. */
@@ -1195,8 +1261,12 @@ export interface ExtractedPage {
   url: string;
   canonicalUrl: string;
   title: string;
+  author?: string;
   publishedAt?: string;
   text: string;
+  /** Explicit limits of the HTML read; image pixels are not OCR evidence. */
+  extractionWarnings?: string[];
+  textTruncated?: boolean;
   /** Ordered article blocks, preserved before the plain-text fallback flattens whitespace. */
   blocks?: Array<{
     kind: "heading" | "paragraph" | "quote" | "list-item" | "code" | "table";

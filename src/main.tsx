@@ -5,6 +5,7 @@ import "./styles.css";
 import "./desk-design.css";
 import "./reader-design.css";
 import "./strategy-design.css";
+import "./swiss-design.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -1,4 +1,6 @@
 import type { DraftOverview } from "../server/draft-overview.js";
+import type { CommunityPlatform, TopicFeedView } from "../server/topic-feeds.js";
+import type { HomeLayout } from "../server/home-layout.js";
 export type { DraftOverview } from "../server/draft-overview.js";
 import type {
   ArticleDraft,
@@ -306,6 +308,13 @@ export const api = {
   bootstrap: () => request<WorkflowState>("/api/bootstrap"),
   shell: () => request<ShellView>("/api/shell"),
   today: () => request<TodayView>("/api/today"),
+  homeNews: (keyword: string) => request<StoryView[]>(`/api/home-news?keyword=${encodeURIComponent(keyword)}`),
+  homeLayout: () => request<HomeLayout>("/api/home-layout"),
+  saveHomeLayout: (layout: HomeLayout) => request<HomeLayout>("/api/home-layout", { method: "PATCH", body: JSON.stringify(layout) }),
+  retryPackageJob: (id: string) => request<{ job: ProductJob; reused: boolean }>(`/api/product/jobs/${encodeURIComponent(id)}/retry`, { method: "POST", body: "{}" }),
+  topicFeed: (platform: CommunityPlatform) => request<TopicFeedView>(`/api/topic-feeds/${platform}`),
+  refreshZhihuHotlist: () => request<TopicFeedView>("/api/topic-feeds/zhihu/refresh", { method: "POST", body: "{}" }),
+  retainZhihuTopic: (id: string) => request<{ runId: string; candidateId: string }>(`/api/topic-feeds/zhihu/${encodeURIComponent(id)}/select`, { method: "POST", body: "{}" }),
   draftOverview: () => request<DraftOverview>("/api/drafts/overview"),
   story: (storyId: string) => request<StoryDetailResult>(`/api/stories/${storyId}`),
   editorialIntake: (runId: string, candidateId: string) => request<EditorialIntakeResult>(

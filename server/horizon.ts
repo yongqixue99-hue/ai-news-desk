@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createSourceDesk } from "./source-desk.js";
+import { collectDiscoveryCandidates } from "./discovery-funnel.js";
 import { collectPortableStructuredSources } from "./structured-collector.js";
 import {
   applyXSourceCursors,
@@ -15,18 +16,11 @@ import { extractPage } from "./extractor.js";
 import { mergeVisualImages } from "./visual-desk.js";
 import { selectTopAndGenerate } from "./generator.js";
 import { findActiveCollectionRun, isCollectionActive } from "./run-policy.js";
-import {
-  rawItemMatchesSearch,
-  rawItemTimeRejectionReason,
-  rawItemToCandidate,
-  sortCandidates,
-} from "./scoring.js";
 import { applySourceRunResult, sourceResultsForRun } from "./source-health.js";
 import {
   dynamicTopicQuery,
   eligibleSourcesForTopics,
   routedFeedsForSource,
-  sourceRoleFor,
 } from "./source-routing.js";
 import { getLocalDatabase, readState, updateState } from "./storage.js";
 import { normalizeTopicIds, topicLabels } from "./topics.js";
@@ -532,6 +526,7 @@ export const executeCollection = async (runId: string) => {
     const rawItems = batch.items;
     await patchRun(runId, {
       horizonRunId,
+      collectedAt: now(),
       rawCount: rawItems.length,
       status: "scoring",
       stage: "去重与评分",
@@ -543,59 +538,21 @@ export const executeCollection = async (runId: string) => {
       rawItems.length ? "success" : "warning",
     );
 
-    const filterOptions = { windowHours: run.windowHours, now: Date.now() };
-    const timeRejectionCounts = rawItems.reduce((counts, item) => {
-      const reason = rawItemTimeRejectionReason(item, filters, filterOptions);
-      if (reason) counts[reason] = (counts[reason] ?? 0) + 1;
-      return counts;
-    }, {} as Partial<Record<NonNullable<ReturnType<typeof rawItemTimeRejectionReason>>, number>>);
-    const filteredRawItems = rawItems.filter((item) => rawItemMatchesSearch(item, {
-      dateFrom: run.dateFrom,
-      dateTo: run.dateTo,
-      keywords: run.keywords,
-    }, filterOptions));
-    const missingOrInvalidDates = (timeRejectionCounts["missing-published-at"] ?? 0)
-      + (timeRejectionCounts["invalid-published-at"] ?? 0);
-    const staleOrOutOfRange = (timeRejectionCounts["outside-window"] ?? 0)
-      + (timeRejectionCounts["outside-date-range"] ?? 0);
-    const futureDates = timeRejectionCounts["future-published-at"] ?? 0;
-    if (missingOrInvalidDates || staleOrOutOfRange || futureDates) {
-      const scope = run.dateFrom || run.dateTo
-        ? "手工日期范围"
-        : `最近 ${run.windowHours} 小时窗口`;
-      await appendLog(
-        runId,
-        "去重与评分",
-        `${scope}已隔离 ${missingOrInvalidDates + staleOrOutOfRange + futureDates} 条记录：超出范围 ${staleOrOutOfRange} 条、缺少或无法解析发布时间 ${missingOrInvalidDates} 条、未来时间 ${futureDates} 条`,
-        "warning",
-      );
-    }
-    await patchRun(runId, { filteredRawCount: filteredRawItems.length });
     const preferenceState = await readState();
-    const seenUrls = new Set<string>();
-    const candidates = sortCandidates(
-      filteredRawItems
-        .filter((item) => {
-          const normalized = item.url.replace(/[?#].*$/, "");
-          if (seenUrls.has(normalized)) return false;
-          seenUrls.add(normalized);
-          return true;
-        })
-        .map((item) => {
-          const candidate = rawItemToCandidate(item, run.windowHours, topicIds);
-          const source = selectedSources.find((entry) =>
-            entry.name === candidate.sourceName
-            || (entry.kind === candidate.sourceType && selectedSources.filter((other) => other.kind === entry.kind).length === 1));
-          // Adapter-level provenance is more specific than the connector's
-          // default role. For example, a GitHub connector yields both official
-          // Releases and community Issues; never flatten both back to one role.
-          if (source && !candidate.sourceRole) candidate.sourceRole = sourceRoleFor(source);
-          return candidate;
-        }),
-      preferenceState.candidateFeedback,
-      preferenceState.settings.personalizationEnabled,
-    );
-    const sourceResults = sourceResultsForRun(selectedSources, rawItems, candidates, batch.failures);
+    const { candidates, funnel } = collectDiscoveryCandidates(rawItems, {
+      windowHours: run.windowHours, topicIds, now: Date.now(),
+      filters: { dateFrom: run.dateFrom, dateTo: run.dateTo, keywords: run.keywords },
+      sources: selectedSources, feedback: preferenceState.candidateFeedback,
+      personalizationEnabled: preferenceState.settings.personalizationEnabled,
+    });
+    await patchRun(runId, { filteredRawCount: funnel.matchedCount, collectionFunnel: funnel });
+    if (funnel.rejections.length) await appendLog(runId, "去重与评分",
+      funnel.rejections.map((entry) => `${entry.label} ${entry.count} 条`).join("；"), "info");
+    const sourceResults = sourceResultsForRun(selectedSources, rawItems, candidates, batch.failures, batch.routeResults);
+    for (const result of sourceResults.filter((result) => result.status === "warning"
+      && result.routes?.some((route) => route.status === "error"))) {
+      await appendLog(runId, "来源覆盖", `${result.sourceName}：${result.detail}`, "warning");
+    }
     const checkedAt = now();
     await updateState((current) => {
       const targetRun = current.runs.find((entry) => entry.id === runId);
@@ -617,7 +574,7 @@ export const executeCollection = async (runId: string) => {
     await appendLog(
       runId,
       "去重与评分",
-      `日期与关键词筛选后保留 ${filteredRawItems.length} 条，得到 ${candidates.length} 条${topicLabels(normalizeTopicIds(run.topicIds)).join("／")}候选`,
+      `日期与关键词筛选后保留 ${funnel.matchedCount} 条，得到 ${candidates.length} 条${topicLabels(normalizeTopicIds(run.topicIds)).join("／")}候选`,
       candidates.length ? "success" : "warning",
     );
     const extractedSourceText = run.collectionPurpose === "official-monitor" ? new Map<string, string>() : await probeImages(runId, controller.signal);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronUp, FileText, LoaderCircle, RotateCcw, TriangleAlert } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, ChevronUp, FileText, LoaderCircle, RotateCcw, TriangleAlert } from "lucide-react";
 import { api, type ProductJob } from "../api";
 
 const activeStatuses = new Set<ProductJob["status"]>(["queued", "running", "retrying"]);
@@ -27,7 +27,7 @@ export const jobActivitySummary = (job: ProductJob, now = Date.now()) => {
 
 const jobLabel = (job: ProductJob) => {
   if (job.type === "draft-from-editorial-intake") return "读取来源并生成文章";
-  if (job.type === "build-content-package") return "按 1→5 建立素材包";
+  if (job.type === "build-content-package") return "准备文章资料";
   if (job.type === "supplement-story-evidence") return "补强独立新闻来源";
   if (job.type === "hydrate-story-assets") return "缓存新闻来源图片";
   if (job.type.includes("draft")) return "生成新闻草稿";
@@ -50,14 +50,26 @@ const draftIdFrom = (job: ProductJob) => {
   return typeof value === "string" ? value : undefined;
 };
 
+const storyIdFrom = (job: ProductJob) => {
+  if (!job.payload || typeof job.payload !== "object" || !("storyId" in job.payload)) return undefined;
+  return typeof job.payload.storyId === "string" ? job.payload.storyId : undefined;
+};
+const storyTitleFrom = (job: ProductJob) => job.payload && typeof job.payload === "object" && "storyTitle" in job.payload && typeof job.payload.storyTitle === "string" ? job.payload.storyTitle : undefined;
+const retryOf = (job: ProductJob) => job.payload && typeof job.payload === "object" && "retryOf" in job.payload ? job.payload.retryOf : undefined;
+const failureCopy = (job: ProductJob) => /HTTP (?:401|403)/u.test(job.error ?? "") ? "来源暂时拒绝读取，选题已保留。"
+  : /HTTP 404/u.test(job.error ?? "") ? "原文链接已失效，选题已保留。"
+  : /超时|timeout|timed out/iu.test(job.error ?? "") ? "读取时间较长，选题已保留，可以重试。" : "这一步未完成，可回到选题继续处理。";
+
 interface ProductJobCenterProps {
+  onOpenStory: (storyId: string) => void;
   onOpenDraft: (draftId: string) => Promise<void> | void;
 }
 
-export function ProductJobCenter({ onOpenDraft }: ProductJobCenterProps) {
+export function ProductJobCenter({ onOpenDraft, onOpenStory }: ProductJobCenterProps) {
   const [jobs, setJobs] = useState<ProductJob[]>([]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string>();
+  const [retryingId, setRetryingId] = useState<string>();
   const [openingDraftId, setOpeningDraftId] = useState<string>();
 
   const openDraft = async (draftId: string) => {
@@ -81,13 +93,21 @@ export function ProductJobCenter({ onOpenDraft }: ProductJobCenterProps) {
     }
   }, []);
 
+  const retry = async (job: ProductJob) => {
+    setRetryingId(job.id); setError(undefined);
+    try { await api.retryPackageJob(job.id); await refresh(); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : "重试未启动，请稍后再试。"); }
+    finally { setRetryingId(undefined); }
+  };
+
   const activeCount = useMemo(() => jobs.filter((job) => activeStatuses.has(job.status)).length, [jobs]);
   const visibleJobs = useMemo(() => jobs
     .filter((job) => {
+      if (jobs.some((next) => retryOf(next) === job.id)) return false;
       if (activeStatuses.has(job.status)) return true;
       const updatedAt = Date.parse(job.updatedAt);
       const isRecent = Number.isFinite(updatedAt) && Date.now() - updatedAt < 24 * 60 * 60 * 1_000;
-      return isRecent && (job.status === "failed" || Boolean(draftIdFrom(job)));
+      return isRecent && (job.status === "failed" || Boolean(draftIdFrom(job)) || (job.status === "complete" && job.type === "build-content-package"));
     })
     .slice(0, 6), [jobs]);
 
@@ -106,6 +126,8 @@ export function ProductJobCenter({ onOpenDraft }: ProductJobCenterProps) {
     return () => events.close();
   }, [refresh]);
 
+  const failedCount = visibleJobs.filter((job) => job.status === "failed").length;
+
   if (!visibleJobs.length && !error) return null;
 
   return (
@@ -116,17 +138,18 @@ export function ProductJobCenter({ onOpenDraft }: ProductJobCenterProps) {
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        {activeCount ? <LoaderCircle className="spin" size={16} /> : error ? <TriangleAlert size={16} /> : <Check size={16} />}
-        <span>{activeCount ? `${activeCount} 个任务处理中` : error ? "任务状态读取失败" : "最近任务"}</span>
+        {activeCount ? <LoaderCircle className="spin" size={16} /> : error || failedCount ? <TriangleAlert size={16} /> : <Check size={16} />}
+        <span>{activeCount ? `${activeCount} 个任务处理中` : error ? "任务状态读取失败" : failedCount ? `${failedCount} 项待处理` : "最近任务"}</span>
         {open ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
       </button>
       {open ? (
         <div className="product-job-panel" aria-live="polite">
-          <header><strong>后台任务</strong><button type="button" onClick={() => void refresh()} aria-label="刷新任务状态"><RotateCcw size={14} /></button></header>
+          <header><strong>任务进度</strong><button type="button" onClick={() => void refresh()} aria-label="刷新任务状态"><RotateCcw size={14} /></button></header>
           {error ? <div className="product-job-error"><TriangleAlert size={14} /><span>{error}</span></div> : null}
           <ol>
             {visibleJobs.map((job) => {
               const draftId = draftIdFrom(job);
+              const storyId = storyIdFrom(job);
               const progressPercent = jobProgressPercent(job.progress);
               const active = activeStatuses.has(job.status);
               const activity = active ? jobActivitySummary(job) : undefined;
@@ -134,11 +157,15 @@ export function ProductJobCenter({ onOpenDraft }: ProductJobCenterProps) {
                 <li key={job.id} className={`status-${job.status}${activity?.stale ? " status-stale" : ""}`}>
                   <span className="product-job-icon">{activeStatuses.has(job.status) ? <LoaderCircle className="spin" size={14} /> : job.status === "complete" ? <Check size={14} /> : <TriangleAlert size={14} />}</span>
                   <div>
-                    <strong>{jobLabel(job)}</strong>
+                    <strong>{storyTitleFrom(job) || jobLabel(job)}</strong>
                     <span>{active ? `${activity?.stage} · ${progressPercent}%` : statusLabel(job)}</span>
                     {active ? <progress value={job.progress} max={1}>{progressPercent}%</progress> : null}
                     {activity ? <small>{activity.elapsed} · {activity.freshness}</small> : null}
-                    {job.error ? <small>{job.error}</small> : null}
+                    {job.error ? <><small className="product-job-failure-copy">{failureCopy(job)}</small><details className="product-job-details"><summary>查看具体原因</summary><p>{job.error}</p></details></> : null}
+                    <div className="product-job-row-actions">
+                      {job.status === "failed" && job.type === "build-content-package" && storyId ? <button type="button" disabled={Boolean(retryingId)} onClick={() => void retry(job)}><RotateCcw size={13} />{retryingId === job.id ? "正在重试…" : "重试读取"}</button> : null}
+                      {!active && storyId ? <button type="button" onClick={() => { onOpenStory(storyId); setOpen(false); }}>{job.status === "complete" ? "继续写作" : "回到选题"}<ArrowRight size={13} /></button> : null}
+                    </div>
                   </div>
                   {draftId ? <button type="button" disabled={Boolean(openingDraftId)} onClick={() => void openDraft(draftId)}><FileText size={13} />{openingDraftId === draftId ? "正在打开…" : "打开草稿"}</button> : null}
                 </li>

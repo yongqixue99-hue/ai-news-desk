@@ -73,6 +73,18 @@ export const editableDraftContent = (draft: ArticleDraft): DraftRecoveryContent 
   status: draft.status,
 });
 
+/** Merge a save acknowledgement without replacing the user's editable document. */
+export const mergeSavedDraftMetadata = (
+  current: ArticleDraft | undefined,
+  saved: ArticleDraft,
+  requestContentSnapshot: string,
+): ArticleDraft | undefined => {
+  if (current?.id !== saved.id
+    || JSON.stringify(editableDraftContent(current)) !== requestContentSnapshot) return current;
+  return { ...current, updatedAt: saved.updatedAt,
+    qualityWarnings: saved.qualityWarnings, factClaims: saved.factClaims, writingBrief: saved.writingBrief };
+};
+
 export const persistDraftRecoverySnapshot = (
   storage: DraftRecoveryStorage,
   draft: ArticleDraft,

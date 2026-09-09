@@ -30,6 +30,33 @@ interface EditorialImagePlanInput {
 const imageNoise = /logo|icon|avatar|emoji|tracking|pixel|spinner|loading|sprite|favicon|author|profile|badge|button|shields\.io/i;
 const badgeCaption = /^(?:license|python\s*\d+(?:\.\d+)*|node(?:\.js)?\s*\d+(?:\.\d+)*|next\.?js\s*\d+(?:\.\d+)*|build|coverage|version|npm|downloads?|stars?|forks?)\b/i;
 
+/** Exact known placeholders only; even a short caption such as "batch=1" is evidence. */
+export const isPlaceholderEditorialCaption = (caption: string) => !caption.trim()
+  || /^(?:原文(?:图表|配图)\s*\d*|来源页面配图|来源图片|来源配图|配图|来源网页首屏截图|原文页面截图)$/u.test(caption.trim());
+
+const modelVersions = (text: string) => {
+  const versions = new Map<string, Set<string>>();
+  const normalized = text.normalize("NFKC").toLocaleLowerCase().replace(/[‐‑‒–—−]/gu, "-");
+  for (const match of normalized.matchAll(/\b(gpt|gemini|qwen|glm|llama|deepseek|claude)(?:[\s-]+(?:opus|sonnet|haiku|fable|mythos))?[\s-]*([rv]?\d+(?:\.\d+)*o?)(?![a-z0-9.])/gu)) {
+    const family = match[1];
+    const version = match[2].replace(/^v/u, "");
+    const known = versions.get(family) ?? new Set<string>();
+    known.add(version);
+    versions.set(family, known);
+  }
+  return versions;
+};
+
+/** A mismatch is evidence of incompatibility; absent version labels are not proof of a match. */
+export const hasEditorialImageVersionConflict = (caption: string, articleText: string) => {
+  const imageVersions = modelVersions(caption);
+  const articleVersions = modelVersions(articleText);
+  return [...imageVersions].some(([family, versions]) => {
+    const described = articleVersions.get(family);
+    return described && ![...versions].some((version) => described.has(version));
+  });
+};
+
 const normalizedVisualUrl = (value: string) => {
   try {
     const parsed = new URL(value);
@@ -130,7 +157,7 @@ const semanticParagraph = (
   if (!tokens.length || /^原文(?:配图|图表)\s*\d*$/u.test(image.caption.trim())) return undefined;
   let best: { index: number; score: number } | undefined;
   paragraphs.forEach((paragraph, index) => {
-    if (unavailable.has(index)) return;
+    if (unavailable.has(index) || hasEditorialImageVersionConflict(image.caption, paragraph)) return;
     const normalized = paragraph.toLocaleLowerCase();
     const score = tokens.reduce((total, token) => total + (normalized.includes(token) ? Math.min(6, token.length) : 0), 0);
     if (score > 0 && (!best || score > best.score)) best = { index, score };
@@ -161,7 +188,9 @@ export const planEditorialImagePlacements = ({
   const limit = Math.max(0, Math.floor(imageLimit));
   if (imagePolicy === "none" || limit === 0 || paragraphs.length === 0) return [];
 
-  const eligible = uniqueEligibleEditorialImages(availableImages);
+  const articleText = paragraphs.join("\n");
+  const eligible = uniqueEligibleEditorialImages(availableImages)
+    .filter((image) => !hasEditorialImageVersionConflict(image.caption, articleText));
   if (!eligible.length) return [];
 
   // The frozen package exposes both an asset ID and its source-image ID.
@@ -203,29 +232,43 @@ export const planEditorialImagePlacements = ({
   const targetCount = Math.min(limit, eligiblePool.length, Math.max(automaticTarget, modelRequestedCount));
   const selected = prioritized.slice(0, targetCount);
   const occupied = new Set<number>();
+  const requestedPositions = new Map<string, number>();
   for (const image of selected) {
     const modelSelection = modelSelectionById.get(image.id);
-    if (!modelSelection) continue;
-    occupied.add(Math.max(0, Math.min(paragraphs.length - 1, modelSelection.afterParagraph)));
+    if (!modelSelection || !Number.isFinite(modelSelection.afterParagraph)) continue;
+    const index = Math.max(0, Math.min(paragraphs.length - 1, Math.floor(modelSelection.afterParagraph)));
+    if (hasEditorialImageVersionConflict(image.caption, paragraphs[index])) continue;
+    requestedPositions.set(image.id, index);
+    occupied.add(index);
   }
   const fallbackSlots = evenlySpacedSlots(paragraphs.length, targetCount)
     .filter((index) => !occupied.has(index));
   const placements: EditorialImageSelection[] = [];
   selected.forEach((image) => {
-    const modelSelection = modelSelectionById.get(image.id);
-    if (modelSelection) {
+    // Placement hints do not authorize rewriting frozen source captions, test
+    // conditions, or inventing conclusions from unread chart text. Caption
+    // translation needs a separate evidence-checked operation.
+    const caption = image.caption.trim() || "来源图片";
+    const requestedPosition = requestedPositions.get(image.id);
+    if (requestedPosition !== undefined) {
       placements.push({
         imageId: image.id,
-        afterParagraph: Math.max(0, Math.min(paragraphs.length - 1, modelSelection.afterParagraph)),
-        caption: modelSelection.caption.trim() || image.caption,
+        afterParagraph: requestedPosition,
+        caption,
       });
       return;
     }
     const semantic = semanticParagraph(image, paragraphs, occupied);
-    const fallback = fallbackSlots.shift();
-    const afterParagraph = semantic ?? fallback ?? Math.min(paragraphs.length - 1, placements.length);
+    const fallbackIndex = fallbackSlots.findIndex((index) => !occupied.has(index)
+      && !hasEditorialImageVersionConflict(image.caption, paragraphs[index]));
+    const fallback = fallbackIndex >= 0 ? fallbackSlots.splice(fallbackIndex, 1)[0] : undefined;
+    const available = paragraphs.findIndex((paragraph, index) => !occupied.has(index)
+      && !hasEditorialImageVersionConflict(image.caption, paragraph));
+    const compatible = paragraphs.findIndex((paragraph) => !hasEditorialImageVersionConflict(image.caption, paragraph));
+    const afterParagraph = semantic ?? fallback ?? (available >= 0 ? available : compatible);
+    if (afterParagraph < 0) return;
     occupied.add(afterParagraph);
-    placements.push({ imageId: image.id, afterParagraph, caption: image.caption });
+    placements.push({ imageId: image.id, afterParagraph, caption });
   });
 
   return placements;

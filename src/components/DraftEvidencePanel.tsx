@@ -75,6 +75,22 @@ export function DraftEvidencePanel({ draft, onUpdateFactClaim, onResolveFactUnce
         </div>
       </section>
 
+      {draft.writingBrief?.sourceReads?.length ? (
+        <details className="utility-section evidence-details context-details">
+          <summary><span><strong>原文读取范围</strong><small>保留了哪些文字，以及尚未读到的部分</small></span><em>{draft.writingBrief.sourceReads.length} 个来源</em></summary>
+          <div className="evidence-detail-body">
+            {draft.writingBrief.sourceReads.map((source, index) => (
+              <div key={`${source.url}-${index}`}>
+                <a href={source.url} target="_blank" rel="noreferrer">{source.label}<ExternalLink size={12} /></a>
+                <p>已保存 {source.characters.toLocaleString("zh-CN")} 字符 · {source.tableCount} 张文字表格{source.truncated ? " · 正文已截断" : ""}{source.fromCache ? " · 使用缓存快照" : ""}</p>
+                <small>读取于 {new Date(source.capturedAt).toLocaleString("zh-CN", { hour12: false })}。图中文字与数值尚未单独核对，未读到不等于原文未披露。</small>
+                {source.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
+
       {view.discoverySources.length ? (
         <details className="utility-section evidence-details discovery-details">
           <summary>

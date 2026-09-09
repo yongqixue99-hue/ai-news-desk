@@ -9,6 +9,18 @@ import {
 } from "./generator.js";
 import type { ContentPackage } from "./product-types.js";
 
+test("paragraph evidence cannot substitute a different dated update on the same official page", () => {
+  const sourceUrl = "https://ai.google.dev/gemini-api/docs/changelog#09-03-2026";
+  const wrong = "https://ai.google.dev/gemini-api/docs/changelog#09-02-2026";
+  const contentPackage: ContentPackage = { id: "p", storyId: "s", mode: "brief", intent: "news", title: "模型预览", createdAt: "2026-09-08T00:00:00Z",
+    facts: [{ id: "f", text: "该模型已开放预览。", status: "supported", sourceSignalIds: ["s"], sourceUrls: [sourceUrl] }],
+    sources: [{ signalId: "s", label: "Google", url: sourceUrl, role: "official", basis: "full-source", publishedAt: "2026-09-03T00:00:00Z", isCommunity: false }],
+    sourceSignalIds: ["s"], assets: [], imageIds: [], discussionSamples: [], communityFocus: [], uncertainties: [], suggestedAngles: [], communityEvidenceLabel: "", status: "ready", blockers: [] };
+  assert.throws(() => buildPackageParagraphClaims({ candidateId: "c", paragraphs: ["该模型已开放预览。"],
+    paragraphEvidence: [{ paragraphIndex: 0, sourceUrls: [wrong] }], paragraphFactIds: [{ paragraphIndex: 0, factIds: ["f"] }],
+    contentPackage, capturedAt: contentPackage.createdAt }), /没有回指/u);
+});
+
 test("a factual brief may be one paragraph and does not need a forced opinion", () => {
   const article = parseGeneratedArticle(JSON.stringify({
     strategy: "brief",

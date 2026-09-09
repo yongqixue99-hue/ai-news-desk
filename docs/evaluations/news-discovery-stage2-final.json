@@ -1,0 +1,40 @@
+{
+  "scope": "offline-primary-event-replay; synthetic-RSS-envelope; no-live-fetch-or-AI-quality-claim",
+  "total": 70,
+  "passed": 70,
+  "failed": 0,
+  "positive": {
+    "total": 20,
+    "parsed": 20,
+    "dateAccepted": 20,
+    "candidate": 20,
+    "story": 20,
+    "recommended": 20,
+    "releaseHighlight": 11
+  },
+  "negative": {
+    "total": 50,
+    "passed": 50,
+    "importantFalsePositives": 0,
+    "releaseFalsePositives": 0,
+    "duplicateChecksPassed": 5
+  },
+  "categoryCounts": {
+    "model": 12,
+    "price-and-access": 1,
+    "product": 4,
+    "security-research": 1,
+    "policy": 1,
+    "protocol": 1,
+    "stale": 5,
+    "future": 5,
+    "missing-date": 5,
+    "invalid-date": 5,
+    "promotion": 5,
+    "digest": 5,
+    "minor-update": 5,
+    "rumor": 5,
+    "duplicate": 5,
+    "keyword-mismatch": 5
+  }
+}

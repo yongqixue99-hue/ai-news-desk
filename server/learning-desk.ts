@@ -1,4 +1,5 @@
 import type { LocalDatabase } from "./local-database.js";
+import { load } from "cheerio";
 import type {
   ArticleDraft,
   DraftRevisionSnapshot,
@@ -39,6 +40,15 @@ const quoteCount = (snapshot: DraftRevisionSnapshot) =>
   + snapshot.paragraphs.filter((paragraph) => /[“”「」]|社区原句/u.test(paragraph)).length;
 const visibleText = (snapshot: DraftRevisionSnapshot) => htmlText(snapshot.bodyHtml)
   || paragraphText(snapshot).join(" ");
+const visibleImageIds = (snapshot: DraftRevisionSnapshot) => {
+  const available = new Set(snapshot.images.map((image) => image.id));
+  if (snapshot.contentFormat === "image-post") return [...new Set(snapshot.imagePostImageIds ?? [])].filter((id) => available.has(id));
+  // Legacy paragraph drafts have no separate tray/body representation.
+  if (snapshot.bodyHtml === undefined) return [...available];
+  const $ = load(snapshot.bodyHtml, null, false);
+  return [...new Set($("img[data-media-id]").map((_index, image) => $(image).attr("data-media-id") || "").get())]
+    .filter((id) => available.has(id));
+};
 const averageLength = (snapshot: DraftRevisionSnapshot) => {
   const paragraphs = paragraphText(snapshot);
   return paragraphs.length ? paragraphs.reduce((total, paragraph) => total + Array.from(paragraph).length, 0) / paragraphs.length : 0;
@@ -91,10 +101,12 @@ export const inferWritingPreferences = (
     summary: `平均段长由 ${Math.round(beforeAverage)} 字降到 ${Math.round(afterAverage)} 字。`,
   });
 
-  if (after.images.length > before.images.length) inferred.push({
+  const beforeImages = visibleImageIds(before).length;
+  const afterImages = visibleImageIds(after).length;
+  if (afterImages > beforeImages) inferred.push({
     kind: "higher-image-density",
     label: "提高正文图片密度",
-    summary: `正文图片由 ${before.images.length} 张增加到 ${after.images.length} 张。`,
+    summary: `正文图片由 ${beforeImages} 张增加到 ${afterImages} 张。`,
   });
   return inferred;
 };
@@ -103,13 +115,13 @@ const isEffectiveEdit = (before: DraftRevisionSnapshot, after: DraftRevisionSnap
   const beforeShape = JSON.stringify({
     title: before.title,
     text: visibleText(before),
-    images: before.images.map((image) => image.id),
+    images: visibleImageIds(before),
     take: before.take,
   });
   const afterShape = JSON.stringify({
     title: after.title,
     text: visibleText(after),
-    images: after.images.map((image) => image.id),
+    images: visibleImageIds(after),
     take: after.take,
   });
   return beforeShape !== afterShape;
@@ -148,11 +160,12 @@ export const recordDraftEdit = (
 };
 
 export const recordPublishedWritingSignals = (database: LocalDatabase, draft: ArticleDraft) => {
+  const imageCount = visibleImageIds(draft).length;
   const event = database.recordFeedback({
     type: "publication_edit_profile",
     subjectType: "draft",
     subjectId: draft.id,
-    payload: { imageCount: draft.images.length, paragraphCount: draft.paragraphs.length },
+    payload: { imageCount, paragraphCount: draft.paragraphs.length },
   });
   const snapshot: DraftRevisionSnapshot = {
     title: draft.title,
@@ -175,13 +188,13 @@ export const recordPublishedWritingSignals = (database: LocalDatabase, draft: Ar
     summary: `确认发布的终稿保留了 ${quotes} 处社区原句或引语。`,
     createdAt: event.createdAt,
   });
-  if (draft.images.length >= 2 && draft.images.length >= Math.ceil(Math.max(1, draft.paragraphs.length) / 3)) {
+  if (imageCount >= 2 && imageCount >= Math.ceil(Math.max(1, draft.paragraphs.length) / 3)) {
     database.recordEditorialMemoryEvidence({
       kind: "higher-image-density",
       label: "提高正文图片密度",
       eventId: event.id,
       draftId: draft.id,
-      summary: `确认发布的终稿为 ${draft.paragraphs.length} 段配置了 ${draft.images.length} 张图。`,
+      summary: `确认发布的终稿为 ${draft.paragraphs.length} 段配置了 ${imageCount} 张图。`,
       createdAt: event.createdAt,
     });
   }
@@ -214,4 +227,3 @@ export const activeWritingGuidelines = (database: LocalDatabase, enabled = true)
     ? view.memories.filter((memory) => memory.applicable).map((memory) => memory.label)
     : [];
 };
-

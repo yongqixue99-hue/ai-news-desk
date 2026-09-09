@@ -159,3 +159,25 @@ test("neutral collection yield preserves health while explicit failures change t
   assert.equal(target.health, "error");
   assert.equal(target.consecutiveFailures, 1);
 });
+
+test("source IDs retain attribution after a rename and prevent same-name sources sharing yield", () => {
+  const sources = [source("one", "Renamed", "rss"), source("two", "Renamed", "rss")];
+  const raw = { ...item("r1", "rss", "Old name"), metadata: { source_id: "one", feed_name: "Old name" } };
+  const results = sourceResultsForRun(sources, [raw], [candidate("r1")]);
+  assert.deepEqual(results.map((result) => [result.rawCount, result.candidateCount]), [[1, 1], [0, 0]]);
+});
+
+test("partial source coverage is a visible warning while successful items remain usable", () => {
+  const target = source("one", "Publisher", "rss");
+  const routes = [
+    { sourceId: "one", url: "https://example.com/feed", status: "success" as const, rawCount: 1 },
+    { sourceId: "one", url: "https://example.com/sitemap", status: "error" as const, rawCount: 0, detail: "HTTP 503" },
+  ];
+  const [result] = sourceResultsForRun([target], [item("r1", "rss", "Publisher")], [candidate("r1")], {}, routes);
+  assert.equal(result.status, "warning");
+  assert.equal(result.healthImpact, "success");
+  assert.equal(result.candidateCount, 1);
+  assert.match(result.detail, /部分.*路线失败/);
+  assert.match(result.detail, /503/);
+  assert.deepEqual(result.routes, routes);
+});

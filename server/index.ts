@@ -156,7 +156,7 @@ import { createWeChatHttpGateway } from "./wechat-http.js";
 import { loadWeChatPlacementImage } from "./wechat-image.js";
 import { createDeliveryDesk } from "./delivery-desk.js";
 import { contentPackageDesk } from "./content-package-desk.js";
-import { buildTodayView, storyById } from "./story-desk.js";
+import { buildHomeNews, buildTodayView, storyById, retainStoryForWriting } from "./story-desk.js";
 import { enrichStoryExplanation } from "./story-explanation-service.js";
 import { storyEvidenceDesk } from "./story-evidence-desk.js";
 import {
@@ -194,7 +194,8 @@ import {
 } from "./storage.js";
 import { normalizeTopicIds } from "./topics.js";
 import { sourceRoleFor } from "./source-routing.js";
-import { buildFocusedNewsSearchRequest } from "./source-desk.js";
+import { buildFocusedNewsSearchRequest, buildTopicFeed, communityPlatforms, createZhihuHotlist, retainZhihuTopic } from "./source-desk.js";
+import type { ZhihuHotSnapshot } from "./zhihu-hotlist.js";
 import {
   applySpendingPolicy,
   assertMeteredProviderAllowed,
@@ -221,7 +222,15 @@ import type {
 } from "./types.js";
 import type { AssignmentMode, ContentPackage, EditorialIntent } from "./product-types.js";
 
+import { homeLayoutFor, parseHomeLayout } from "./home-layout.js";
+import { retryPackageJob } from "./job-recovery.js";
+
 const app = express();
+const zhihuHotlist = createZhihuHotlist({
+  load: async () => (await getLocalDatabase()).getSourceSnapshot<ZhihuHotSnapshot>("source-desk:zhihu-hot:v1")?.page,
+  save: async (page) => { (await getLocalDatabase()).saveSourceSnapshot({ urlKey: "source-desk:zhihu-hot:v1",
+    requestedUrl: "https://www.zhihu.com/hot", canonicalUrl: "https://www.zhihu.com/hot", page, capturedAt: page.attemptedAt }); },
+});
 app.disable("x-powered-by");
 const port = Number(process.env.AI_NEWS_DESK_PORT || 4317);
 const deliveryDesk = createDeliveryDesk();
@@ -415,6 +424,60 @@ app.get(
   }),
 );
 
+app.get("/api/home-news", asyncRoute(async (request, response) => {
+  const keyword = typeof request.query.keyword === "string" ? request.query.keyword.trim().slice(0, 120) : "";
+  response.json(buildHomeNews(await readState(), keyword));
+}));
+
+app.get("/api/home-layout", asyncRoute(async (_request, response) => {
+  response.json(homeLayoutFor((await readState()).settings.homeLayout));
+}));
+app.patch("/api/home-layout", asyncRoute(async (request, response) => {
+  let layout;
+  try { layout = parseHomeLayout(request.body); } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "栏目设置无效" }); return; }
+  await updateState((state) => { state.settings.homeLayout = layout; });
+  response.json(layout);
+}));
+app.post("/api/product/jobs/:jobId/retry", asyncRoute(async (request, response) => {
+  const database = await getLocalDatabase();
+  const oldJob = database.getJob(routeParam(request.params.jobId));
+  if (!oldJob || oldJob.type !== "build-content-package" || oldJob.status !== "failed") { response.status(409).json({ error: "这个任务不能从这里重试" }); return; }
+  const storyId = oldJob.payload && typeof oldJob.payload === "object" && "storyId" in oldJob.payload ? String(oldJob.payload.storyId) : "";
+  const story = storyById(await readState(), storyId);
+  if (!story) { response.status(404).json({ error: "原选题不存在" }); return; }
+  await updateState((state) => retainStoryForWriting(state, storyId));
+  response.status(202).json(retryPackageJob(database, oldJob.id, story.title));
+}));
+
+app.get(
+  "/api/topic-feeds/:platform",
+  asyncRoute(async (request, response) => {
+    const platform = communityPlatforms.find((value) => value === request.params.platform);
+    if (!platform) { response.status(404).json({ error: "未知选题分类" }); return; }
+    response.json(buildTopicFeed(await readState(), platform, platform === "zhihu" ? await zhihuHotlist.read() : undefined));
+  }),
+);
+
+app.post(
+  "/api/topic-feeds/zhihu/refresh",
+  asyncRoute(async (_request, response) => {
+    const hot = await zhihuHotlist.refresh();
+    response.json(buildTopicFeed(await readState(), "zhihu", hot));
+  }),
+);
+
+app.post(
+  "/api/topic-feeds/zhihu/:questionId/select",
+  asyncRoute(async (request, response) => {
+    const snapshot = await zhihuHotlist.read();
+    const item = snapshot.items.find((entry) => entry.id === request.params.questionId);
+    if (!item || !snapshot.capturedAt) { response.status(404).json({ error: "该选题不在已读取榜单中，请重新读取榜单。" }); return; }
+    const capturedAt = snapshot.capturedAt;
+    const ref = await updateState((state) => retainZhihuTopic(state, item, capturedAt));
+    response.json(ref);
+  }),
+);
+
 app.get(
   "/api/today",
   asyncRoute(async (_request, response) => {
@@ -431,6 +494,7 @@ app.get(
     }
     const evidencePool = [
       ...view.watching,
+      ...(view.pending ?? []),
       ...view.mustReads,
       ...(view.interesting ?? []),
       ...view.secondary,
@@ -687,6 +751,7 @@ app.post(
     }
     const mode = requestedMode as Exclude<AssignmentMode, "watch" | "skip"> | undefined;
     const force = request.body?.force === true;
+    await updateState((state) => retainStoryForWriting(state, storyId));
     const database = await getLocalDatabase();
     const assetRevision = createHash("sha256")
       .update(JSON.stringify(story.images.map((image) => [
@@ -703,7 +768,7 @@ app.post(
       idempotencyKey: force
         ? `build-content-package:refresh:${storyId}:${randomUUID()}`
         : `build-content-package:${storyId}:${mode ?? story.assignment.mode}:${story.lastSeenAt}:${assetRevision}`,
-      payload: { storyId, mode, minimumImages: force ? 4 : 2 },
+      payload: { storyId, storyTitle: story.title, mode, minimumImages: force ? 4 : 2 },
       maxAttempts: 2,
     });
     if (queued.job.status === "complete") {
@@ -1173,6 +1238,10 @@ app.patch(
   "/api/settings",
   asyncRoute(async (request, response) => {
     const allowed = request.body as Partial<Settings>;
+    if (allowed.homeLayout !== undefined) {
+      try { allowed.homeLayout = parseHomeLayout(allowed.homeLayout); }
+      catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "栏目设置无效" }); return; }
+    }
     if (allowed.spendingPolicy !== undefined
       && allowed.spendingPolicy !== "zero-cost"
       && allowed.spendingPolicy !== "allow-metered") {
@@ -1191,6 +1260,7 @@ app.patch(
       };
       // Keep scheduled collection aligned with Today's 48-hour editorial
       // window so a late daily run cannot create an artificial blind spot.
+      if (allowed.homeLayout !== undefined) next.homeLayout = parseHomeLayout(allowed.homeLayout);
       next.windowHours = 48;
       next.officialMonitorEnabled = next.officialMonitorEnabled !== false;
       next.officialMonitorIntervalMinutes = officialPollInterval(next.officialMonitorIntervalMinutes);
@@ -3254,7 +3324,7 @@ const durableJobDesk = createJobDesk({
         ? rawMode as Exclude<AssignmentMode, "watch" | "skip">
         : undefined;
       if (!storyId) throw new Error("任务缺少 Story ID");
-      context.progress(0.03, "准备按 1→5 优先级建立素材包");
+      context.progress(0.03, "核对原文并准备文章资料");
       const result = await contentPackageDesk.buildAndSave(
         storyId,
         mode,

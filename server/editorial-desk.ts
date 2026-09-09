@@ -1,6 +1,8 @@
+import { pendingSourceReadingNotice } from "./package-reading-status.js";
 import type { AssignmentDecision, AssignmentMode, EvidenceStrength } from "./product-types.js";
 
 export interface EditorialAssignmentInput {
+  bodyVerified?: boolean;
   technicalArticle?: import("./technical-article.js").TechnicalArticlePolicy;
   title: string;
   ageHours: number;
@@ -50,8 +52,9 @@ export const assignStory = (input: EditorialAssignmentInput): AssignmentDecision
     reason = "原始材料较完整，优先制作导读与有限引用，避免无意义重写";
   } else {
     mode = "brief";
-    reason = "事件单一且证据足够，适合生成简洁事实稿";
+    reason = input.bodyVerified === false ? "官方或媒体已有线索，先核对原文再整理为简洁事实稿" : "事件集中，适合整理为简洁事实稿";
   }
+  if (input.bodyVerified === false && !["watch", "skip"].includes(mode)) warnings.push(pendingSourceReadingNotice);
   if (input.communitySourceCount > 0 && input.communitySampleCount < 5) {
     warnings.push("社区样本不足，只能呈现有限观点，不能概括共识");
   }
@@ -72,4 +75,3 @@ export const assignStory = (input: EditorialAssignmentInput): AssignmentDecision
     basis: "policy-v1",
   };
 };
-

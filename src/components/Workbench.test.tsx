@@ -205,7 +205,7 @@ test("selection summary names every queued candidate, surfaces gaps, and shows t
     onOpenAiSettings: () => undefined,
   }));
 
-  assert.match(markup, />选型总结</u);
+  assert.match(markup, />待写选题 /u);
   assert.match(markup, /OpenAI launches a new model/u);
   assert.match(markup, /OpenAI · 官方一手来源/u);
   assert.match(markup, /2 张来源图/u);

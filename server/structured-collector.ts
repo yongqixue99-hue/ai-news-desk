@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import type { AnyNode } from "domhandler";
 import { parseKnowledgeIndex } from "./official-knowledge.js";
+import { officialIndexRoute } from "./official-news-index.js";
+import { createSourceRouteReader, SourceRouteReadError, type SourceRouteReader } from "./source-route-cache.js";
+import { workflowRoot } from "./workspace-paths.js";
+import path from "node:path";
+import { verifyOfficialPublicationDates } from "./official-publication-date.js";
 import { fetchRemote, readResponseBuffer } from "./remote-url.js";
 import { routedFeedsForSource, sourceRoleFor } from "./source-routing.js";
 import type {
@@ -9,6 +14,7 @@ import type {
   CollectionTopicId,
   RawHorizonItem,
   SourceConfig,
+  SourceRouteResult,
 } from "./types.js";
 
 const maximumFeedBytes = 4 * 1024 * 1024;
@@ -16,13 +22,31 @@ const maximumItemsPerFeed = 100;
 const minimumSharedSitemapLastmodCount = 10;
 const sitemapSourceOrderReserve = Math.floor(maximumItemsPerFeed / 2);
 const hackerNewsTopStories = "https://hacker-news.firebaseio.com/v0/topstories.json";
+const defaultRouteReader = createSourceRouteReader({ cacheDirectory: path.join(workflowRoot, "source-cache") });
 
 type CollectorFetcher = (url: string | URL, init: RequestInit) => Promise<Response>;
+
+const requestSignal = (signal: AbortSignal | undefined, timeoutMs: number) => signal
+  ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+  : AbortSignal.timeout(timeoutMs);
+
+const collectionError = (error: unknown) => {
+  if (!(error instanceof Error)) return "来源读取失败";
+  if (error.name === "TimeoutError") return "读取超时，请检查网络或该来源的可用性";
+  const cause = error.cause as { code?: string } | undefined;
+  const networkErrors: Record<string, string> = {
+    UND_ERR_CONNECT_TIMEOUT: "连接超时", ETIMEDOUT: "连接超时", ECONNRESET: "连接被中断",
+    ENOTFOUND: "域名解析失败", EAI_AGAIN: "域名解析暂时失败",
+    UNABLE_TO_VERIFY_LEAF_SIGNATURE: "证书验证失败", CERT_HAS_EXPIRED: "证书已过期",
+  };
+  return (networkErrors[cause?.code ?? ""] ?? error.message).slice(0, 500);
+};
 
 export interface PortableStructuredCollectionOptions {
   fetcher?: CollectorFetcher;
   now?: () => Date;
   signal?: AbortSignal;
+  routeReader?: SourceRouteReader;
 }
 
 const normalizedText = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -95,6 +119,13 @@ export const parsePortableFeed = (
   },
 ): RawHorizonItem[] => {
   const $ = cheerio.load(xml, { xmlMode: true });
+  const root = $.root().children().first().get(0);
+  const format = root && "name" in root ? root.name.toLowerCase().split(":").at(-1) : "";
+  if (format === "sitemapindex") throw new Error("此地址是 sitemap 目录索引，请配置具体的文章 sitemap 路线");
+  if (!["rss", "rdf", "feed", "urlset"].includes(format ?? "")
+    || (format === "rss" && !$("rss > channel").length)) {
+    throw new Error("返回内容不是可识别的 RSS、Atom 或文章 sitemap，可能是网页、登录页或访问验证页");
+  }
   const entries = $("item, entry").toArray().slice(0, maximumItemsPerFeed);
   if (!entries.length) {
     const parsedSitemapEntries = $("urlset > url").toArray()
@@ -175,6 +206,7 @@ export const parsePortableFeed = (
         source_id: input.sourceId,
         source_role: input.sourceRole,
         source_format: "sitemap",
+        date_basis: "sitemap-lastmod",
         sitemap_lastmod_status: entry.lastmodStatus,
         category: input.category,
         collector: "portable-typescript",
@@ -189,7 +221,9 @@ export const parsePortableFeed = (
     if (!title || !url) return [];
     const content = plainText(directChild($, entry, ["encoded", "content", "summary", "description"]));
     const author = plainText(directChild($, entry, ["creator", "author"]));
-    const publishedAt = validDate(directChild($, entry, ["pubdate", "published", "updated", "date"]));
+    const declaredPublication = directChild($, entry, ["pubdate", "published", "date"]);
+    const modifiedAt = validDate(directChild($, entry, ["updated"]));
+    const publishedAt = declaredPublication ? validDate(declaredPublication) : modifiedAt;
     const identity = directChild($, entry, ["guid", "id"]) || url;
     return [{
       id: stableItemId("rss", `${input.sourceId}:${identity}`),
@@ -205,6 +239,9 @@ export const parsePortableFeed = (
         feed_url: input.feedUrl,
         source_id: input.sourceId,
         source_role: input.sourceRole,
+        source_format: "feed",
+        date_basis: new URL(input.feedUrl).hostname === "news.google.com" ? "news-index" : declaredPublication ? "feed-published" : "feed-updated",
+        ...(modifiedAt ? { modified_at: modifiedAt } : {}),
         category: input.category,
         collector: "portable-typescript",
       },
@@ -220,8 +257,8 @@ const indexMatchStopWords = new Set([
 const indexMatchTokens = (value: string) => new Set(value.normalize("NFKC").toLowerCase()
   .split(/[^\p{L}\p{N}]+/u).filter((word) => word && !indexMatchStopWords.has(word)));
 
-/** Resolve only unambiguous matches present in this publisher's own index.
- * The discovery URL and date remain the original record; lastmod is not news time. */
+/** Resolve unambiguous publisher links and prefer original RSS publication
+ * evidence. Preserve the index's observed date separately from event time. */
 export const resolveOfficialFeedLinks = (items: RawHorizonItem[], source: SourceConfig) => {
   if (sourceRoleFor(source) !== "official" || !source.homepageUrl) return items;
   const owner = new URL(source.homepageUrl).hostname.replace(/^www\./u, "");
@@ -239,8 +276,17 @@ export const resolveOfficialFeedLinks = (items: RawHorizonItem[], source: Source
       return { entry, shared, valid: shared >= 3 && shared === tokens.size && shared / Math.max(1, title.size) >= 0.65 };
     }).filter((match) => match.valid).sort((a, b) => b.shared - a.shared);
     const best = matches[0];
-    if (!best || (matches[1] && matches[1].shared === best.shared && matches[1].entry.url !== best.entry.url)) return item;
-    return { ...item, metadata: { ...item.metadata, canonical_url: best.entry.url, canonical_evidence: "publisher-index" } };
+    const identity = (entry: RawHorizonItem) => entry.url.replace(/\/$/u, "");
+    if (!best || matches.some((match) => match.shared === best.shared && identity(match.entry) !== identity(best.entry))) return item;
+    const publications = matches.filter((match) => identity(match.entry) === identity(best.entry)
+      && match.entry.metadata?.date_basis === "feed-published" && match.entry.published_at);
+    const dates = new Set(publications.map((match) => match.entry.published_at));
+    const original = dates.size === 1 ? publications[0]?.entry : undefined;
+    return { ...item, ...(original ? { published_at: original.published_at } : {}), metadata: { ...item.metadata,
+      canonical_url: best.entry.url, canonical_evidence: "publisher-index",
+      ...(original ? { date_basis: "publisher-feed", indexed_at: item.published_at,
+        date_source_url: original.url, date_publication_precision: "timestamp" } : {}),
+    } };
   });
 };
 
@@ -251,39 +297,47 @@ const collectFeed = async (
   fetcher: CollectorFetcher,
   fetchedAt: string,
   signal?: AbortSignal,
+  routeReader?: SourceRouteReader,
 ) => {
   const feeds = routedFeedsForSource(source, topicIds, filters);
+  if (!feeds.length) throw new Error("当前频道没有可读取的来源路线");
   const attempts = await Promise.allSettled(feeds.map(async (feed) => {
-    const response = await fetcher(feed.url, {
-      signal: signal ?? AbortSignal.timeout(18_000),
+    const index = officialIndexRoute(feed.format, feed.url);
+    return (routeReader ?? createSourceRouteReader({ fetcher: (url, init) => fetcher(url, init ?? {}) })).read({
+      sourceId: source.id, url: index?.requestUrl ?? feed.url, format: feed.format ?? "feed",
+      parserVersion: `dated-events-v2:${source.name}:${sourceRoleFor(source)}:${feed.category}`,
+      maxBytes: index?.maxBytes ?? maximumFeedBytes,
+      init: {
+      signal: requestSignal(signal, 18_000),
       headers: {
-        accept: "application/atom+xml, application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.5",
+        accept: index?.accept ?? "application/atom+xml, application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.5",
+        ...(feed.format === "gemini-changelog" ? { "accept-language": "en-US,en;q=0.9" } : {}),
         "user-agent": "AI-News-Desk/0.2 (portable collector)",
       },
-    });
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new Error(`${feed.name} 返回 HTTP ${response.status}`);
-    }
-    const xml = (await readResponseBuffer(response, maximumFeedBytes)).toString("utf8");
-    return parsePortableFeed(xml, {
+      },
+      parse: (content) => index ? index.parse(content, source, fetchedAt) : parsePortableFeed(content, {
       feedUrl: feed.url,
       feedName: feed.name,
       sourceId: source.id,
       sourceRole: sourceRoleFor(source),
       category: feed.category,
       fetchedAt,
+      }),
     });
   }));
-  const items = attempts.flatMap((attempt) => attempt.status === "fulfilled" ? attempt.value : []);
-  if (!items.length && attempts.some((attempt) => attempt.status === "rejected")) {
-    const reasons = attempts.flatMap((attempt) =>
-      attempt.status === "rejected"
-        ? [attempt.reason instanceof Error ? attempt.reason.message : String(attempt.reason)]
-        : []);
-    throw new Error(reasons.join("；").slice(0, 700));
-  }
-  return resolveOfficialFeedLinks(items, source);
+  const items = attempts.flatMap((attempt) => attempt.status === "fulfilled" ? attempt.value.items : []);
+  const routes = attempts.map((attempt, index): SourceRouteResult => ({
+    sourceId: source.id,
+    url: feeds[index]!.url,
+    status: attempt.status === "fulfilled" ? "success" : "error",
+    rawCount: attempt.status === "fulfilled" ? attempt.value.items.length : 0,
+    ...(attempt.status === "fulfilled" ? { cacheStatus: attempt.value.cacheStatus, lastSuccessfulAt: attempt.value.lastSuccessfulAt,
+      ...(attempt.value.cacheStatus === "not-modified" ? { detail: "官方确认内容未变化，沿用已解析记录" } : {}) }
+      : { detail: collectionError(attempt.reason), ...(attempt.reason instanceof SourceRouteReadError ? {
+        errorCode: attempt.reason.code, retryAt: attempt.reason.retryAt, httpStatus: attempt.reason.statusCode,
+      } : {}) }),
+  }));
+  return { items: resolveOfficialFeedLinks(items, source), routes };
 };
 
 interface HackerNewsItem {
@@ -307,7 +361,7 @@ const collectHackerNews = async (
   signal?: AbortSignal,
 ) => {
   const topResponse = await fetcher(hackerNewsTopStories, {
-    signal: signal ?? AbortSignal.timeout(12_000),
+    signal: requestSignal(signal, 12_000),
     headers: { accept: "application/json", "user-agent": "AI-News-Desk/0.2" },
   });
   if (!topResponse.ok) throw new Error(`Hacker News 返回 HTTP ${topResponse.status}`);
@@ -322,7 +376,7 @@ const collectHackerNews = async (
       const id = ids[cursor++];
       try {
         const response = await fetcher(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
-          signal: signal ?? AbortSignal.timeout(8_000),
+          signal: requestSignal(signal, 8_000),
           headers: { accept: "application/json", "user-agent": "AI-News-Desk/0.2" },
         });
         if (!response.ok) continue;
@@ -367,8 +421,10 @@ export const collectPortableStructuredSources = async (
   options: PortableStructuredCollectionOptions = {},
 ) => {
   const fetcher = options.fetcher ?? ((url, init) => fetchRemote(url, init, 3));
+  const routeReader = options.routeReader ?? (options.fetcher ? createSourceRouteReader({ fetcher: (url, init) => fetcher(url, init ?? {}), now: options.now }) : defaultRouteReader);
   const fetchedAt = (options.now ?? (() => new Date()))().toISOString();
   const failures: Record<string, string> = {};
+  const routeResults: SourceRouteResult[][] = sources.map(() => []);
   const signal = options.signal ?? request.signal;
   const collected: RawHorizonItem[][] = Array.from({ length: sources.length }, () => []);
   let cursor = 0;
@@ -388,23 +444,31 @@ export const collectPortableStructuredSources = async (
           collected[index] = await collectHackerNews(source, fetcher, fetchedAt, signal);
           continue;
         }
-        collected[index] = await collectFeed(
+        const feed = await collectFeed(
           source,
           request.topicIds,
           request.filters ?? {},
           fetcher,
           fetchedAt,
           signal,
+          routeReader,
         );
+        collected[index] = feed.items;
+        routeResults[index] = feed.routes;
+        if (feed.routes.every((route) => route.status === "error")) {
+          failures[source.id] = feed.routes.map((route) => route.detail).join("；").slice(0, 700);
+        }
       } catch (error) {
-        failures[source.id] = error instanceof Error ? error.message : String(error);
+        failures[source.id] = collectionError(error);
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(4, sources.length) }, worker));
+  const items = await verifyOfficialPublicationDates(collected.flat(), { routeReader, signal, now: options.now });
   return {
-    items: collected.flat(),
+    items,
     failures,
+    routeResults: routeResults.flat(),
     horizonRunId: `portable_${fetchedAt.replace(/[-:.TZ]/g, "").slice(0, 14)}`,
   };
 };

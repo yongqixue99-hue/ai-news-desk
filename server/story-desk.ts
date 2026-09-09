@@ -1,5 +1,8 @@
+import { matchesHomeKeyword } from "./home-layout.js";
 import { createHash } from "node:crypto";
-import { assessEditorialOpportunity, opportunityPriority } from "./newsworthiness.js";
+import { assessEditorialOpportunity, editorialExclusionFor, hasAnnouncementLead, mayShareEditorialEvent, normalizeEditorialText, opportunityPriority } from "./newsworthiness.js";
+import { areDistinctOfficialUpdates, hasOfficialUpdateAnchor } from "./official-update-url.js";
+import { latestSourceCollection } from "./source-health.js";
 import { personalizeCandidates } from "./personalization.js";
 import type {
   EvidenceStrength,
@@ -17,6 +20,7 @@ import { hasCurrentPublication } from "./publication-state.js";
 import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
 import { uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import { firstPartyModelVendorFor, modelResearchVendorFor } from "./model-release-research.js";
+import { modelReleaseTerms, launchHeadlineTerms, routineReleaseTerms, supportingDocumentTerms, modelLaunchCatchupHours } from "./model-announcement.js";
 import type { Candidate, CollectionTopicId, SourceConfig, WorkflowState } from "./types.js";
 
 interface CandidateRecord {
@@ -57,7 +61,7 @@ const normalizedUrl = (value: string | undefined) => {
     for (const key of [...url.searchParams.keys()]) {
       if (/^(?:utm_.+|ref|source|spm|from)$/iu.test(key)) url.searchParams.delete(key);
     }
-    url.hash = "";
+    if (!hasOfficialUpdateAnchor(url)) url.hash = "";
     url.pathname = url.pathname.replace(/\/+$/u, "") || "/";
     return url.toString().toLocaleLowerCase();
   } catch {
@@ -74,6 +78,31 @@ export const hasLinkedCommunitySource = (candidate: Candidate) => {
 
 const isFactBearingCandidate = (candidate: Candidate) => !isCommunityCandidate(candidate)
   || (hasLinkedCommunitySource(candidate) && candidate.briefing?.basis === "full-source");
+
+/** Canonical enrichment adds an alias to a source; it does not add corroboration. */
+const distinctFactRecords = (records: CandidateRecord[]) => {
+  const parents = records.map((_record, index) => index);
+  const root = (index: number): number => parents[index] === index ? index : (parents[index] = root(parents[index]));
+  const aliases = new Map<string, number>();
+  records.forEach(({ candidate }, index) => {
+    const keys = [`candidate:${candidate.id}`, ...[candidate.url, candidate.canonicalUrl]
+      .map(normalizedUrl).filter(Boolean).map((url) => `url:${url}`)];
+    for (const key of keys) {
+      const previous = aliases.get(key);
+      if (previous !== undefined) parents[root(index)] = root(previous);
+      else aliases.set(key, index);
+    }
+  });
+  const representatives = new Map<number, CandidateRecord>();
+  records.forEach((record, index) => {
+    const key = root(index);
+    const previous = representatives.get(key);
+    if (!previous || briefingRank(record.candidate) > briefingRank(previous.candidate)
+      || (briefingRank(record.candidate) === briefingRank(previous.candidate)
+        && record.candidate.canonicalUrl && !previous.candidate.canonicalUrl)) representatives.set(key, record);
+  });
+  return [...representatives.values()];
+};
 
 const titleTokens = (title: string) => {
   const cached = titleTokenCache.get(title);
@@ -196,7 +225,9 @@ const clustersFor = (state: WorkflowState) => {
         for (const candidateCluster of versionIndex.get(key) ?? []) versionCandidates.add(candidateCluster);
       }
       cluster = [...versionCandidates].find((candidateCluster) =>
-        withinMergeWindow(record, candidateCluster.records.at(-1)!));
+        !candidateCluster.records.some((entry) => areDistinctOfficialUpdates(entry.candidate.url, record.candidate.url))
+        && candidateCluster.records.every((entry) => mayShareEditorialEvent(entry.candidate.title, record.candidate.title))
+        && withinMergeWindow(record, candidateCluster.records.at(-1)!));
     }
     if (!cluster) {
       const nearbyClusters = new Set<StoryCluster>();
@@ -206,6 +237,8 @@ const clustersFor = (state: WorkflowState) => {
         }
       }
       cluster = [...nearbyClusters].find((candidateCluster) => {
+        if (candidateCluster.records.some((entry) => areDistinctOfficialUpdates(entry.candidate.url, record.candidate.url))) return false;
+        if (!candidateCluster.records.every((entry) => mayShareEditorialEvent(entry.candidate.title, record.candidate.title))) return false;
         const latest = candidateCluster.records.at(-1)!;
         if (Boolean(record.candidate.technicalArticle) !== Boolean(latest.candidate.technicalArticle)) return false;
         if (!withinMergeWindow(record, latest)) return false;
@@ -400,19 +433,16 @@ const explanationFor = (
   };
 };
 
-const modelReleaseTerms = /(?:\b(?:claude|fable|mythos|gpt(?:-[\w.]+)?|astra|gemini|llama|qwen|deepseek|grok|mistral|kimi|glm|ernie|minimax)\b|\bmodel\b|模型)/iu;
 const releaseEventTerms = /(?:\b(?:release(?:d|s)?|launch(?:ed|es)?|introduc(?:e|ed|es|ing)|announce(?:d|s)?|available|preview|coming soon|on the way|preparing)\b|发布|推出|上线|预告|即将|模型)/iu;
-const launchHeadlineTerms = /(?:\b(?:new generation|release(?:d|s)?|launch(?:ed|es)?|introduc(?:e|ed|es|ing)|announce(?:d|s)?)\b|正式发布|发布|推出|上线)/iu;
-const supportingDocumentTerms = /(?:\b(?:safety|system card|pricing|case study|apolog(?:y|ize[sd]?)|reviewed|cut manual fixes)\b|安全|模型卡|定价|致歉|案例)/iu;
-const modelIdentityTerms = /\b(?:gpt[\s-]*\d+|astra|(?:claude[\s-]*)?(?:fable|mythos|opus|sonnet|haiku)[\s-]*\d+|gemini[\s-]*\d+|deepseek[\s-]*[rv]?\d+|qwen[\s-]*\d+)\b/iu;
-const routineReleaseTerms = /\b(?:nightly|canary|daily|weekly|webinar|(?:co)?workshop|cli|sdk)\b|报名|活动预告/iu;
+const modelIdentityTerms = /\b(?:gpt[\s-]*\d+\w*|astra|claude[\s-]*\d+|(?:claude[\s-]*)?(?:fable|mythos|opus|sonnet|haiku)[\s-]*\d+|gemini[\s-]*\d+|deepseek[\s-]*[rv]?\d+|qwen[\s-]*\d+)\b/iu;
 const isFirstPartyModelSignal = (signal: StorySignalView) => signal.sourceRole === "official"
   && Boolean(firstPartyModelVendorFor(signal))
-  && modelReleaseTerms.test(`${signal.title} ${signal.titleZh ?? ""}`)
+  && modelReleaseTerms.test(normalizeEditorialText(signal.title))
+  && !editorialExclusionFor(signal.title)
   && !routineReleaseTerms.test(signal.title)
   && !supportingDocumentTerms.test(signal.title);
 const isFirstPartyModelAnnouncement = (signal: StorySignalView) => isFirstPartyModelSignal(signal)
-  && launchHeadlineTerms.test(`${signal.title} ${signal.titleZh ?? ""}`);
+  && (launchHeadlineTerms.test(normalizeEditorialText(signal.title)) || hasAnnouncementLead(signal.excerpt ?? ""));
 
 const dossierTextFor = (records: CandidateRecord[]) => records.flatMap(({ candidate }) => [
   candidate.title,
@@ -454,7 +484,7 @@ const releaseDossierFor = (
 ): ModelReleaseDossier | undefined => {
   const text = dossierTextFor(records);
   const looksLikeRelease = modelReleaseTerms.test(text)
-    && (releaseEventTerms.test(text) || cluster.versionKeys.size > 0);
+    && (releaseEventTerms.test(text) || launchHeadlineTerms.test(text) || cluster.versionKeys.size > 0);
   if (!looksLikeRelease) return undefined;
 
   const ownerDomains = knownOwnerDomainsFor(text);
@@ -612,10 +642,8 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     return !materialVendor || materialVendor === storyVendor;
   });
   const uniqueSignals = uniqueBy(records, (record) => `${record.runId}:${record.candidate.id}`);
-  const factRecords = uniqueBy(
-    records.filter((record) => isFactBearingCandidate(record.candidate)),
-    (record) => normalizedUrl(record.candidate.canonicalUrl || record.candidate.url) || record.candidate.sourceName,
-  );
+  const factRecords = distinctFactRecords(records.filter((record) => isFactBearingCandidate(record.candidate)));
+  const independentFactRecords = factRecords.filter((record) => record.candidate.evidenceRelation !== "research-material");
   const communityRecords = uniqueBy(
     records.filter((record) => isCommunityCandidate(record.candidate)),
     (record) => normalizedUrl(record.candidate.engagement?.discussionUrl || record.candidate.url) || record.candidate.sourceName,
@@ -631,8 +659,9 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   const firstPartyLaunch = storyVendor
     ? [...eventRecords]
       .filter((record) => {
-        const titles = recordTitles(record).join(" ");
+        const titles = normalizeEditorialText(record.candidate.title);
         return record.candidate.sourceRole === "official"
+          && !editorialExclusionFor(titles)
           && firstPartyModelVendorFor({
             sourceName: record.candidate.sourceName,
             url: record.candidate.canonicalUrl || record.candidate.url,
@@ -674,7 +703,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   const firstSeenAt = new Date(fetchedTimes.length ? Math.min(...fetchedTimes) : fallbackTime).toISOString();
   const lastSeenAt = new Date(fetchedTimes.length ? Math.max(...fetchedTimes) : fallbackTime).toISOString();
   const ageHours = Math.max(0, (Date.parse(now) - Date.parse(publishedAt)) / 3_600_000);
-  const evidenceStrength = evidenceStrengthFor(factRecords);
+  const evidenceStrength = evidenceStrengthFor(independentFactRecords);
   const communitySampleCount = Math.max(0, ...records.filter((record) => isCommunityCandidate(record.candidate)).map((record) => commentSamplesIn(record.candidate)));
   const protectedStory = records.some((record) => record.candidate.selected
     || record.candidate.status === "drafted"
@@ -684,11 +713,12 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     || (headlinePrimary === primary ? bestBriefing?.titleZh : undefined)
     || headlinePrimary.candidate.title;
   const assignment = assignStory({
+    bodyVerified: independentFactRecords.some((record) => record.candidate.briefing?.basis === "full-source"),
     technicalArticle,
     title,
     ageHours,
     evidenceStrength,
-    factSourceCount: factRecords.length,
+    factSourceCount: independentFactRecords.length,
     communitySourceCount: communityRecords.length,
     communitySampleCount,
     longestExcerpt: Math.max(...records.map((record) => record.candidate.excerpt.length)),
@@ -706,6 +736,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     sourceRole: record.candidate.sourceRole,
     sourceType: record.candidate.sourceType,
     title: record.candidate.title,
+    excerpt: record.candidate.excerpt,
     titleZh: record.candidate.briefing?.titleZh,
     summaryZh: record.candidate.briefing?.summaryZh,
     briefingBasis: record.candidate.briefing?.basis,
@@ -714,6 +745,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     author: record.candidate.author,
     publishedAt: record.candidate.publishedAt,
     publicationDateKnown: record.candidate.publicationDateKnown,
+    publicationEvidence: record.candidate.publicationEvidence,
     fetchedAt: record.candidate.fetchedAt,
     isCommunity: isCommunityCandidate(record.candidate),
     factBearing: isFactBearingCandidate(record.candidate),
@@ -746,7 +778,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
     recommendationScore: Math.max(...records.map((record) => record.candidate.recommendationScore)),
     evidenceStrength,
     sourceCount,
-    factSourceCount: factRecords.length,
+    factSourceCount: independentFactRecords.length,
     communitySourceCount: communityRecords.length,
     communitySampleCount,
     images,
@@ -786,9 +818,12 @@ export const buildStories = (state: WorkflowState, now = new Date().toISOString(
   const focused = state.settings.recommendationMode !== "balanced";
   return clustersFor(state).map((cluster) => {
     const story = storyFromCluster(cluster, now);
-    const opportunity = assessEditorialOpportunity(story.originalTitle, story.summary);
+    const originalSignal = story.signals.find((signal) => signal.title === story.originalTitle && !signal.isCommunity)
+      ?? story.signals.find((signal) => signal.title === story.originalTitle);
+    const opportunity = assessEditorialOpportunity(story.originalTitle, originalSignal?.excerpt ?? "", { official: originalSignal?.sourceRole === "official" });
     if (story.releaseDossier?.releaseStatus === "released"
-      && modelIdentityTerms.test(`${story.originalTitle} ${story.title}`)
+      && modelIdentityTerms.test(normalizeEditorialText(story.originalTitle))
+      && !editorialExclusionFor(story.originalTitle)
       && !routineReleaseTerms.test(story.originalTitle)
       && story.signals.some(isFirstPartyModelAnnouncement)) {
       opportunity.lane = "important";
@@ -796,10 +831,11 @@ export const buildStories = (state: WorkflowState, now = new Date().toISOString(
       opportunity.reason = "有厂商发布来源，优先核对能力、价格与可用范围的变化。";
     }
     if (story.releaseDossier?.releaseStatus === "preview"
+      && !editorialExclusionFor(story.originalTitle)
       && story.releaseDossier.facets.some((facet) => facet.id === "official" && facet.status === "ready")
       && !routineReleaseTerms.test(story.originalTitle)
       && story.signals.some((signal) => isFirstPartyModelSignal(signal)
-        && /\b(?:preview|coming soon|on the way|preparing)\b|预告|即将/iu.test(`${signal.title} ${signal.titleZh ?? ""}`))) {
+        && /\b(?:preview|coming soon|on the way|preparing)\b|预告|即将/iu.test(signal.title))) {
       opportunity.lane = "important";
       opportunity.label = "官方预告";
       opportunity.reason = "厂商已发布预告，正式上线时间和可用范围仍需核对。";
@@ -826,7 +862,7 @@ const diagnosticsFor = (sources: SourceConfig[]) => sources
   }));
 
 const standardTodayWindowHours = 48;
-const confirmedModelLaunchCatchupHours = 7 * 24;
+const confirmedModelLaunchCatchupHours = modelLaunchCatchupHours;
 
 const isWithinTodayWindow = (story: StoryView) => {
   if (story.ageHours <= standardTodayWindowHours) return true;
@@ -838,6 +874,8 @@ const isWithinTodayWindow = (story: StoryView) => {
       url: signal.url,
     })));
   return story.ageHours <= confirmedModelLaunchCatchupHours
+    && !editorialExclusionFor(story.originalTitle)
+    && story.signals.some(isFirstPartyModelAnnouncement)
     && story.releaseDossier?.releaseStatus === "released"
     && officialFacet?.status === "ready"
     && hasKnownFirstPartyOwner
@@ -851,7 +889,8 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
   // announcement deserves attention while its original page is being read.
   const releaseHighlights = stories.filter((story) => story.ageHours <= confirmedModelLaunchCatchupHours
     && !story.ignored && !story.published && story.releaseDossier
-    && modelIdentityTerms.test(`${story.originalTitle} ${story.title}`)
+    && !editorialExclusionFor(story.originalTitle)
+    && modelIdentityTerms.test(normalizeEditorialText(story.originalTitle))
     && !routineReleaseTerms.test(`${story.originalTitle} ${story.title}`)
     && story.signals.some(isFirstPartyModelAnnouncement))
     .sort((left, right) => Number(right.releaseDossier?.releaseStatus === "released")
@@ -871,7 +910,7 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
       ?? story.signals[0]?.sourceName
       ?? "未知来源",
   );
-  const watching = active.filter((story) => story.assignment.mode === "watch" && eligible(story)).slice(0, 6);
+  const watching = active.filter((story) => story.assignment.mode === "watch" && !story.selected && eligible(story)).slice(0, 6);
   const backlog = interleaveBySource(
     stories.filter((story) => !story.technicalArticle && !isWithinTodayWindow(story)
       && story.ageHours > standardTodayWindowHours
@@ -921,6 +960,8 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
   ].filter((reason) => reason.count > 0);
   return {
     generatedAt: now,
+    collection: latestSourceCollection(state.runs),
+    pending: stories.filter((story) => story.selected && !story.drafted && !story.published && !story.ignored),
     releaseHighlights,
     selectionMode: focused ? "focused" : "balanced",
     mustReads: visibleNews.slice(0, 3),
@@ -963,3 +1004,18 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
 
 export const storyById = (state: WorkflowState, storyId: string, now = new Date().toISOString()) =>
   buildStories(state, now).find((story) => story.id === storyId);
+
+export const retainStoryForWriting = (state: WorkflowState, storyId: string) => {
+  const story = storyById(state, storyId);
+  const signal = story?.signals.find((item) => !item.isCommunity) ?? story?.signals[0];
+  const candidate = signal && state.runs.find((run) => run.id === signal.runId)?.candidates.find((item) => item.id === signal.candidateId);
+  if (candidate) candidate.selected = true;
+};
+
+// A local view over StoryDesk aggregation: browsing never starts collection or AI work.
+export const buildHomeNews = (state: WorkflowState, keyword: string, now = new Date().toISOString()) =>
+  buildStories(state, now).filter((story) => !story.ignored && !story.published
+    && (story.ageHours <= 7 * 24 || story.selected)
+    && story.signals.some((signal) => !signal.isCommunity)
+    && matchesHomeKeyword([story.title, story.originalTitle, ...story.signals.map((signal) => signal.excerpt)], keyword))
+    .slice(0, 40);

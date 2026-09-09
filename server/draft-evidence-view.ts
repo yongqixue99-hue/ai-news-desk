@@ -3,9 +3,14 @@ import { isCommunityDiscoveryFraming } from "./editorial-source-policy.js";
 
 const communityLabelPattern = /Hacker News|Reddit|V2EX|知乎|社区|讨论串/u;
 const communityCommentPattern = /Top Comments|热门评论|热评|Top Comment/u;
-const rightsPattern = /版权|转载|翻译|图片|授权|许可|权利/u;
+const rightsPattern = /版权|转载|翻译|授权|许可|权利/u;
 const contextPattern = /^(仍未知|未知|尚未公开|公开资料|现有页面|原始材料过长|原文使用)|没有说明|没有给出|无法直接读取|本地快照/u;
-const explicitFactPattern = /^(待核验|待确认|事实冲突|来源冲突)|尚未核实|无法核实/u;
+const explicitFactPattern = /(?:^|[。；;：:\n])\s*(?:待核验|待确认|事实冲突|来源冲突)|尚未核实|无法核实/u;
+// These are source/reading limits, not a request for the user to reconstruct a
+// benchmark. Missing event details and unrecognised uncertainty still stay fact.
+const benchmarkContextPattern = /(?:原文|文中|本次材料|现有材料)[^。；;\n]{0,70}未(?:披露|公开|提供|包含)(?:各项|相关|完整|的|任何|\s){0,12}(?:(?:(?:基准)?测试|评测)(?:的)?(?:完整)?(?:配置|设置|细节)|样本(?:规模|数量)|复现(?:细节|配置)|(?:第三方|独立)(?:验证|复测|评测)(?:结果|数据)?)/u;
+const imageReadingContextPattern = /(?:图片|图表|截图|图中|图内)(?:中的?|内的?|的)?(?:文字|数值|数字)(?:和(?:文字|数值|数字))?(?:尚|仍)?未(?:单独)?(?:核对|读取|识别)/u;
+const extractionScopePattern = /^本次读取的文字未包含|^本次只读取了\s*HTML\s*文字与图注[，,]\s*没有核对(?:图表)?图片像素中的(?:文字|数值)/u;
 const weakStatuses = new Set(["excerpt-only", "inference", "unverified"]);
 
 const hostFor = (value: string) => {
@@ -31,9 +36,11 @@ export type DraftUncertaintyKind = "fact" | "rights" | "context";
 
 export const classifyDraftUncertainty = (value: string): DraftUncertaintyKind => {
   const text = value.trim();
-  if (rightsPattern.test(text)) return "rights";
   if (explicitFactPattern.test(text)) return "fact";
-  if (contextPattern.test(text)) return "context";
+  if (rightsPattern.test(text)) return "rights";
+  if (text.startsWith("读取范围：") || contextPattern.test(text)
+    || benchmarkContextPattern.test(text) || imageReadingContextPattern.test(text)
+    || extractionScopePattern.test(text)) return "context";
   return "fact";
 };
 

@@ -9,6 +9,7 @@ import { resolveCodexExecutable } from "./codex-executable.js";
 import { planEditorialImagePlacements, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import { completeDraftImageLibrary } from "./draft-image-library.js";
 import { frozenFactSourceUrls, reconcileDraftFactEvidence } from "./editorial-quality-desk.js";
+import { sourceSnapshotKey } from "./source-snapshot.js";
 import {
   appendAiError,
   appendAiProviderAttempt,
@@ -228,19 +229,7 @@ const httpUrl = (value: unknown) => {
   }
 };
 
-const normalizedEvidenceUrl = (value: string) => {
-  try {
-    const parsed = new URL(value);
-    parsed.hash = "";
-    parsed.pathname = parsed.pathname.replace(/\/+$/u, "") || "/";
-    for (const key of [...parsed.searchParams.keys()]) {
-      if (/^(?:utm_.+|ref|source|spm|from)$/iu.test(key)) parsed.searchParams.delete(key);
-    }
-    return parsed.toString().toLocaleLowerCase();
-  } catch {
-    return value.trim().toLocaleLowerCase();
-  }
-};
+const normalizedEvidenceUrl = sourceSnapshotKey;
 
 const communityDiscoveryFramePattern = /Hacker News|Reddit|V2EX|知乎|社区(?:讨论|热议)?|论坛|热议|因.{0,24}讨论.{0,16}(?:受到|引发)|(?:重新)?受到(?:关注|注意)/iu;
 
@@ -552,7 +541,7 @@ ${skills.filter((skill) => skill.compatibility === "codex-native").length
     : "只写过去指定时间窗内真正发生的新事件；公告日期、开放日期和报道日期必须区分。"}
    如果 job.storyContext.discoveredViaCommunity 为 true，社区只是选题发现渠道。news 稿的标题、摘要和首句不得出现社区平台名、热议、讨论、受到关注或重新受到注意；必须直接说明项目、产品或公司已经由非社区来源支持的具体事实。如果关联项目并非当天发布，就写成不冒充突发新闻的项目介绍，不虚构“重新走红”等事件。只有 contentIntent 为 community 时，讨论本身才可以成为正文主角。不要把 Dependabot、依赖升级、README 调整等例行维护抬成标题，除非它确实改变了产品能力、安全性或使用方式。
 3. 严格按 job.draftStrategy 写作，不要把所有新闻塞进同一个模板：
-   - brief：单一且事实清楚的事件，直接交代动作、规则、受影响对象、后果与限制。只有一两项正文级事实时可以保持 2–3 段；素材包已有 5 条以上受支持事实时，必须写成 5–7 段、正文约 600–1000 个中文字符，依次回答“发生了什么、为什么被纳入、具体新增什么义务、会影响谁、违规后果与仍未知什么”。每段都必须由 paragraphEvidence 回指来源并增加新信息，不能同义改写凑字，take 可以为空。
+   - brief：单一且事实清楚的事件，直接交代动作、规则、受影响对象、后果与限制。按证据密度安排段落；一两项事实可写成短讯，事实较多时覆盖重要信息、机制和适用限制。已经讲清的短稿直接完成，不为字数、段落数或固定模板补写背景、义务与后果。每段都必须由 paragraphEvidence 回指来源并增加新信息，不能同义改写凑字，take 可以为空。
    - synthesis：有多个独立来源、冲突或因果关系时，先写共同确认的事实，再解释差异与影响；段落数量随材料变化。
    - community：先写素材包中的事实主干，再呈现真实社区样本；原句、译文和编辑概括必须区分。少于 5 条有效样本时，社区只能占正文一句且必须说明是有限样本；不足 15 条且不足 5 个分支时不能写多数、共识或反复出现。
    - playbook：只整理素材包中可验证的步骤、前置条件、失败经验和适用边界；不能补不存在的步骤。
@@ -570,12 +559,12 @@ ${skills.filter((skill) => skill.compatibility === "codex-native").length
 9. 把图表、产品截图和架构图视为新闻证据，而不是装饰。先检查图片是否支持对应段落，再按 editorialPriority 选择：1 原新闻可下载图片，2 原文图表截图，3 当事人物/公司身份资料图，4 事件相关图片，5 生成兜底。原图与忠实的原文图表截图都属于来源证据，可按正文需要选择；不要为了用满上限插入正文没有解释的雷达图、作者头像或推荐文章图片。三段以上正文通常选择 2–4 张，材料不适合时可更少，分散插在相关段落后。其余图片保留在配图库，不需要全部插入正文。图注用自然中文说明图片内容，保留官方自测归属与重要条件。如果没有冻结素材包，且核验到官方原图，可把精确图片 URL 放入 discoveredImages；冻结素材包任务只能使用包内图片。
 10. 只有 1–4 级都不存在合格图片时才可选择第 5 级 AI 生成兜底；不要自行生成图片，不要选择无关 logo、头像、装饰图、旧事件图片或仅凭“AI/科技”等泛词命中的通用图。caption 要说明画面是什么并保留来源语义。imageSelections 只是同级图片的段落匹配建议，系统会再次强制执行优先级。
 11. topics 必须返回空数组。平台话题只由用户从已成功发布的历史标签中选择，不能自动生成。
-12. paragraphEvidence 必须覆盖每个 paragraphs 下标。每一段列出直接支持该段的精确来源 URL；URL 必须同时出现在 sources 中，候选原始链接也必须列入 sources。${contentIntent === "source" ? "sourceMaterials 中的社区主帖 URL 只能证明原作者确实这样写过，不能把其陈述升级为已独立核验事实。" : "社区讨论链接只能支持“讨论热度、分数、评论内容”等社区事实，不能支持产品功能、公司行为或裁员传闻。"}没有来源支持的句子不得写入正文。
+12. paragraphEvidence 必须覆盖每个 paragraphs 下标。每一段列出直接支持该段的精确来源 URL；URL 必须同时出现在 sources 中，候选原始链接也必须列入 sources。${contentIntent === "source" ? "sourceMaterials 中的社区主帖 URL 只能证明原作者确实这样写过，不能把其陈述升级为已独立核验事实。" : "社区讨论链接只能支持“讨论热度、分数、评论内容”等社区事实，不能支持产品功能、公司行为或裁员传闻。"}没有来源支持的句子不得写入正文。素材包任务中的日期也只能取自 facts 明确写出的事件日期；sources.publishedAt 只是页面发布时间，不能自动写成事件发生日期，facts 未记载时省略日期。
 13. packageLocked 时，paragraphFactIds 也必须覆盖每个 paragraphs 下标，并且只能列出该段实际使用的 job.contentPackage.facts[].id；不能把未写入正文的事实登记为已使用。非素材包任务返回空数组。
 14. 返回严格符合 JSON Schema 的 JSON，不要写 Markdown 或解释。
 `;
 
-const apiSystemPrompt = `你是新闻编辑工作台的中文成稿引擎。只能依据用户提供的候选新闻、正文摘录、ContentPackage 和来源信息写作，不能假装已经浏览网页。evidenceBoundary 为 content-package 时，素材包是唯一事实边界，不能补充模型记忆中的事实、来源或图片。先服从 contentIntent：news 必须以新闻或官方来源建立事实主干，社区只可作为选题发现线索，不能用评论替代新闻内容；source 只处理 sourceMaterials 中冻结的原始材料，按原文顺序保留具体信息和作者语气，中文原文做最小整理，外文做忠实中文翻译，不添加背景、评价、统一模板或虚构过渡，也不能把作者陈述写成已独立核验事实；community 先把事件事实讲清，再使用达到采样门槛的真实观点。再遵守 draftStrategy：brief 只把单一事件说清；当 brief 的素材包已有 5 条以上受支持事实时，写成 5–7 段、正文约 600–1000 个中文字符，具体解释事件、适用规则、受影响对象、后果和限制，不能只交付摘要，也不能同义改写凑字；synthesis 组织多源共识与差异；community 先写事实主干，再保留达到采样门槛的真实社区样本；playbook 只整理可验证步骤；curate 在 news 意图下只做导读与有限引用，在 source 意图下生成带明确来源归属的私有原文工作副本；commentary 只有存在明确 userAngle 时可采用。社区热度不能替代事实来源，少于 5 条社区样本时不得让评论主导正文。storyContext.discoveredViaCommunity 为 true 且 contentIntent 为 news 时，社区仍然只是发现渠道：标题、摘要和首句不得出现社区平台名、热议、讨论、受到关注或重新受到注意，必须直接说明非社区来源支持的项目、产品或公司事实；若项目不是当天发布，就写成项目介绍，不能虚构“重新走红”。只有 contentIntent 为 community 时讨论本身才可成为正文主角。不要为了制造新品新闻，把依赖升级、自动更新或 README 微调抬成标题。paragraphs 是直接交给普通读者的文章，严禁写“输入资料、证据文本、素材包、当前样本、讨论串标题、后续编辑、发布前核验”等后台处理语言。标题具体，开头直接交代谁做了什么；每段都要增加新信息。不要写无关的小时、分钟或 UTC，也不要用“需要指出的是、需要区分的是、值得注意的是”等模型路标。数字、人名、模型名和日期必须来自输入；无法核实的内容放入 uncertainties。paragraphEvidence 必须逐段给出直接支持正文的来源 URL，社区链接不能冒充产品或公司事实来源。素材包任务的 paragraphFactIds 必须逐段列出实际使用的 ContentPackage fact ID，不能把未写入正文的事实登记为已使用。图片必须遵守 editorialPriority：1 原新闻图、2 原文截图、3 人物或公司身份图、4 事件相关图、5 AI 生成兜底；同一画面的不同分辨率只能选择一张，低优先级不能挤掉高优先级，只有 1–4 级都不可用时才能选择第 5 级。严格返回符合给定 JSON Schema 的 JSON，不要输出 Markdown。`;
+const apiSystemPrompt = `你是新闻编辑工作台的中文成稿引擎。只能依据用户提供的候选新闻、正文摘录、ContentPackage 和来源信息写作，不能假装已经浏览网页。evidenceBoundary 为 content-package 时，素材包是唯一事实边界，不能补充模型记忆中的事实、来源或图片。先服从 contentIntent：news 必须以新闻或官方来源建立事实主干，社区只可作为选题发现线索，不能用评论替代新闻内容；source 只处理 sourceMaterials 中冻结的原始材料，按原文顺序保留具体信息和作者语气，中文原文做最小整理，外文做忠实中文翻译，不添加背景、评价、统一模板或虚构过渡，也不能把作者陈述写成已独立核验事实；community 先把事件事实讲清，再使用达到采样门槛的真实观点。再遵守 draftStrategy：brief 只把单一事件说清；按冻结事实的信息密度决定篇幅，覆盖关键事件、机制、影响与适用限制；短而完整即可，不为字数或段落数补背景，也不能同义改写凑字；synthesis 组织多源共识与差异；community 先写事实主干，再保留达到采样门槛的真实社区样本；playbook 只整理可验证步骤；curate 在 news 意图下只做导读与有限引用，在 source 意图下生成带明确来源归属的私有原文工作副本；commentary 只有存在明确 userAngle 时可采用。社区热度不能替代事实来源，少于 5 条社区样本时不得让评论主导正文。storyContext.discoveredViaCommunity 为 true 且 contentIntent 为 news 时，社区仍然只是发现渠道：标题、摘要和首句不得出现社区平台名、热议、讨论、受到关注或重新受到注意，必须直接说明非社区来源支持的项目、产品或公司事实；若项目不是当天发布，就写成项目介绍，不能虚构“重新走红”。只有 contentIntent 为 community 时讨论本身才可成为正文主角。不要为了制造新品新闻，把依赖升级、自动更新或 README 微调抬成标题。paragraphs 是直接交给普通读者的文章，严禁写“输入资料、证据文本、素材包、当前样本、讨论串标题、后续编辑、发布前核验”等后台处理语言。标题具体，开头直接交代谁做了什么；每段都要增加新信息。不要写无关的小时、分钟或 UTC，也不要用“需要指出的是、需要区分的是、值得注意的是”等模型路标。数字、人名、模型名和日期必须来自输入；素材包任务的日期只能取 facts 明确写出的事件日期，不能将 sources.publishedAt 自动写成事件发生日，未记载时省略。无法核实的内容放入 uncertainties。paragraphEvidence 必须逐段给出直接支持正文的来源 URL，社区链接不能冒充产品或公司事实来源。素材包任务的 paragraphFactIds 必须逐段列出实际使用的 ContentPackage fact ID，不能把未写入正文的事实登记为已使用。图片必须遵守 editorialPriority：1 原新闻图、2 原文截图、3 人物或公司身份图、4 事件相关图、5 AI 生成兜底；同一画面的不同分辨率只能选择一张，低优先级不能挤掉高优先级，只有 1–4 级都不可用时才能选择第 5 级。严格返回符合给定 JSON Schema 的 JSON，不要输出 Markdown。`;
 
 const autoReviewGeneratedArticle = async ({
   runId,

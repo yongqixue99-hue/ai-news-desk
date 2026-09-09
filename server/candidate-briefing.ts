@@ -132,7 +132,7 @@ const readerCopyQualityFlags = (
   return [...new Set(flags)];
 };
 
-const explanationFrom = (item: RenderedBriefingItem, titleZh: string) => {
+const explanationFrom = (item: RenderedBriefingItem, titleZh: string, basis: CandidateBriefingBasis) => {
   const hasExplanation = [
     item.whatHappenedZh,
     item.readerBriefZh,
@@ -146,10 +146,16 @@ const explanationFrom = (item: RenderedBriefingItem, titleZh: string) => {
   const keyPointsZh = chineseTextList(item.keyPointsZh, "讲解要点", 4, 180);
   if (!keyPointsZh.length) throw new Error("讲解要点至少需要一项");
   const readerBriefZh = cleanText(item.readerBriefZh, "编辑速读", 420);
-  const editorNoteZh = optionalChineseText(item.editorNoteZh, "编辑备注", 180);
+  const parsedEditorNoteZh = optionalChineseText(item.editorNoteZh, "编辑备注", 180);
+  const editorNoteZh = basis === "full-source" ? parsedEditorNoteZh : undefined;
   const whyItMattersZh = optionalChineseText(item.whyItMattersZh, "实际影响", 360);
   const affectedZh = optionalChineseText(item.affectedZh, "影响对象", 220);
-  const unknownsZh = chineseTextList(item.unknownsZh, "未知项", 2, 180);
+  const parsedUnknownsZh = chineseTextList(item.unknownsZh, "未知项", 2, 180);
+  // Not reading a document is no evidence that its publisher omitted a fact.
+  // These are new scan briefings, never patches to a user's edited article.
+  const unknownsZh = basis === "full-source" ? parsedUnknownsZh : [basis === "title"
+    ? "目前只读到标题，细节仍需打开原文核对。"
+    : "目前只读到来源摘要，未覆盖的正文内容仍需核对。"];
   const qualityFlags = readerCopyQualityFlags(titleZh, readerBriefZh, editorNoteZh, unknownsZh);
   return {
     voiceVersion: 2 as const,
@@ -189,7 +195,7 @@ export const parseCandidateBriefings = (
       throw new Error(`社区速读缺少讨论摘要或关注点：${candidateId}`);
     }
     const titleZh = cleanText(item.titleZh, "中文标题", 80);
-    const explanation = explanationFrom(item, titleZh);
+    const explanation = explanationFrom(item, titleZh, evidence.basis);
     byId.set(candidateId, {
       candidateId,
       briefing: {

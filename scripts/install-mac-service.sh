@@ -5,6 +5,12 @@ project_path="${0:A:h:h}"
 template_path="$project_path/scripts/cn.ai-news-desk.plist.template"
 launch_agent_path="$HOME/Library/LaunchAgents/cn.ai-news-desk.plist"
 node_path="$(command -v node)"
+"$node_path" -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major !== 22 || minor < 16) { console.error("安装需要 Node.js 22.16 或更新的 22.x；请先将符合要求的 Node 加入 PATH。"); process.exit(1); }'
+npm_version="$(npm --version)"
+if [[ ! "$npm_version" =~ '^10\.9\.[0-9]+$' ]]; then
+  printf '安装需要 npm 10.9.x，当前为 %s。\n' "$npm_version" >&2
+  exit 1
+fi
 path_value="$(dirname "$node_path"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 user_domain="gui/$(id -u)"
 
@@ -25,4 +31,3 @@ launchctl kickstart -k "$user_domain/cn.ai-news-desk"
 
 printf 'AI 新闻台后台服务已安装：%s\n' "$launch_agent_path"
 printf '控制台：http://127.0.0.1:4317\n'
-

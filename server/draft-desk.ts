@@ -15,10 +15,18 @@ const inFlight = new Map<string, Promise<{ draft: ArticleDraft; reused: boolean 
 const humanInFlight = new Map<string, Promise<{ draft: ArticleDraft; reused: boolean }>>();
 
 /** Bump only when routing/evidence/prompt behavior materially changes. */
-export const editorialGeneratorRevision = "source-first-v13";
+export const editorialGeneratorRevision = "source-first-v14";
 export const humanDraftRevision = "human-first-v1";
 
 const writingBriefFor = (contentPackage: ContentPackage): ArticleDraft["writingBrief"] => ({
+  ...((contentPackage.sourceEvidence ?? contentPackage.sourceMaterials)?.length ? {
+    sourceReads: (contentPackage.sourceEvidence ?? contentPackage.sourceMaterials ?? []).map((source) => ({
+      label: source.sourceLabel, url: source.url, characters: source.originalText.length,
+      tableCount: source.blocks?.filter((block) => block.kind === "table").length ?? 0,
+      capturedAt: source.capturedAt, fromCache: Boolean(source.fromCache), truncated: source.truncated,
+      warnings: [...(source.extractionWarnings ?? [])],
+    })),
+  } : {}),
   suggestedAngles: structuredClone(contentPackage.suggestedAngles),
   communityFocus: structuredClone(contentPackage.communityFocus),
   communityEvidenceLabel: contentPackage.communityEvidenceLabel,

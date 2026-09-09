@@ -11,6 +11,7 @@ const genericTags = new Set([
   "示意图",
   "资料图",
   "大模型",
+  "生成式ai",
 ]);
 
 const normalized = (value: string) => value
@@ -26,20 +27,17 @@ const storySearchText = (story: StoryView) => normalized([
   story.summary,
   story.whyImportant,
   ...story.topicIds,
-  ...story.communityFocus,
-  ...story.signals.flatMap((signal) => [
+  ...story.signals.filter((signal) => !signal.isCommunity && signal.factBearing !== false).flatMap((signal) => [
     signal.title,
     signal.titleZh || "",
     signal.summaryZh || "",
-    signal.sourceName,
-    signal.author || "",
   ]),
 ].join(" "));
 
 const containsTerm = (haystack: string, rawNeedle: string) => {
   const needle = normalized(rawNeedle);
   if (!needle) return false;
-  if (needle.length <= 2 && /^[a-z0-9]+$/u.test(needle)) {
+  if (/^[a-z0-9 ]+$/u.test(needle)) {
     return new RegExp(`(?:^|\\s)${needle.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?:$|\\s)`, "u").test(haystack);
   }
   return haystack.includes(needle);
@@ -117,13 +115,15 @@ const rankMaterialForStory = (
       editorialOrigin: "entity-library",
     };
   }
-  const entityMatches = material.entityTags.filter((tag) => containsTerm(storyText, tag));
+  const entityMatches = material.entityTags.filter((tag) =>
+    !genericTags.has(normalized(tag)) && containsTerm(storyText, tag));
   const specificTagMatches = material.tags.filter((tag) =>
     !genericTags.has(normalized(tag)) && containsTerm(storyText, tag));
   const isGeneric = material.tags.some((tag) => genericTags.has(normalized(tag)));
   const generated = isGeneratedMaterial(material);
-  if (generated && !entityMatches.length && !specificTagMatches.length) return undefined;
-  if (!entityMatches.length && !specificTagMatches.length && !isGeneric) return undefined;
+  // Ownership establishes reuse permission, not relevance. Generic AI tags and
+  // the publisher's identity must never supply an unrelated automatic visual.
+  if (!entityMatches.length && !specificTagMatches.length) return undefined;
   return {
     material,
     score: entityMatches.length * 20 + specificTagMatches.length * 6 + (isGeneric ? 1 : 0),

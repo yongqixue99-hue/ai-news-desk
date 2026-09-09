@@ -71,3 +71,41 @@ test("an expired snapshot is not silently reused", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("dated official updates keep separate snapshots and never borrow another event on failure", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-update-snapshot-"));
+  const database = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({ version: 12 }) });
+  const first = "https://ai.google.dev/gemini-api/docs/changelog#09-03-2026";
+  const second = "https://ai.google.dev/gemini-api/docs/changelog#09-04-2026";
+  const firstPage = { ...page, url: first, canonicalUrl: first };
+  try {
+    await readSourceWithSnapshot({ url: first, imageLimit: 4, database, extractor: async () => firstPage });
+    await assert.rejects(readSourceWithSnapshot({ url: second, imageLimit: 4, database,
+      extractor: async () => { throw new Error("new event unavailable"); } }), /new event unavailable/u);
+    const cached = await readSourceWithSnapshot({ url: first, imageLimit: 4, database,
+      extractor: async () => { throw new Error("offline"); } });
+    assert.equal(cached.fromCache, true);
+    assert.equal(cached.page.canonicalUrl, first);
+  } finally { database.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("official update snapshot rejects mismatched live or cached event identity", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-update-identity-"));
+  const database = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({ version: 12 }) });
+  const requested = "https://api-docs.deepseek.com/updates/#date-2026-09-03";
+  const wrong = "https://api-docs.deepseek.com/updates/#date-2026-09-04";
+  const wrongPage = { ...page, url: wrong, canonicalUrl: wrong };
+  try {
+    await assert.rejects(readSourceWithSnapshot({ url: requested, imageLimit: 4, database,
+      extractor: async () => wrongPage }), /事件/u);
+    database.saveSourceSnapshot({ urlKey: sourceSnapshotKey(requested), requestedUrl: requested,
+      canonicalUrl: wrong, page: wrongPage, capturedAt: new Date().toISOString() });
+    await assert.rejects(readSourceWithSnapshot({ url: requested, imageLimit: 4, database,
+      extractor: async () => { throw new Error("offline"); } }), /offline/u);
+  } finally { database.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("snapshot identity preserves case-sensitive paths, query values and non-tracking article keys", () => {
+  assert.notEqual(sourceSnapshotKey("https://example.com/Post?id=ABC"), sourceSnapshotKey("https://example.com/post?id=abc"));
+  assert.notEqual(sourceSnapshotKey("https://example.com/read?source=article-a"), sourceSnapshotKey("https://example.com/read?source=article-b"));
+});

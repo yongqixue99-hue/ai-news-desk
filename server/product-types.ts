@@ -2,6 +2,7 @@ import type {
   CandidateBriefingBasis,
   CandidateFeedbackKind,
   CollectionTopicId,
+  CollectionSummary,
   SourceHealthStatus,
   SourceImage,
   SourceRole,
@@ -60,12 +61,15 @@ export interface AssignmentDecision {
 
 export interface StorySignalView {
   publicationDateKnown?: boolean;
+  publicationEvidence?: import("./types.js").PublicationEvidence;
   runId: string;
   candidateId: string;
   sourceName: string;
   sourceRole?: SourceRole;
   sourceType: string;
   title: string;
+  /** Source-provided excerpt, kept separate from AI translation for routing. */
+  excerpt?: string;
   titleZh?: string;
   summaryZh?: string;
   briefingBasis?: CandidateBriefingBasis;
@@ -231,9 +235,12 @@ export interface TodayFunnel {
 }
 
 export interface TodayView {
+  /** User-selected, not-yet-drafted stories survive the recommendation window. */
+  pending?: StoryView[];
   /** Official tutorials are retained separately from time-sensitive news. */
   knowledge?: StoryView[];
   generatedAt: string;
+  collection?: CollectionSummary;
   /** Recent official announcements, including leads still awaiting the original page. */
   releaseHighlights?: StoryView[];
   mustReads: StoryView[];
@@ -329,6 +336,7 @@ export interface ContentPackageSource {
  */
 export interface SourceMaterialSnapshot {
   blocks?: import("./types.js").ExtractedPage["blocks"];
+  extractionWarnings?: string[];
   signalId: string;
   sourceKind: "community-post" | "linked-page" | "article";
   sourceLabel: string;

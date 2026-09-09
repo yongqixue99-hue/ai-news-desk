@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -22,4 +22,15 @@ test("Windows resolves the newest Codex Desktop executable without relying on PA
     localAppData,
     userProfile: undefined,
   }), currentExecutable);
+});
+
+test("macOS prefers the installed desktop CLI so a stale PATH binary cannot reject current models", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "newsdesk-mac-codex-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const desktop = path.join(root, "ChatGPT.app", "Contents", "Resources", "codex");
+  await mkdir(path.dirname(desktop), { recursive: true });
+  await writeFile(desktop, "#!/bin/sh\nexit 0\n");
+  await chmod(desktop, 0o755);
+  assert.equal(resolveCodexExecutable({ platform: "darwin", macApplicationsRoots: [root] }), desktop);
+  assert.equal(resolveCodexExecutable({ platform: "darwin", macApplicationsRoots: [path.join(root, "missing")] }), "codex");
 });

@@ -5,6 +5,7 @@ import {
   draftQualityFindingsFor,
   evaluateDraftPackageQuality,
   reconcileDraftFactEvidence,
+  frozenFactSourceUrls,
 } from "./editorial-quality-desk.js";
 import type { ContentPackage } from "./product-types.js";
 import type { ArticleDraft } from "./types.js";
@@ -610,6 +611,61 @@ test("a community discovery sharing the original signal cannot become a second f
   assert.deepEqual(claims[0]?.sourceUrls, [original.url]);
   assert.equal(claims[0]?.sourceLabel, original.label);
   assert.equal(claims[0]?.status, "full-source");
+});
+
+test("a valid frozen fact id cannot endorse a changed price denominator or unit", () => {
+  const sourceUrl = contentPackage().sources[0]!.url;
+  for (const [fact, claim] of [
+    ["输入价格为每百万 token 0.2 美元。", "输入价格为每千 token 0.2 美元。"],
+    ["模型需要 16 GB 内存。", "模型需要 16 MB 内存。"],
+    ["服务试用期为 7 天。", "服务试用期为 7 小时。"],
+    ["产品从 2026 年 9 月 3 日开放。", "产品从 2026 年 9 月 8 日开放。"],
+  ]) {
+    const packageData = contentPackage({ facts: [{ id: "frozen", text: fact!, status: "supported", sourceSignalIds: ["signal-github"], sourceUrls: [sourceUrl] }] });
+    const claimRecord = { id: "claim-integrity", claim: claim!, factIds: ["frozen"], status: "full-source" as const, sourceUrls: [sourceUrl], capturedAt: "2026-09-01T00:00:00Z" };
+    const reconciled = reconcileDraftFactEvidence(packageData, [claimRecord]);
+    assert.equal(reconciled[0]?.status, "unverified", `${fact} -> ${claim}`);
+    const report = evaluateDraftPackageQuality({ contentPackage: packageData, draft: draft({ paragraphs: [claim!], factClaims: reconciled }) });
+    assert.ok(report.blockers.some((issue) => issue.id === "frozen-fact-integrity"), JSON.stringify(report));
+  }
+});
+
+test("final quality checks the actual edited paragraph rather than trusting an old claim snapshot", () => {
+  const sourceUrl = contentPackage().sources[0]!.url;
+  const correct = "模型需要 16 GB 内存。";
+  const packageData = contentPackage({ facts: [{ id: "frozen", text: correct, status: "supported", sourceSignalIds: ["signal-github"], sourceUrls: [sourceUrl] }] });
+  const report = evaluateDraftPackageQuality({ contentPackage: packageData, draft: draft({
+    paragraphs: ["模型需要 16 MB 内存。"],
+    factClaims: [{ id: "claim-integrity", claim: correct, factIds: ["frozen"], status: "full-source", sourceUrls: [sourceUrl], capturedAt: "2026-09-01T00:00:00Z" }],
+  }) });
+  assert.ok(report.blockers.some((issue) => issue.id === "frozen-fact-integrity" && issue.blockId === "paragraph:0"));
+});
+
+test("final quality rejects invented quantities and dates in the title using supported frozen facts", () => {
+  const sourceUrl = contentPackage().sources[0]!.url;
+  for (const [fact, title] of [
+    ["模型需要 16 GB 内存。", "新模型只需 32 GB 内存"],
+    ["产品于 2026 年 9 月 3 日开放。", "新产品 2026 年 9 月 8 日开放"],
+    ["服务目前仅限预览测试。", "新服务已正式商用"],
+  ]) {
+    const packageData = contentPackage({ facts: [{ id: "frozen", text: fact!, status: "supported", sourceSignalIds: ["signal-github"], sourceUrls: [sourceUrl] }] });
+    const report = evaluateDraftPackageQuality({ contentPackage: packageData, draft: draft({ title: title!, paragraphs: [fact!],
+      factClaims: [{ id: "claim", claim: fact!, factIds: ["frozen"], status: "full-source", sourceUrls: [sourceUrl], capturedAt: "2026-09-01T00:00:00Z" }],
+    }) });
+    assert.ok(report.blockers.some((issue) => issue.id === "frozen-fact-integrity" && issue.blockId === "title"), JSON.stringify(report));
+  }
+});
+
+test("frozen fact provenance preserves distinct official update sections", () => {
+  const urls = ["https://ai.google.dev/gemini-api/docs/changelog#09-01-2026", "https://ai.google.dev/gemini-api/docs/changelog#09-02-2026"];
+  const fact = { id: "two-updates", text: "两个日期有不同更新。", status: "supported" as const, sourceSignalIds: ["a", "b"], sourceUrls: urls };
+  const packageData = contentPackage({ facts: [fact], sources: urls.map((url, index) => ({
+    signalId: index ? "b" : "a", label: index ? "第二日更新" : "第一日更新", url, role: "official", basis: "full-source", publishedAt: "2026-09-01T00:00:00Z", isCommunity: false,
+  })) });
+  assert.deepEqual(frozenFactSourceUrls(packageData, fact), urls);
+  const claims = reconcileDraftFactEvidence(packageData, [{ id: "claim", claim: fact.text, factIds: [fact.id], status: "full-source", capturedAt: "2026-09-03T00:00:00Z" }]);
+  assert.equal(claims[0]?.sourceLabel, "第一日更新；第二日更新");
+  assert.deepEqual(claims[0]?.sourceUrls, urls);
 });
 
 test("DraftDesk quality gate keeps a genuinely small one-fact brief concise", () => {

@@ -1,0 +1,367 @@
+{
+  "version": 1,
+  "origin": "original-synthetic-regression-cases",
+  "description": "原创合成的冻结事实数量、单位、日期与少量明确条件矛盾回归。不是现实新闻、完整语义核验或模型准确率评测。",
+  "cases": [
+    {
+      "id": "safe-01",
+      "label": "中文参数前后序",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "模型参数量为七十亿。",
+      "text": "这是一款七十亿参数模型。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-02",
+      "label": "参数数量中英等值",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "The model has 7 billion parameters.",
+      "text": "模型含 70 亿参数。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-03",
+      "label": "连字符参数",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "A 7-billion-parameter model.",
+      "text": "模型具有七十亿参数。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-04",
+      "label": "token中文尺度",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "The context is one million tokens.",
+      "text": "上下文为 100 万 token。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-05",
+      "label": "token紧凑尺度",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "The context is 128K tokens.",
+      "text": "上下文为 128000 token。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-06",
+      "label": "内存全称翻译",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "The model requires 16 gigabytes of memory.",
+      "text": "模型需要 16 GB 内存。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-07",
+      "label": "十进制存储单位",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "容量为 2 GB。",
+      "text": "容量为 2000 MB。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-08",
+      "label": "二进制存储单位",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "显存需求为 2 GiB。",
+      "text": "显存需求为 2048 MiB。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-09",
+      "label": "时长等值",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "测试期限为 7 天。",
+      "text": "测试持续 168 小时。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-10",
+      "label": "毫秒等值",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "Latency is 200 milliseconds.",
+      "text": "延迟为 0.2 秒。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-11",
+      "label": "英文原始日期",
+      "category": "date",
+      "synthetic": true,
+      "fact": "The release date is September 3, 2026.",
+      "text": "发布日期是 2026 年 9 月 3 日。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-12",
+      "label": "中文日期省年份",
+      "category": "date",
+      "synthetic": true,
+      "fact": "开放时间为 2026-09-03。",
+      "text": "9 月 3 日开始开放。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-13",
+      "label": "中文汉字日期",
+      "category": "date",
+      "synthetic": true,
+      "fact": "开放时间为九月三日。",
+      "text": "9 月 3 日开放。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-14",
+      "label": "货币格式",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "Input costs $0.20 per million input tokens.",
+      "text": "每百万输入 token 为 0.2 美元。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-15",
+      "label": "等值计费表达",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "输入价格每百万 token 0.2 美元。",
+      "text": "输入价格每千 token 0.0002 美元。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-16",
+      "label": "中文百分比",
+      "category": "quantity",
+      "synthetic": true,
+      "fact": "官方公布通过率 80%。",
+      "text": "官方公布通过率百分之八十。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-17",
+      "label": "英文百分比",
+      "category": "quantity",
+      "synthetic": true,
+      "fact": "The success rate is 80 percent.",
+      "text": "成功率为 80%。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-18",
+      "label": "原始型号不误判数量",
+      "category": "identity",
+      "synthetic": true,
+      "fact": "模型名为 GPT-4.1，API 已发布。",
+      "text": "GPT-4.1 已提供 API。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-19",
+      "label": "正确归属",
+      "category": "source",
+      "synthetic": true,
+      "fact": "官方自测成功率为 80%。",
+      "text": "根据厂商自测，成功率达到 80%。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-20",
+      "label": "预览未商用",
+      "category": "scope",
+      "synthetic": true,
+      "fact": "该服务仅限预览测试。",
+      "text": "该服务仍未正式商用。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-21",
+      "label": "自测不等于独立验证",
+      "category": "source",
+      "synthetic": true,
+      "fact": "官方自测成功率为 80%。",
+      "text": "官方自测成功率 80%，并非独立评测结果。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-22",
+      "label": "未知缓存价",
+      "category": "scope",
+      "synthetic": true,
+      "fact": "缓存命中价格每百万 token 0.2 美元。",
+      "text": "缓存未命中价格尚未公布。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-23",
+      "label": "美元尺度换算",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "The cost is $1 million.",
+      "text": "成本为 100 万美元。",
+      "expectedPass": true
+    },
+    {
+      "id": "safe-24",
+      "label": "中文金额尺度",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "成本为 1 亿美元。",
+      "text": "成本为 100000000 美元。",
+      "expectedPass": true
+    },
+    {
+      "id": "unsafe-01",
+      "label": "数字变更",
+      "category": "quantity",
+      "synthetic": true,
+      "fact": "模型需要 16 GB 内存。",
+      "text": "模型需要 32 GB 内存。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-02",
+      "label": "单位变更",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "模型需要 16 GB 内存。",
+      "text": "模型需要 16 MB 内存。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-03",
+      "label": "时长单位变更",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "试用期为 7 天。",
+      "text": "试用期为 7 小时。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-04",
+      "label": "计费分母变更",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "输入价格每百万 token 0.2 美元。",
+      "text": "输入价格每千 token 0.2 美元。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-05",
+      "label": "计费货币变更",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "输入价格每百万 token 0.2 美元。",
+      "text": "输入价格每百万 token 0.2 元。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-06",
+      "label": "计费方向变更",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "输入价格每百万 token 0.2 美元。",
+      "text": "输出价格每百万 token 0.2 美元。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-07",
+      "label": "日期变更",
+      "category": "date",
+      "synthetic": true,
+      "fact": "产品将于 2026-09-03 开放。",
+      "text": "产品将于 2026 年 9 月 8 日开放。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-08",
+      "label": "凭空增加数量",
+      "category": "quantity",
+      "synthetic": true,
+      "fact": "模型已经发布。",
+      "text": "模型需要 16 GB 内存。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-09",
+      "label": "共享百分比单位的区间下界变更",
+      "category": "quantity",
+      "synthetic": true,
+      "fact": "官方公布召回率提高 7.5-9.7%。",
+      "text": "官方公布召回率提高 70.5-9.7%。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-10",
+      "label": "自测变第三方",
+      "category": "source",
+      "synthetic": true,
+      "fact": "官方自测成功率为 80%。",
+      "text": "第三方实测成功率为 80%。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-11",
+      "label": "缓存命中变未命中",
+      "category": "scope",
+      "synthetic": true,
+      "fact": "缓存命中价格每百万 token 0.2 美元。",
+      "text": "缓存未命中价格每百万 token 0.2 美元。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-12",
+      "label": "预览变商用",
+      "category": "scope",
+      "synthetic": true,
+      "fact": "该服务目前仅限预览测试。",
+      "text": "该服务已经正式商用。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-13",
+      "label": "未独立验证不能变独立结论",
+      "category": "source",
+      "synthetic": true,
+      "fact": "官方自测成功率为 80%，尚未经独立验证。",
+      "text": "独立评测成功率为 80%。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-14",
+      "label": "未商用不能因存在商用二字获背书",
+      "category": "scope",
+      "synthetic": true,
+      "fact": "服务仅限预览测试，尚未正式商用。",
+      "text": "服务已经正式商用。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-15",
+      "label": "美元尺度变更",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "The cost is $1 million.",
+      "text": "成本为 1 billion dollars。",
+      "expectedPass": false
+    },
+    {
+      "id": "unsafe-16",
+      "label": "人民币尺度变更",
+      "category": "unit",
+      "synthetic": true,
+      "fact": "成本为 1 亿元。",
+      "text": "成本为 1 万元。",
+      "expectedPass": false
+    }
+  ]
+}

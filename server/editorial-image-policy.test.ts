@@ -185,5 +185,51 @@ test("frozen package asset IDs resolve to source image IDs before ranking select
     modelSelections: [{ imageId: "asset_cost", afterParagraph: 1, caption: "官方提供的缓存读取成本对比。" }],
     paragraphs: ["发布两种模型。", "缓存读取降低了成本。", "接入条件。"], imageLimit: 4,
   });
-  assert.deepEqual(placements, [{ imageId: "cost", afterParagraph: 1, caption: "官方提供的缓存读取成本对比。" }]);
+  assert.deepEqual(placements, [{ imageId: "cost", afterParagraph: 1, caption: "Indexed cost of model usage" }]);
+});
+
+test("model caption suggestions cannot erase source benchmark conditions or add unverified chart conclusions", () => {
+  const sourceCaption = "GPT-4.1 latency benchmark; H100, batch size 1, 1K input tokens, median of 5 runs.";
+  const placements = planEditorialImagePlacements({
+    availableImages: [{ id: "benchmark", url: "https://example.com/latency.png", caption: sourceCaption, editorialPriority: 1 }],
+    modelSelections: [{ imageId: "benchmark", afterParagraph: 0, caption: "GPT-4.1 在所有任务上快 10 倍。" }],
+    paragraphs: ["GPT-4.1 已经发布。", "测试覆盖指定硬件与任务，不能直接代表所有场景。"], imageLimit: 1,
+  });
+  assert.equal(placements[0]?.caption, sourceCaption);
+});
+
+test("generic source captions do not authorize invented OCR numbers", () => {
+  const placements = planEditorialImagePlacements({
+    availableImages: [{ id: "source-chart", url: "/media/chart.png", caption: "原文图表 1", editorialPriority: 2 }],
+    modelSelections: [{ imageId: "source-chart", afterParagraph: 0, caption: "从图中可知新模型得分 92.6%，全面超过人类。" }],
+    paragraphs: ["官方提供了评测图表，具体测试条件仍需核对。"], imageLimit: 1,
+  });
+  assert.equal(placements[0]?.caption, "原文图表 1");
+});
+
+test("an older model chart cannot be automatically inserted into an article that only discusses the new version", () => {
+  const placements = planEditorialImagePlacements({
+    availableImages: [{ id: "old-chart", url: "https://example.com/chart.png", caption: "GPT-4.1 latency benchmark", editorialPriority: 1 }],
+    modelSelections: [{ imageId: "old-chart", afterParagraph: 0, caption: "新版本测试结果" }],
+    paragraphs: ["GPT-5 正式发布。", "本文介绍 GPT5 的 API 接入方式。"], imageLimit: 2,
+  });
+  assert.deepEqual(placements, []);
+});
+
+test("a valid old-versus-new discussion keeps the old chart beside the paragraph about that version", () => {
+  const placements = planEditorialImagePlacements({
+    availableImages: [{ id: "old-chart", url: "https://example.com/chart.png", caption: "GPT-4.1 latency benchmark", editorialPriority: 1 }],
+    modelSelections: [{ imageId: "old-chart", afterParagraph: 0, caption: "新版本测试结果" }],
+    paragraphs: ["GPT-5 已经上线。", "回顾 GPT 4.1 的 latency benchmark，需要保留此前测试条件。"], imageLimit: 1,
+  });
+  assert.equal(placements[0]?.afterParagraph, 1);
+  assert.equal(placements[0]?.caption, "GPT-4.1 latency benchmark");
+});
+
+test("version punctuation aliases stay compatible and a multi-model comparison chart remains eligible", () => {
+  const placements = planEditorialImagePlacements({
+    availableImages: [{ id: "comparison", url: "https://example.com/chart.png", caption: "Qwen 2.5 and Qwen3 benchmark comparison", editorialPriority: 1 }],
+    modelSelections: [], paragraphs: ["Qwen-3 的发布资料包含多模型评测比较。"], imageLimit: 1,
+  });
+  assert.equal(placements[0]?.imageId, "comparison");
 });

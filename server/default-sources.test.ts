@@ -61,7 +61,7 @@ test("Gemini product and API changes have a dedicated first-party discovery sour
   assert.equal(source.enabled, true);
   assert.equal(source.selected, true);
   assert.ok(source.routes?.some((route) => route.query?.includes("site:blog.google/products-and-platforms/products/gemini")));
-  assert.ok(source.routes?.some((route) => route.query?.includes("site:ai.google.dev/gemini-api/docs/changelog")));
+  assert.ok(source.routes?.some((route) => route.url === "https://ai.google.dev/gemini-api/docs/changelog" && route.format === "gemini-changelog"));
 });
 
 test("OpenAI collection does not rely on the newsroom RSS alone for model launches", () => {

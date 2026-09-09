@@ -44,3 +44,11 @@ test("unhandled stories move to a seven-day backlog before expiring", () => {
   assert.match(backlog.warnings[0] ?? "", /近 7 日补看区/u);
   assert.equal(protectedStory.canDraft, true);
 });
+
+test("an official headline and short excerpt are a lead, not a verified article body", () => {
+  const assignment = assignStory({ ...base, longestExcerpt: 144, bodyVerified: false });
+  assert.equal(assignment.mode, "brief");
+  assert.equal(assignment.canDraft, true, "the lead still enters package preparation");
+  assert.doesNotMatch(assignment.reason, /证据足够/u);
+  assert.match(assignment.warnings.join(" "), /原文待读取/u);
+});

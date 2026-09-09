@@ -52,17 +52,17 @@ export const createContentPackageDesk = (overrides: Partial<ContentPackageDeskDe
       const initialState = await dependencies.readState();
       const resolvedMode = requestedMode ?? storyById(initialState, storyId)?.assignment.mode;
       const resolvedIntent = editorial?.intent ?? (resolvedMode === "community" ? "community" : resolvedMode === "curate" ? "source" : "news");
+      // Establish a readable factual body before spending time on illustrations.
+      const articleEvidence = resolvedIntent === "news"
+        ? await dependencies.prepareArticleEvidence(initialState, storyId, (value, stage) => progress?.(Math.max(0.05, Math.min(0.4, (value - 0.65) * 2)), stage))
+        : undefined;
       const [visualResult, discussionSamples, sourceMaterials] = await Promise.all([
-        dependencies.hydrateAssets(storyId, minimumImages, { progress, scope: "article" }),
+        dependencies.hydrateAssets(storyId, minimumImages, { progress: (value, stage) => progress?.(0.4 + Math.min(1, Math.max(0, value)) * 0.45, stage), scope: "article" }),
         dependencies.hydrateDiscussion(storyId),
         resolvedIntent === "source"
           ? dependencies.loadSourceMaterials(initialState, storyId)
           : Promise.resolve([]),
       ]);
-      const evidenceState = await dependencies.readState();
-      const articleEvidence = resolvedIntent === "news"
-        ? await dependencies.prepareArticleEvidence(evidenceState, storyId, progress)
-        : undefined;
       progress?.(0.88, "整理事实、社区证据与相关素材");
       const builtPackage = buildContentPackage(await dependencies.readState(), {
         storyId,

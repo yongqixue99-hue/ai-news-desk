@@ -6,6 +6,7 @@ import { getXBearerToken } from "./secrets.js";
 import { accountsForXSource, createXApiClient, type XRecentSearchClient } from "./x-official.js";
 import type { SourceConfig, SourceProbeResult } from "./types.js";
 import { parseKnowledgeIndex } from "./official-knowledge.js";
+import { officialIndexRoute } from "./official-news-index.js";
 
 const MAXIMUM_PROBE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 8_000;
@@ -49,6 +50,10 @@ const probeTargetFor = (source: SourceConfig) => {
   }
   const routed = routedFeedsForSource(source, sourceTopicIds(source));
   const routedFeed = routed[0];
+  if (routedFeed?.format) {
+    const index = officialIndexRoute(routedFeed.format, routedFeed.url)!;
+    return { url: index.requestUrl, format: "official-index" as const, index };
+  }
   // Site-scoped routes are collected through a news index, but that index is
   // infrastructure rather than the source itself. Probe the source's own page
   // so a temporary Google News outage does not falsely mark the publisher down.
@@ -149,12 +154,13 @@ export const probeSource = async (
     const response = await fetcher(target.url, {
       method: "GET",
       headers: {
-        accept: target.format === "json"
+        accept: target.format === "official-index" ? target.index.accept : target.format === "json"
           ? "application/json"
           : target.format === "feed"
             ? "application/atom+xml, application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.5"
             : "text/html, */*;q=0.5",
         "user-agent": "AI-News-Desk-Source-Probe/1.0",
+        ...(target.format === "official-index" && target.url.includes("ai.google.dev/") ? { "accept-language": "en-US,en;q=0.9" } : {}),
       },
       signal,
     });
@@ -186,9 +192,9 @@ export const probeSource = async (
         httpStatus: response.status,
       };
     }
-    const content = (await readResponseBuffer(response, MAXIMUM_PROBE_BYTES)).toString("utf8");
+    const content = (await readResponseBuffer(response, target.format === "official-index" ? target.index.maxBytes : MAXIMUM_PROBE_BYTES)).toString("utf8");
     const isSitemap = target.format === "feed" && /<urlset\b/iu.test(content);
-    const itemCount = target.format === "documentation" ? parseKnowledgeIndex(content, source, checkedAt).length : target.format === "feed"
+    const itemCount = target.format === "official-index" ? target.index.parse(content, source, checkedAt).length : target.format === "documentation" ? parseKnowledgeIndex(content, source, checkedAt).length : target.format === "feed"
       ? countFeedItems(content)
       : target.format === "json"
         ? countJsonItems(content)
@@ -219,7 +225,7 @@ export const probeSource = async (
         ? isSitemap
           ? `Sitemap 可访问，读取到 ${itemCount} 个网址条目`
           : `RSS 可访问，读取到 ${itemCount} 个条目`
-        : target.format === "json"
+        : target.format === "json" || target.format === "official-index"
           ? `接口可访问，读取到 ${itemCount} 条记录`
           : "官网可访问",
       targetUrl,

@@ -1,3 +1,4 @@
+import { packageUncertaintiesFor } from "../../server/package-reading-status.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -24,6 +25,9 @@ import {
 import { api, type DraftOverview, type ProductJob, type StoryDetailResult } from "../api";
 import { PageLoading } from "./PageLoading";
 import { TodayWorkspaceRail } from "./TodayWorkspaceRail";
+import { TopicCategoryPanel, TopicCategoryTabs } from "./TopicCategoryPanel";
+import { HomeLayoutDialog } from "./HomeLayoutDialog";
+import { defaultHomeLayout, type HomeLayout } from "../../server/home-layout.js";
 import { StoryAssetGallery } from "./StoryAssetGallery";
 import { KnowledgeShelf } from "./KnowledgeShelf";
 import { useDialogA11y } from "../hooks/useDialogA11y";
@@ -192,7 +196,7 @@ const StoryRow = ({ story, rank, featured = false, busy = false, processing = fa
         <div className="today-story-kicker">
           <span className="today-source-name">{story.signals.find((signal) => !signal.isCommunity)?.sourceName || story.signals[0]?.sourceName || "来源待核对"}</span>
           <span className={`assignment-pill mode-${story.assignment.mode}`}>{modeLabels[story.assignment.mode]}</span>
-          <span className={`evidence-pill evidence-${story.evidenceStrength}`}>{evidenceLabels[story.evidenceStrength]}</span>
+          <span className={`evidence-pill evidence-${story.evidenceStrength}`}>{story.explanation.basis === "full-source" ? evidenceLabels[story.evidenceStrength] : "原文待读取"}</span>
           <span>{relativeTime(story.publishedAt)}</span>
         </div>
         <h3>{story.title}</h3>
@@ -310,6 +314,7 @@ const StoryDrawer = ({
     story.technicalArticle ? "curate" : story.assignment.canDraft ? story.assignment.mode as Exclude<AssignmentMode, "watch" | "skip"> : "brief",
   );
   const contentPackage = detail.contentPackage;
+  const packageUncertainties = contentPackage ? packageUncertaintiesFor(contentPackage) : [];
   const processing = Boolean(activeJob && !terminalJobStatuses.has(activeJob.status));
   const factSignals = uniqueSourceSignals(story.signals.filter((signal) => !signal.isCommunity));
   const communitySignals = uniqueSourceSignals(story.signals.filter((signal) => signal.isCommunity));
@@ -323,7 +328,7 @@ const StoryDrawer = ({
           <div>
             <div className="today-story-kicker">
               <span className={`assignment-pill mode-${story.assignment.mode}`}>{modeLabels[story.assignment.mode]}</span>
-              <span className={`evidence-pill evidence-${story.evidenceStrength}`}>{evidenceLabels[story.evidenceStrength]}</span>
+              <span className={`evidence-pill evidence-${story.evidenceStrength}`}>{contentPackage?.sources.some((source) => source.basis === "full-source" && !source.isCommunity) ? "原文已核对" : story.explanation.basis === "full-source" ? evidenceLabels[story.evidenceStrength] : "原文待读取"}</span>
             </div>
             <h2 id="story-drawer-title">{story.title}</h2>
             {story.originalTitle !== story.title ? <p className="story-original-title">原题：{story.originalTitle}</p> : null}
@@ -584,9 +589,43 @@ interface TodayPageProps {
   onNotice: (kind: "success" | "info" | "error", message: string) => void;
   onOpenDraft?: (draftId: string) => Promise<void> | void;
   onSearch: (query: string) => Promise<void>;
+  requestedStoryId?: string;
+  onRequestedStoryHandled?: () => void;
 }
 
-export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: TodayPageProps) {
+export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, requestedStoryId, onRequestedStoryHandled }: TodayPageProps) {
+  const [category, setCategory] = useState("news");
+  const [layout, setLayout] = useState<HomeLayout>(defaultHomeLayout);
+  const [customizing, setCustomizing] = useState(false);
+  const [layoutLoaded, setLayoutLoaded] = useState(false);
+  const [keywordNews, setKeywordNews] = useState<StoryView[]>([]);
+  const [keywordLoading, setKeywordLoading] = useState(false);
+  const [keywordError, setKeywordError] = useState<string>();
+  const activeColumn = layout.columns.find((column) => column.id === category) ?? layout.columns[0];
+  const applyLayout = (next: HomeLayout) => {
+    setLayout(next);
+    setCategory((current) => next.columns.some((column) => column.id === current) ? current : next.columns[0].id);
+  };
+  useEffect(() => {
+    let alive = true;
+    void api.homeLayout().then((next) => { if (alive) { applyLayout(next); setLayoutLoaded(true); } })
+      .catch(() => { if (alive) setLayoutLoaded(false); });
+    return () => { alive = false; };
+  }, []);
+  const customize = async () => {
+    if (layoutLoaded) { setCustomizing(true); return; }
+    try { applyLayout(await api.homeLayout()); setLayoutLoaded(true); setCustomizing(true); }
+    catch { onNotice("error", "栏目设置暂未读取，请稍后重试。"); }
+  };
+  useEffect(() => {
+    if (activeColumn.source !== "news" || !activeColumn.keyword) return;
+    let alive = true;
+    setKeywordLoading(true); setKeywordNews([]); setKeywordError(undefined);
+    void api.homeNews(activeColumn.keyword).then((stories) => { if (alive) setKeywordNews(stories); })
+      .catch(() => { if (alive) setKeywordError("当前栏目暂未读取，可切换栏目后重试。"); })
+      .finally(() => { if (alive) setKeywordLoading(false); });
+    return () => { alive = false; };
+  }, [activeColumn.id, activeColumn.keyword, activeColumn.source]);
   const [today, setToday] = useState<TodayView>();
   const [drafts, setDrafts] = useState<DraftOverview>();
   const [draftError, setDraftError] = useState<string>();
@@ -692,7 +731,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
     }
   }, []);
 
-  const openStory = async (story: StoryView) => {
+  const openStory = useCallback(async (story: Pick<StoryView, "id">) => {
     const requestId = explanationRequestRef.current + 1;
     explanationRequestRef.current = requestId;
     setExplanationError(undefined);
@@ -709,7 +748,13 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
     } finally {
       if (explanationRequestRef.current === requestId) setBusy(false);
     }
-  };
+  }, [hydrateExplanation, onNotice]);
+
+  useEffect(() => {
+    if (!requestedStoryId) return;
+    void openStory({ id: requestedStoryId });
+    onRequestedStoryHandled?.();
+  }, [requestedStoryId, openStory, onRequestedStoryHandled]);
 
   const retryExplanation = () => {
     if (!detail) return;
@@ -954,7 +999,9 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
         }
         await loadToday(true);
       } catch (jobError) {
-        onNotice("error", jobError instanceof Error ? jobError.message : String(jobError));
+        onNotice("error", job.type === "build-content-package" && job.status === "failed"
+          ? "文章资料暂未准备好，选题已保留。可在右下角任务中重试或回到选题。"
+          : jobError instanceof Error ? jobError.message : String(jobError));
       } finally {
         setActiveStoryJob((current) => current?.id === job.id ? undefined : current);
       }
@@ -1007,7 +1054,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
         </div>
         <div className="today-header-actions">
           <span className="today-date">{new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Hong_Kong", month: "long", day: "numeric", weekday: "long" }).format(new Date())}</span>
-          <div>{today ? <span className="today-updated"><Clock3 size={13} />{relativeTime(today.generatedAt)}更新</span> : null}
+          <div>{today ? <span className="today-updated"><Clock3 size={13} />{today.collection ? `最近读取：${relativeTime(today.collection.collectedAt)}` : "尚无采集记录"}</span> : null}
           <button type="button" className="text-button today-refresh" title="重新整理已有事件；搜索才会读取外部新闻源" disabled={loading} onClick={() => void loadToday()}><RefreshCw className={loading ? "spin" : ""} size={14} />重新整理</button></div>
         </div>
       </header>
@@ -1031,6 +1078,16 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
         <p id="today-search-help">实时读取已启用的官网与新闻来源；X 和社区帖子不参与这次事实搜索。</p>
       </form>
 
+      {today?.collection ? <aside className="today-collection-status" aria-label="最近一轮采集">
+        <span>最近一轮 · {today.collection.sourceCount} 个来源 · {today.collection.rawCount} 条原始信息 → {today.collection.candidateCount} 条候选</span>
+        {today.collection.failedSourceCount || today.collection.partialSourceCount ? <button type="button" className="text-button" onClick={() => onNavigate("sources")}>
+          {[
+            today.collection.failedSourceCount ? `${today.collection.failedSourceCount} 个来源读取失败` : "",
+            today.collection.partialSourceCount ? `${today.collection.partialSourceCount} 个来源覆盖不完整` : "",
+          ].filter(Boolean).join("，")} · 查看原因
+        </button> : null}
+      </aside> : null}
+
       {today ? <section className="today-metrics" aria-label="今日覆盖概览">
         {metrics.map(({ label, value, icon: Icon }) => <div key={label}><Icon size={17} /><span>{label}</span><strong>{value}</strong></div>)}
       </section> : null}
@@ -1041,8 +1098,15 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
 
       {loading && !today ? <PageLoading label="正在整理今天的选题与草稿…" /> : null}
 
-      {today ? (
-        <>
+      <div className="today-editorial-grid">
+        <div className="today-reading-column">
+          <TopicCategoryTabs value={activeColumn.id} columns={layout.columns} onChange={setCategory} onCustomize={() => void customize()} />
+          {activeColumn.source === "news" ? <div role="tabpanel" id={`topic-panel-${activeColumn.id}`} aria-labelledby={`topic-tab-${activeColumn.id}`} tabIndex={0}>
+            {activeColumn.keyword ? <section className="today-section home-keyword-news">
+              <div className="today-section-heading"><div><span>近 7 天已采集新闻 · 关键词「{activeColumn.keyword}」</span><h2>{activeColumn.label}</h2></div><small>{keywordNews.length} 条</small></div>
+              {keywordLoading ? <p role="status" className="story-empty-copy">正在整理栏目…</p> : keywordError ? <p role="alert" className="story-empty-copy">{keywordError}</p> : keywordNews.length ? keywordNews.map((story) => <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />) : <p className="story-empty-copy">已采集新闻中暂无匹配内容。可用上方搜索补充线索。</p>}
+            </section> : <>
+            {today ? <>
           {today.releaseHighlights?.length ? <section className="today-release-highlights" aria-label="近期重要发布">
             <div className="release-highlights-heading"><span>RELEASE RADAR</span><h2>近期重要发布</h2><small>过去 7 天 · 官方发布线索</small></div>
             <div className="release-highlights-list">{today.releaseHighlights.map((story) => <button type="button" key={story.id} onClick={() => openStory(story)}>
@@ -1050,8 +1114,6 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
               <strong>{story.title}</strong><span className="release-open">查看发布资料 <ArrowRight size={14} /></span>
             </button>)}</div>
           </section> : null}
-          <div className="today-editorial-grid">
-          <div className="today-reading-column">
           <section className="today-section today-must-read">
             <div className="today-section-heading">
               <div><span>今日重点 / {String(today.mustReads.length).padStart(2, "0")}</span><h2>今天，先看这几件事</h2></div>
@@ -1093,11 +1155,15 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
             </section>
           ) : null}
 
-          </div>
-          <TodayWorkspaceRail today={today} drafts={drafts} draftError={draftError} openingDraftId={openingDraftId} onRetry={() => void loadToday(true)} onNavigate={onNavigate} onOpenDraft={(draftId) => void resumeDraft(draftId)} onOpenStory={openStory} />
-          </div>
 
-          <KnowledgeShelf stories={today.knowledge ?? []} onOpen={openStory} />
+            </> : null}</>}
+          </div> : <TopicCategoryPanel key={activeColumn.id} columnId={activeColumn.id} keyword={activeColumn.keyword} platform={activeColumn.source} onOpenStory={openStory}
+            onChanged={() => void loadToday(true)} onNavigate={onNavigate} onNotice={onNotice} />}
+        </div>
+        {today ? <TodayWorkspaceRail showDrafts={layout.showDrafts} today={today} drafts={drafts} draftError={draftError} openingDraftId={openingDraftId} onRetry={() => void loadToday(true)} onNavigate={onNavigate} onOpenDraft={(draftId) => void resumeDraft(draftId)} onOpenStory={openStory} /> : <aside className="today-workspace-rail"><button type="button" className="text-button" onClick={() => onNavigate("drafts")}>打开我的稿件 <ArrowRight size={15} /></button></aside>}
+      </div>
+      {today ? <>
+        {activeColumn.source === "news" && !activeColumn.keyword ? <KnowledgeShelf stories={today.knowledge ?? []} onOpen={openStory} /> : null}
           <div className="desk-operational-details">
             {today.diagnostics.length ? (
               <details className="desk-disclosure">
@@ -1112,9 +1178,9 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch }: Today
             ) : null}
             <details className="desk-disclosure"><summary><span><FileStack size={16} />工作记录与推荐覆盖</span><span>查看统计 <ChevronRight size={15} /></span></summary><Funnel data={today.funnel} /></details>
           </div>
-        </>
-      ) : null}
+      </> : null}
 
+      {customizing ? <HomeLayoutDialog initial={layout} onClose={() => setCustomizing(false)} onSaved={(next) => { applyLayout(next); setCustomizing(false); }} /> : null}
       {detail ? (
         <StoryDrawer
           detail={detail}

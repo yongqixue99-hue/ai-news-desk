@@ -1,10 +1,12 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 interface CodexExecutableEnvironment {
   platform?: NodeJS.Platform;
   localAppData?: string;
   userProfile?: string;
+  macApplicationsRoots?: string[];
 }
 
 const executableCandidates = (binRoot: string) => {
@@ -30,6 +32,18 @@ export const resolveCodexExecutable = (
   environment: CodexExecutableEnvironment = {},
 ) => {
   const platform = environment.platform ?? process.platform;
+  if (platform === "darwin") {
+    const roots = environment.macApplicationsRoots ?? ["/Applications", path.join(homedir(), "Applications")];
+    const candidates = roots.flatMap((root) => ["ChatGPT.app", "Codex.app"].flatMap((name) => {
+      const executable = path.join(root, name, "Contents", "Resources", "codex");
+      try {
+        accessSync(executable, constants.X_OK);
+        const stats = statSync(executable);
+        return stats.isFile() ? [{ executable, modifiedAt: stats.mtimeMs }] : [];
+      } catch { return []; }
+    })).sort((left, right) => right.modifiedAt - left.modifiedAt);
+    return candidates[0]?.executable ?? "codex";
+  }
   if (platform !== "win32") return "codex";
 
   const localAppData = Object.hasOwn(environment, "localAppData")

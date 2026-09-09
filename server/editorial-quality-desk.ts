@@ -9,6 +9,8 @@ import type {
 import { uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import { isCommunityDiscoveryFraming } from "./editorial-source-policy.js";
 import { assessWritingQuality } from "./writing-quality.js";
+import { auditFrozenFactIntegrity } from "./frozen-fact-integrity.js";
+import { hasOfficialUpdateAnchor } from "./official-update-url.js";
 
 export interface EditorialQualityIssue {
   id: string;
@@ -58,7 +60,7 @@ export const draftQualityFindingsFor = (
 const normalizedSourceUrl = (value: string) => {
   try {
     const parsed = new URL(value);
-    parsed.hash = "";
+    if (!hasOfficialUpdateAnchor(parsed)) parsed.hash = "";
     parsed.pathname = parsed.pathname.replace(/\/+$/u, "") || "/";
     return parsed.toString();
   } catch {
@@ -89,7 +91,7 @@ export const reconcileDraftFactEvidence = (
 ): DraftFactClaim[] => {
   const factById = new Map(contentPackage.facts.map((fact) => [fact.id, fact]));
   const sourceByUrl = new Map(contentPackage.sources.map((source) => [normalizedSourceUrl(source.url), source]));
-  return factClaims.map((claim) => {
+  return factClaims.map((claim, index) => {
     if (!claim.factIds?.length) return structuredClone(claim);
     const facts = claim.factIds.map((factId) => {
       const fact = factById.get(factId);
@@ -101,7 +103,10 @@ export const reconcileDraftFactEvidence = (
       const source = sourceByUrl.get(normalizedSourceUrl(url));
       return source ? [source.label] : [];
     }))];
-    const status = !sourceUrls.length || facts.some((fact) => fact.status === "unverified" || fact.status === "conflicted")
+    const integrity = auditFrozenFactIntegrity(claim.claim, facts, { attributionContext: factClaims[index - 1]?.claim });
+    // Editing remains recoverable: refuse to endorse a contradicted claim,
+    // rather than reject an autosave and discard the user's work.
+    const status = !integrity.passed || !sourceUrls.length || facts.some((fact) => fact.status === "unverified" || fact.status === "conflicted")
       ? "unverified" as const
       : facts.some((fact) => fact.status === "partially-supported")
         ? "excerpt-only" as const
@@ -223,6 +228,10 @@ export const evaluateDraftPackageQuality = ({
   }
   if (contentPackage.intent === "news" || contentPackage.intent === "community") {
     const claims = draft.factClaims ?? [];
+    const titleIntegrity = auditFrozenFactIntegrity(draft.title, contentPackage.facts.filter((fact) =>
+      fact.status === "supported" || fact.status === "partially-supported"));
+    if (!titleIntegrity.passed) blockers.push({ id: "frozen-fact-integrity", blockId: "title",
+      message: titleIntegrity.errors.map((issue) => issue.message).join("；") });
     const everyParagraphHasEvidence = claims.length >= draft.paragraphs.length
       && draft.paragraphs.every((_paragraph, index) => Boolean(claims[index]?.sourceUrls?.length || claims[index]?.sourceUrl));
     if (!everyParagraphHasEvidence) {
@@ -231,6 +240,24 @@ export const evaluateDraftPackageQuality = ({
         blockId: "evidence",
         message: "新闻正文的每一段都必须保存可回指的来源链接。",
       });
+    }
+    const frozenById = new Map(contentPackage.facts.map((fact) => [fact.id, fact]));
+    let attributionWarningAdded = false;
+    for (const [index, paragraph] of draft.paragraphs.entries()) {
+      const ids = claims[index]?.factIds;
+      // Legacy paragraphs without mappings need a deliberate rebuild. Never
+      // infer their fact selection from a shared source URL or prose overlap.
+      if (!ids?.length) continue;
+      const facts = ids.flatMap((id) => frozenById.has(id) ? [frozenById.get(id)!] : []);
+      const audit = auditFrozenFactIntegrity(paragraph, facts, { attributionContext: draft.paragraphs[index - 1] });
+      if (facts.length !== ids.length || !audit.passed) blockers.push({
+        id: "frozen-fact-integrity", blockId: `paragraph:${index}`,
+        message: facts.length !== ids.length ? "本段引用了素材包之外的事实编号。" : audit.errors.map((issue) => issue.message).join("；"),
+      });
+      if (!attributionWarningAdded && audit.warnings.length) {
+        attributionWarningAdded = true;
+        warnings.push({ id: "frozen-fact-attribution", blockId: `paragraph:${index}`, message: audit.warnings[0]!.message });
+      }
     }
   }
   const supportedFactCount = contentPackage.facts.filter((claim) =>

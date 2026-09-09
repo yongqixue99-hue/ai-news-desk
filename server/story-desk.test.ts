@@ -1,10 +1,12 @@
+import { preparePackageSourceEvidence } from "./package-source-evidence.js";
+import { ClassifiedJobError } from "./job-desk.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
 import { createDefaultState } from "./defaults.js";
-import { buildStories, buildTodayView } from "./story-desk.js";
+import { buildHomeNews, buildStories, buildTodayView, retainStoryForWriting } from "./story-desk.js";
 import type { Candidate, WorkflowRun } from "./types.js";
 
 const imageFixtureRoot = mkdtempSync(path.join(tmpdir(), "ai-news-story-images-"));
@@ -73,6 +75,87 @@ const run = (id: string, candidates: Candidate[]): WorkflowRun => ({
   rawCount: candidates.length,
   candidates,
   logs: [],
+});
+
+test("real GPT-6 headline remains visible during release catch-up without an AI briefing", () => {
+  const state = createDefaultState();
+  state.runs = [run("real-release", [candidate("gpt6-real", {
+    sourceName: "OpenAI 官方",
+    title: "GPT-6 Astra: A new generation of intelligence - OpenAI",
+    excerpt: "GPT-6 Astra: A new generation of intelligence - OpenAI",
+    url: "https://openai.com/index/gpt-6-astra/",
+    canonicalUrl: "https://openai.com/index/gpt-6-astra/",
+    publishedAt: "2026-09-03T11:00:00.000Z",
+    fetchedAt: "2026-09-08T12:00:00.000Z",
+    briefing: undefined,
+  })])];
+  const view = buildTodayView(state, "2026-09-08T13:00:00.000Z");
+  assert.ok(view.releaseHighlights?.some((story) => story.signals.some((signal) => signal.candidateId === "gpt6-real")),
+    "the actual official headline must survive collection age and a missing AI translation");
+});
+
+test("repeated collection routes do not turn a single announcement into independent corroboration", () => {
+  const state = createDefaultState();
+  state.runs = Array.from({ length: 9 }, (_, index) => run(`repeat-${index}`, [candidate("same-announcement", {
+    title: "Introducing GPT-6 Astra", sourceName: "OpenAI 官方",
+    url: "https://news.google.com/rss/articles/observed-announcement?oc=5",
+    canonicalUrl: index === 4 ? "https://openai.com/index/gpt-6-astra/"
+      : index === 1 ? "https://news.google.com/rss/articles/observed-announcement" : undefined,
+    publishedAt: "2026-09-03T11:00:00.000Z", fetchedAt: `2026-09-03T1${index}:00:00.000Z`,
+    briefing: undefined,
+  })]));
+  const stories = buildStories(state, "2026-09-03T20:00:00.000Z");
+  assert.equal(stories.length, 1);
+  assert.equal(stories[0].factSourceCount, 1);
+  assert.notEqual(stories[0].assignment.mode, "synthesis");
+  assert.equal(stories[0].firstSeenAt, "2026-09-03T10:00:00.000Z");
+  assert.equal(stories[0].lastSeenAt, "2026-09-03T18:00:00.000Z");
+});
+
+test("research pages enrich a release without counting as independent publishers", () => {
+  const state = createDefaultState();
+  const releaseUrl = "https://openai.com/index/introducing-model-x";
+  state.runs = [run("release-and-research", [
+    candidate("release", { url: releaseUrl, canonicalUrl: releaseUrl, sourceName: "OpenAI" }),
+    candidate("research", { url: "https://developers.openai.com/models", canonicalUrl: undefined,
+      sourceName: "OpenAI", evidenceRelation: "research-material", evidenceGroupUrl: releaseUrl,
+      title: "Model X pricing", excerpt: "Model X costs $1 per million input tokens.", briefing: undefined }),
+  ])];
+  const [story] = buildStories(state, "2026-08-30T02:00:00Z");
+  assert.equal(story.factSourceCount, 1);
+  assert.equal(story.evidenceStrength, "moderate");
+  assert.notEqual(story.assignment.mode, "synthesis");
+  assert.equal(story.signals.length, 2, "research material remains available and traceable");
+});
+
+test("official updates on one page keep separate event identities and dates", () => {
+  const state = createDefaultState();
+  state.runs = [run("updates", [
+    candidate("a", { title: "DeepSeek API caching is available", url: "https://api-docs.deepseek.com/updates/#cache", canonicalUrl: undefined, briefing: undefined }),
+    candidate("b", { title: "DeepSeek introduces a mobile application", url: "https://api-docs.deepseek.com/updates/#app", canonicalUrl: undefined, briefing: undefined, publishedAt: "2026-08-29T01:00:00.000Z" }),
+  ])];
+  assert.equal(buildStories(state, "2026-08-30T02:00:00.000Z").length, 2);
+});
+
+test("Today distinguishes a refreshed view from the last collection and excludes imported articles", () => {
+  const state = createDefaultState();
+  state.runs = [
+    { ...run("collected", []), collectedAt: "2026-08-30T01:05:00.000Z", rawCount: 2, sourceResults: [
+      { sourceId: "official", sourceName: "Official", status: "warning", healthImpact: "success", rawCount: 2, candidateCount: 0, detail: "部分路线失败", routes: [
+        { sourceId: "official", url: "https://example.com/rss", status: "success", rawCount: 2 },
+        { sourceId: "official", url: "https://example.com/index", status: "error", rawCount: 0, detail: "HTTP 503" },
+      ] },
+    ] },
+    { ...run("imported", []), origin: "link-intake", updatedAt: "2026-08-30T10:00:00.000Z" },
+  ];
+  const first = buildTodayView(state, "2026-08-30T11:00:00.000Z");
+  const refreshed = buildTodayView(state, "2026-08-30T12:00:00.000Z");
+  assert.equal(first.collection?.collectedAt, "2026-08-30T01:05:00.000Z");
+  assert.equal(first.collection?.partialSourceCount, 1);
+  assert.equal(first.collection?.failedSourceCount, 0);
+  assert.equal(first.collection?.rawCount, 2);
+  assert.deepEqual(first.collection, refreshed.collection);
+  assert.notEqual(first.generatedAt, refreshed.generatedAt);
 });
 
 test("StoryDesk merges official, news and community signals into one story", () => {
@@ -809,4 +892,29 @@ test("focused Today reserves a small discovery section without manufacturing hea
   assert.ok(state.runs[0]!.candidates.every((entry) => entry.heatScore === 0));
   assert.equal(today.funnel.visibleRecommendationCount, 2);
   assert.equal(today.funnel.recommendationDropReasons.find((reason) => reason.code === "below-display-limit")?.count, 2);
+});
+
+
+test("retaining a story survives source preparation failure and keyword views use real local stories", () => {
+  const state = createDefaultState();
+  state.runs = [run("collection", [candidate("selected", { title: "Acme releases Codex toolkit", canonicalUrl: "https://acme.example/codex", url: "https://acme.example/codex" })])];
+  const story = buildStories(state, "2026-08-30T02:00:00Z")[0]!;
+  retainStoryForWriting(state, story.id);
+  assert.equal(state.runs[0]?.candidates[0]?.selected, true);
+  assert.equal(buildHomeNews(state, "ＣＯＤＥＸ", "2026-08-30T02:00:00Z")[0]?.id, story.id);
+  assert.equal(buildHomeNews(state, "unrelated-keyword", "2026-08-30T02:00:00Z").length, 0);
+});
+
+
+test("a refused source stops with a repairable error before any fact generation", async () => {
+  const state = createDefaultState();
+  state.runs = [run("collection", [candidate("refused", { briefing: undefined })])];
+  const story = buildStories(state)[0]!;
+  for (const code of [401, 403, 404, 503]) {
+    let reads = 0;
+    await assert.rejects(preparePackageSourceEvidence(state, story.id, undefined, { readSource: async () => {
+      reads++; throw new Error(`页面读取失败：HTTP ${code}`);
+    } }), (error: unknown) => error instanceof ClassifiedJobError && error.failureClass === (code === 503 ? "transient" : "repairable"));
+    assert.equal(reads, 1);
+  }
 });

@@ -13,6 +13,7 @@ const formatDateTime = (iso: string) =>
   }).format(new Date(iso));
 
 const displayRunStage = (stage: string) => stage.replace("生成中文速读", "生成中文摘要");
+const routeHost = (value: string) => { try { return new URL(value).hostname; } catch { return "来源地址"; } };
 
 export function RunsPage({
   runs,
@@ -67,7 +68,7 @@ export function RunsPage({
               <span title={run.keywords ? `关键词：${run.keywords}` : undefined}>{run.dateFrom && run.dateTo ? `${run.dateFrom.slice(5)} 至 ${run.dateTo.slice(5)}` : `${run.windowHours} 小时`}</span>
               <span>{run.rawCount}</span>
               <span>{run.candidates.length} / {draftCount}</span>
-              <span>{run.error ?? (empty ? "完成，但未找到候选；请检查来源日志" : displayRunStage(run.stage))}</span>
+              <span>{run.error ?? (empty ? "本轮没有符合条件的候选" : displayRunStage(run.stage))}</span>
               <div className="run-history-actions">
                 {retryable ? <button className="icon-link retry" onClick={() => onRetry(run.id)} title="按原配置重试"><RotateCcw size={16} /></button> : null}
                 <button className="icon-link" onClick={() => onOpenRun(run.id)} title="打开本次候选"><ExternalLink size={16} /></button>
@@ -80,8 +81,17 @@ export function RunsPage({
                 || trace.subjectId && run.candidates.some((candidate) => candidate.id === trace.subjectId));
               const failedSources = (run.sourceResults ?? []).filter((source) => source.status !== "healthy");
               return <div className="run-detail-panel">
-                <div><strong>来源结果</strong><span>{run.sourceResults?.length ?? 0} 个来源 · {failedSources.length} 个异常</span>{failedSources.map((source) => <small key={source.sourceId}>{source.sourceName}：{source.detail}</small>)}</div>
-                <div><strong>过滤漏斗</strong><span>{run.rawCount} 原始 → {run.filteredRawCount ?? run.rawCount} 符合检索 → {run.candidates.length} 候选</span></div>
+                <div><strong>来源结果</strong><span>{run.sourceResults?.length ?? 0} 个来源 · {failedSources.filter((source) => source.healthImpact === "failure").length} 个读取失败 · {failedSources.filter((source) => source.healthImpact !== "failure").length} 条提示</span>{failedSources.map((source) => <small key={source.sourceId}>{source.sourceName}：{source.detail}</small>)}</div>
+                {run.sourceResults?.some((source) => source.routes?.length) ? <div><strong>读取明细</strong>{run.sourceResults.flatMap((source) => (source.routes ?? []).map((route) => <small key={`${source.sourceId}:${route.url}`}>
+                  {source.sourceName} · {routeHost(route.url)}：{route.status === "error" ? route.detail || "读取失败" : route.cacheStatus === "not-modified" ? `已核对，内容未变化 · ${route.rawCount} 条` : `读取 ${route.rawCount} 条`}
+                  {route.retryAt ? ` · 可重试 ${formatDateTime(route.retryAt)}` : ""}
+                </small>))}</div> : null}
+                <div><strong>筛选过程</strong>{run.collectionFunnel ? <>
+                  <span>{run.collectionFunnel.rawCount} 原始 → {run.collectionFunnel.dateAcceptedCount} 日期符合 → {run.collectionFunnel.matchedCount} 搜索命中 → {run.collectionFunnel.candidateCount} 候选</span>
+                  {run.collectionFunnel.rejections.map((reason) => <small key={reason.code}>{reason.label}：{reason.count} 条</small>)}
+                  {run.collectionFunnel.publicationDateChecks ? <small>回查原始日期：{run.collectionFunnel.publicationDateChecks.verified} 条已确认，{run.collectionFunnel.publicationDateChecks.unavailable} 条仍未确认，{run.collectionFunnel.publicationDateChecks.deferred} 条超出本轮核对上限。</small> : null}
+                  <small>记录本次采集时的数量；首页还会根据证据、稿件状态与展示上限筛选。</small>
+                </> : <span>{run.rawCount} 原始 → {run.filteredRawCount ?? run.rawCount} 符合检索 → {run.candidates.length} 候选（历史记录未保存逐项原因）</span>}</div>
                 <div><strong>AI 任务</strong>{traces.length ? traces.map((trace) => <span key={trace.id}>{trace.requestedProvider.name || trace.requestedProvider.id} · {trace.requestedProvider.model} · {trace.status === "succeeded" ? "成功" : trace.status === "failed" ? "失败" : "运行中"} · {trace.durationMs !== undefined ? `${(trace.durationMs / 1000).toFixed(1)} 秒` : "计时中"}<small>Replay {trace.replayId}{trace.errors[0] ? ` · ${trace.errors[0].category}：${trace.errors[0].message}` : ""}</small></span>) : <span>本次没有 AI 调用，或是升级前的历史记录。</span>}</div>
                 <div><strong>最近日志</strong>{run.logs.slice(-5).reverse().map((log, index) => <small key={`${log.at}-${index}`}>{formatDateTime(log.at)} · {displayRunStage(log.stage)} · {log.message}</small>)}</div>
               </div>;
