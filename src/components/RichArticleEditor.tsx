@@ -57,7 +57,7 @@ interface RichArticleEditorProps {
   content: string;
   preview: boolean;
   theme: DraftLayoutTheme;
-  onChange: (html: string) => void;
+  onChange: (html: string, origin?: "ai") => void;
   onUploadFile: (file: File) => Promise<DraftImagePlacement>;
   onImportUrl: (url: string, caption?: string) => Promise<DraftImagePlacement>;
   onRequestCompletion?: (
@@ -80,6 +80,7 @@ type CompletionUi =
   | { status: "loading" }
   | { status: "streaming"; preview: string; providerName?: string }
   | { status: "visible"; paragraphs: number; providerName?: string }
+  | { status: "stale" | "dismissed" | "retry"; message: string }
   | { status: "unavailable"; message: string };
 
 const NewsImage = Image.extend({
@@ -162,7 +163,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
       completionState.current = invalidateInlineCompletion(completionState.current);
       completionProviderName.current = undefined;
       if (currentEditor && !currentEditor.isDestroyed) clearInlineCompletion(currentEditor);
-      if (updateUi) setCompletionUi({ status: "idle" });
+      if (updateUi) setCompletionUi((current) => ["visible", "streaming", "loading"].includes(current.status) ? { status: "stale", message: "正文或光标已变化，旧建议已过期" } : current);
     };
 
     const completionContextFor = (currentEditor: Editor) => {
@@ -171,9 +172,9 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
       const parentName = selection.$from.parent.type.name;
       if (parentName !== "paragraph" || selection.$from.node(-1)?.type.name === "blockquote") return undefined;
       if (selection.$from.parentOffset !== selection.$from.parent.content.size) return undefined;
-      const before = doc.textBetween(0, selection.from, "\n", "\n").slice(-1_600);
+      const before = doc.textBetween(0, selection.from, "\n", "\n");
       if (before.trim().length < 4) return undefined;
-      const after = doc.textBetween(selection.from, doc.content.size, "\n", "\n").slice(0, 500);
+      const after = doc.textBetween(selection.from, doc.content.size, "\n", "\n");
       return {
         position: selection.from,
         before,
@@ -307,7 +308,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
           const retryDelay = inlineCompletionRetryDelay(error);
           completionRetryAt.current = Date.now() + retryDelay;
           setCompletionUi({
-            status: "unavailable",
+            status: "retry",
             message: `补全暂不可用，${Math.ceil(retryDelay / 1_000)} 秒后继续输入可重试`,
           });
         }).finally(() => {
@@ -350,7 +351,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
           onDismiss: () => {
             dismissedContext.current = completionState.current.contextKey;
             completionState.current = invalidateInlineCompletion(completionState.current);
-            setCompletionUi({ status: "idle" });
+            setCompletionUi({ status: "dismissed", message: "已拒绝这条建议；继续编辑后再补全" });
           },
         }),
       ],
@@ -366,10 +367,12 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
         attributes: {
           class: "continuous-prose",
           "aria-label": "连续文章编辑器",
+          role: "textbox",
+          "aria-multiline": "true",
         },
       },
-      onUpdate: ({ editor: current }) => {
-        if (updatesEnabled.current) onChange(current.getHTML());
+      onUpdate: ({ editor: current, transaction }) => {
+        if (updatesEnabled.current) onChange(current.getHTML(), transaction.getMeta("newsdesk-ai-insertion") ? "ai" : undefined);
         scheduleCompletion(current);
       },
       onSelectionUpdate: ({ editor: current }) => scheduleCompletion(current),
@@ -662,7 +665,8 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
               {completionUi.status === "loading" ? <><LoaderCircle className="spin" size={12} />正在补全</> : null}
               {completionUi.status === "streaming" ? <><LoaderCircle className="spin" size={12} />正在生成 <span className="inline-completion-stream-preview">{completionUi.preview}</span>{completionUi.providerName ? ` · ${completionUi.providerName}` : ""}</> : null}
               {completionUi.status === "visible" ? <><kbd>Tab</kbd> {completionUi.paragraphs > 1 ? "接受下一段" : "接受"}{completionUi.paragraphs > 1 ? <><span>·</span><kbd>Ctrl+Enter</kbd> 接受全部</> : null}{completionUi.providerName ? ` · ${completionUi.providerName}` : ""} <span>·</span> <kbd>Esc</kbd> 取消</> : null}
-              {completionUi.status === "unavailable" ? completionUi.message : null}
+              {["unavailable", "stale", "dismissed", "retry"].includes(completionUi.status) && "message" in completionUi ? completionUi.message : null}
+              {completionUi.status === "retry" ? <button onClick={() => { completionRetryAt.current = 0; if (editor) scheduleCompletion(editor, true); }}>重试补全</button> : null}
               {completionUi.status === "idle" ? <>停顿后预测下一句或下一段，按 <kbd>Tab</kbd> 接受</> : null}
               </>}
             </div>

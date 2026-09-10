@@ -492,3 +492,9 @@ test("publication confirmation blocks an inserted image with no reviewed SHA-256
     /缺少已审核.*SHA-256.*重新插入/u,
   );
 });
+
+test("fact mappings and frozen package identity invalidate an earlier delivery fingerprint",()=>{
+ const draft=draftFixture();const before=publicationRevisionHash(draft,"wechat");
+ draft.provenance.contentPackageId="new-package";assert.notEqual(publicationRevisionHash(draft,"wechat"),before);
+ const bound=publicationRevisionHash(draft,"wechat");draft.factClaims=[{id:"new",claim:"new fact",status:"unverified",capturedAt:draft.createdAt}];assert.notEqual(publicationRevisionHash(draft,"wechat"),bound);
+});

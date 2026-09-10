@@ -1,3 +1,5 @@
+import { packageEvidenceText } from "./draft-desk.js";
+import { draftDocumentKey } from "./draft-document.js";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -815,7 +817,7 @@ export const createArticleAgentThread = async (
     if (reusable) return reusable;
   }
   const provider = providerForRole(state, role);
-  const contentPackage = qualityRepairRequested && draft.provenance.contentPackageId
+  const contentPackage = draft.provenance.contentPackageId
     ? (await getLocalDatabase()).getContentPackage<ContentPackage>(draft.provenance.contentPackageId)
     : undefined;
   if (qualityRepairRequested && !draft.provenance.contentPackageId) {
@@ -824,12 +826,15 @@ export const createArticleAgentThread = async (
   if (qualityRepairRequested && !contentPackage) {
     throw new Error("冻结素材包已不可用，不能执行自动定向补写");
   }
+  if (role === "optimization" && (!contentPackage || contentPackage.status !== "ready" || contentPackage.blockers.length)) throw new Error("AI 修改必须使用已冻结且通过预检的素材包；请先建立素材包");
   const qualityRepair = qualityRepairRequested && contentPackage
     ? buildQualityRepairContext(draft, contentPackage)
     : undefined;
   const sourceSnapshot = qualityRepair && contentPackage
     ? qualityRepairSourceSnapshot(draft, contentPackage, qualityRepair)
-    : await sourceForDraft(draft);
+    : role === "optimization" && contentPackage
+      ? { url: contentPackage.sources[0]?.url || "", title: contentPackage.title, text: packageEvidenceText(contentPackage), method: "content-package" as const, capturedAt: contentPackage.createdAt }
+      : await sourceForDraft(draft);
   const currentDraft = draftInputFor(draft, input);
   const candidate = state.runs.find((run) => run.id === draft.runId)
     ?.candidates.find((entry) => entry.id === draft.candidateId);
@@ -855,6 +860,7 @@ export const createArticleAgentThread = async (
         sourceUrls: fact.sourceUrls,
         note: fact.note,
       }))
+    : contentPackage ? contentPackage.facts.map((fact) => ({ id: fact.id, claim: fact.text, status: fact.status, sourceUrls: fact.sourceUrls, note: fact.note }))
     : (draft.factClaims || []).map((claim) => ({
         id: claim.id,
         factIds: claim.factIds,
@@ -902,7 +908,7 @@ export const createArticleAgentThread = async (
     take: currentDraft.take,
     factClaimIds: qualityRepair
       ? qualityRepair.unusedFacts.map((fact) => fact.id)
-      : [...new Set((draft.factClaims || []).flatMap((claim) => [claim.id, ...(claim.factIds ?? [])]))],
+      : contentPackage ? contentPackage.facts.map((fact) => fact.id) : [...new Set((draft.factClaims || []).flatMap((claim) => [claim.id, ...(claim.factIds ?? [])]))],
     qualityAssessment,
     qualityRepair: Boolean(qualityRepair),
   });
@@ -944,6 +950,7 @@ export const createArticleAgentThread = async (
     draftSnapshot: {
       title: currentDraft.title,
       text: currentDraft.text,
+      documentKey: draftDocumentKey({ ...draft, ...input, provenance: draft.provenance }),
       capturedAt: createdAt,
     },
     analysis,
@@ -1025,6 +1032,7 @@ export const askArticleAgent = async (
     target.draftSnapshot = {
       title: currentDraft.title,
       text: currentDraft.text,
+      documentKey: target.draftSnapshot.documentKey,
       capturedAt: assistantMessage.createdAt,
     };
     return target;

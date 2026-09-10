@@ -1,10 +1,11 @@
+import { auditFactRelations, modelMentions } from "./fact-relations.js";
 /**
  * A bounded contradiction detector, not semantic entailment. It checks typed
  * quantities/dates and a few explicit scope reversals against selected frozen
  * facts. Passing says nothing about unrecognised names, causality or prose.
  */
 export interface FrozenFactIntegrityIssue {
-  code: "quantity-not-supported" | "date-not-supported" | "scope-contradiction" | "attribution-missing";
+  code: "quantity-not-supported" | "date-not-supported" | "scope-contradiction" | "attribution-missing" | "relation-contradiction";
   message: string;
 }
 
@@ -186,11 +187,14 @@ export const auditFrozenFactIntegrity = (
   facts: readonly { text: string }[],
   options: { attributionContext?: string } = {},
 ): FrozenFactIntegrityReport => {
+  const mentionedModels = modelMentions(text);
+  const matchingFacts = mentionedModels.length === 1 ? facts.filter(fact => modelMentions(fact.text).includes(mentionedModels[0]!)) : [];
+  const quantityFacts = matchingFacts.length ? matchingFacts : facts;
   const claimed = quantities(text);
-  const frozen = facts.map((fact) => quantities(fact.text));
+  const frozen = quantityFacts.map((fact) => quantities(fact.text));
   const supported = frozen.flatMap((fact) => fact.values);
   const supportedDates = frozen.flatMap((fact) => fact.dates);
-  const errors: FrozenFactIntegrityIssue[] = [];
+  const errors: FrozenFactIntegrityIssue[] = auditFactRelations(text, facts).map(message => ({ code: "relation-contradiction", message }));
   const warnings: FrozenFactIntegrityIssue[] = [];
   for (const value of claimed.values) {
     if (!supported.some((fact) => supportedQuantity(value, fact))) errors.push({ code: "quantity-not-supported",

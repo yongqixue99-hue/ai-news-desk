@@ -813,7 +813,7 @@ test("today explains recommendation shortages without promoting evidence-blocked
   assert.equal(today.funnel.visibleRecommendationCount, 6);
   assert.equal(today.funnel.recommendationShortageCount, 2);
   assert.deepEqual(today.funnel.recommendationDropReasons, [
-    { code: "outside-window", label: "超过常规 48 小时或模型发布 7 天窗口", count: 1 },
+    { code: "outside-window", label: "超过新闻 48 小时、发布 7 天或实践 30 天窗口", count: 1 },
     { code: "already-drafted", label: "已经进入成稿流程", count: 1 },
     { code: "evidence-blocked", label: "证据不足，暂留观察", count: 1 },
   ]);
@@ -917,4 +917,13 @@ test("a refused source stops with a repairable error before any fact generation"
     } }), (error: unknown) => error instanceof ClassifiedJobError && error.failureClass === (code === 503 ? "transient" : "repairable"));
     assert.equal(reads, 1);
   }
+});
+
+test("practice recommendations require materials and reserve space across authors",()=>{
+ const state=createDefaultState();const titles=["How I built an offline coding assistant","Porting an Amiga game to Godot","A hands-on benchmark of local inference"];
+ state.runs=[run("authors",titles.map((title,index)=>candidate(`author-${index}`,{title,briefing:undefined,url:`https://author.example/${index}`,canonicalUrl:undefined,author:index===2?"Another author":"Same author",excerpt:`Documented practice: ${title}`})))];
+ const interesting=buildTodayView(state,"2026-08-30T03:00:00Z").interesting!;
+ assert.equal(interesting.length,2);assert.equal(new Set(interesting.map(story=>story.signals[0]!.author)).size,2);
+ state.runs[0]!.candidates.forEach(candidate=>{candidate.excerpt="";});
+ assert.equal(buildTodayView(state,"2026-08-30T03:00:00Z").interesting?.length,0);
 });

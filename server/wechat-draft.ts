@@ -51,6 +51,7 @@ export interface WeChatDraftDesk {
 
 interface WeChatDraftDeskDependencies {
   gateway: WeChatDraftGateway;
+  beforeCommit?: () => Promise<void>;
   loadImage?: (placement: DraftImagePlacement) => Promise<WeChatImageAsset>;
 }
 
@@ -150,6 +151,7 @@ export const createWeChatDraftDesk = (
     })).digest("hex");
     const syncedAt = (input.now ?? new Date()).toISOString();
     if (input.previousReceipt?.contentHash === sourceHash) {
+      await dependencies.beforeCommit?.();
       return {
         ...input.previousReceipt,
         operation: "unchanged",
@@ -185,6 +187,7 @@ export const createWeChatDraftDesk = (
       only_fans_can_comment: 0,
     };
     const existingMediaId = input.previousReceipt?.mediaId;
+    await dependencies.beforeCommit?.();
     let mediaId = existingMediaId;
     let operation: WeChatDraftSyncReceipt["operation"] = "updated";
     if (existingMediaId) {

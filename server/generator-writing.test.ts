@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   acceptGeneratedReview,
+  generateCandidateDraft,
   buildGeneratedFactClaims,
   buildPackageParagraphClaims,
   parseGeneratedArticle,
@@ -37,6 +38,7 @@ test("a factual brief may be one paragraph and does not need a forced opinion", 
       paragraphIndex: 0,
       sourceUrls: ["https://help.openai.com/example"],
     }],
+    paragraphFactIds: [],
     uncertainties: [],
     imageSelections: [],
     discoveredImages: [],
@@ -93,6 +95,7 @@ test("automatic review may compress list-like prose but cannot change evidence m
     take: "",
     sources: [{ label: "GitHub", url: "https://github.com/example/repo", kind: "primary", verified: true }],
     paragraphEvidence: [{ paragraphIndex: 0, sourceUrls: ["https://github.com/example/repo"] }],
+    paragraphFactIds: [],
     uncertainties: [],
     imageSelections: [],
     discoveredImages: [],
@@ -118,6 +121,7 @@ test("automatic review is rejected when it drops a protected fact", () => {
     take: "",
     sources: [{ label: "GitHub", url: "https://github.com/example/repo", kind: "primary", verified: true }],
     paragraphEvidence: [{ paragraphIndex: 0, sourceUrls: ["https://github.com/example/repo"] }],
+    paragraphFactIds: [],
     uncertainties: [], imageSelections: [], discoveredImages: [], topics: [],
   };
   const original = parseGeneratedArticle(JSON.stringify(payload));
@@ -218,4 +222,24 @@ test("a source-first news draft cannot promote its community discovery channel i
     title: "开发者在 Hacker News 争论 AI 是否会替代管理岗位",
     paragraphs: ["一场社区讨论围绕 AI 与管理岗位展开。"],
   }, { contentIntent: "community", discoveredViaCommunity: true }));
+});
+
+test("malformed nested model evidence is rejected rather than silently dropped", () => {
+  assert.throws(() => parseGeneratedArticle(JSON.stringify({ strategy: "brief", title: "这是八个字以上的标题", paragraphs: ["这是有原文支持的完整新闻段落。"], take: "", sources: [{ label: "来源", url: "https://example.com", kind: "primary", verified: "true" }], paragraphEvidence: [], paragraphFactIds: [], uncertainties: [], imageSelections: [], discoveredImages: [], topics: [] })), /结构校验/);
+});
+
+test("raw generation fails before state, source or provider access when no frozen package is supplied", async () => {
+  await assert.rejects(generateCandidateDraft("unused", {} as never, {} as never, []), /ContentPackage/);
+});
+
+test("structured drafts preserve more than eight blocks and reject out-of-range evidence", () => {
+  const paragraphs = Array.from({ length: 12 }, (_, i) => `步骤 ${i + 1}：保留原文给出的条件与限制。`);
+  const input = { strategy: "playbook", title: "一个可核对的完整实践教程", paragraphs, take: "", sources: [{ label: "Source", url: "https://example.com", kind: "primary", verified: true }],
+    paragraphEvidence: paragraphs.map((_, paragraphIndex) => ({ paragraphIndex, sourceUrls: ["https://example.com"] })),
+    paragraphFactIds: paragraphs.map((_, paragraphIndex) => ({ paragraphIndex, factIds: [`f${paragraphIndex}`] })),
+    uncertainties: [], imageSelections: [{ imageId: "chart", afterParagraph: 11, caption: "来源图" }], discoveredImages: [], topics: [],
+    blocks: paragraphs.map((_, paragraphIndex) => ({ paragraphIndex, kind: paragraphIndex === 0 ? "heading" : "paragraph" })) };
+  const parsed = parseGeneratedArticle(JSON.stringify(input));
+  assert.equal(parsed.paragraphs.length, 12); assert.equal(parsed.blocks?.[0]?.kind, "heading");
+  assert.throws(() => parseGeneratedArticle(JSON.stringify({ ...input, paragraphFactIds: [{ paragraphIndex: 12, factIds: ["f"] }] })), /索引|编号|范围/u);
 });

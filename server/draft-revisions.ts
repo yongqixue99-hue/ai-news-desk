@@ -14,6 +14,7 @@ const MAX_REVISIONS_PER_DRAFT = 30;
 const clone = <T>(value: T): T => structuredClone(value);
 
 export const snapshotDraft = (draft: ArticleDraft): DraftRevisionSnapshot => ({
+  sourceChangeReviews: draft.sourceChangeReviews ? clone(draft.sourceChangeReviews) : undefined,
   contentFormat: draft.contentFormat,
   imagePostImageIds: draft.imagePostImageIds ? clone(draft.imagePostImageIds) : undefined,
   title: draft.title,
@@ -33,6 +34,9 @@ export const snapshotDraft = (draft: ArticleDraft): DraftRevisionSnapshot => ({
 const snapshotKey = (snapshot: DraftRevisionSnapshot) => JSON.stringify(snapshot);
 
 const revisionLabel = (kind: DraftRevision["kind"]) => {
+  if (kind === "initial") return "初稿基线";
+  if (kind === "confirmed") return "确认定稿";
+  if (kind === "ai") return "采用 AI 修改";
   if (kind === "auto") return "自动保存";
   if (kind === "restore-backup") return "恢复前备份";
   return "手动保存";
@@ -40,7 +44,7 @@ const revisionLabel = (kind: DraftRevision["kind"]) => {
 
 const trimDraftRevisions = (state: WorkflowState, draftId: string) => {
   const matching = state.draftRevisions
-    .filter((revision) => revision.draftId === draftId)
+    .filter((revision) => revision.draftId === draftId && revision.kind !== "initial" && revision.kind !== "confirmed")
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   const excessIds = new Set(
     matching.slice(0, Math.max(0, matching.length - MAX_REVISIONS_PER_DRAFT)).map((revision) => revision.id),
@@ -53,12 +57,13 @@ const trimDraftRevisions = (state: WorkflowState, draftId: string) => {
 export const appendDraftRevision = (
   state: WorkflowState,
   draft: ArticleDraft,
-  kind: DraftSaveMode | "restore-backup",
+  kind: DraftRevision["kind"],
   now = new Date(),
 ) => {
   state.draftRevisions ??= [];
   const timestamp = now.toISOString();
   const snapshot = snapshotDraft(draft);
+  draft.editorialBaseline ??= { initial: { snapshot: clone(snapshot), capturedAt: timestamp, origin: kind === "initial" ? "initial" : "legacy" } };
   const revisions = state.draftRevisions
     .filter((revision) => revision.draftId === draft.id)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -73,10 +78,12 @@ export const appendDraftRevision = (
   ) {
     latest.snapshot = snapshot;
     latest.updatedAt = timestamp;
+    draft.revisionId = latest.id;
     return latest;
   }
 
   if (kind === "auto" && latest && snapshotKey(latest.snapshot) === snapshotKey(snapshot)) {
+    draft.revisionId = latest.id;
     return latest;
   }
 
@@ -90,6 +97,7 @@ export const appendDraftRevision = (
     snapshot,
   };
   state.draftRevisions.push(revision);
+  draft.revisionId = revision.id;
   trimDraftRevisions(state, draft.id);
   return revision;
 };
@@ -121,6 +129,8 @@ export const restoreDraftRevision = (
   draft.community = snapshot.community;
   draft.topics = snapshot.topics;
   draft.sourceMaterial = snapshot.sourceMaterial;
+  draft.sourceChangeReviews = snapshot.sourceChangeReviews;
+  draft.aiAssistedSinceConfirmation = true;
   draft.updatedAt = now.toISOString();
   return draft;
 };

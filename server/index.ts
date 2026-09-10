@@ -1,3 +1,11 @@
+import { writingPreferencePlan } from "./writing-preference-retrieval.js";
+import { recordEditObservation } from "./edit-observation.js";
+import { reviewDraftQuality, bindReviewedParagraph } from "./draft-quality-review.js";
+import { affectedDraftsForSourceChanges } from "./source-change-impact.js";
+import { traceDiscoveryUrl } from "./discovery-trace.js";
+import { confirmDraftInState } from "./draft-confirmation.js";
+import { queueEditorialDraft } from "./editorial-jobs.js";
+import { readStoredStorySources } from "./source-desk.js";
 import { createHash, randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import path from "node:path";
@@ -71,6 +79,7 @@ import {
   currentPublicationConfirmation,
   PublicationRevisionConflictError,
   publicationRevisionHash,
+  assertPublicationRevision,
   reconcileDraftPublicationAfterEdit,
   recordXiaoheiheFillAttempt,
 } from "./publication-state.js";
@@ -120,7 +129,6 @@ import {
 } from "./editorial-system.js";
 import {
   recordDraftEdit,
-  activeWritingGuidelines,
   recordPublishedWritingSignals,
   writingMemoryView,
 } from "./learning-desk.js";
@@ -165,7 +173,7 @@ import {
   editorialGeneratorRevision,
 } from "./draft-desk.js";
 import { editorialIntakeDesk } from "./editorial-intake.js";
-import { createJobDesk } from "./job-desk.js";
+import { ClassifiedJobError, createJobDesk } from "./job-desk.js";
 import {
   buildInlineCompletionPrompt,
   isStableInlineCompletionPreview,
@@ -175,6 +183,7 @@ import { runInlineCompletionProvider, streamInlineCompletionProvider } from "./p
 import { hydrateStoryAssets } from "./visual-desk.js";
 import {
   confirmIntakeReview,
+  executeReviewGeneration,
   createLinkIntakeReview,
   createManualXPostIntakeReview,
   createScreenshotIntakeReview,
@@ -382,6 +391,10 @@ const publisherPreflightFor = async (
     ...draft,
     images: draft.images.filter((placement) => inserted.has(placement.id)),
   }, "xiaoheihe");
+  const quality = reviewDraftQuality(draft, await getLocalDatabase());
+  readiness.factBlockers.push(...quality.blockers);
+  readiness.blockers.push(...quality.blockers); readiness.ready = readiness.blockers.length === 0;
+  readiness.binding = quality.binding;
   return appendEditorialReadiness(preflight, readiness);
 };
 
@@ -424,6 +437,11 @@ app.get(
   }),
 );
 
+app.get("/api/discovery/trace", async (request, response, next) => {
+  try { response.json(traceDiscoveryUrl(await readState(), String(request.query.url ?? ""))); }
+  catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "链接诊断失败" }); }
+});
+
 app.get("/api/home-news", asyncRoute(async (request, response) => {
   const keyword = typeof request.query.keyword === "string" ? request.query.keyword.trim().slice(0, 120) : "";
   response.json(buildHomeNews(await readState(), keyword));
@@ -441,12 +459,11 @@ app.patch("/api/home-layout", asyncRoute(async (request, response) => {
 app.post("/api/product/jobs/:jobId/retry", asyncRoute(async (request, response) => {
   const database = await getLocalDatabase();
   const oldJob = database.getJob(routeParam(request.params.jobId));
-  if (!oldJob || oldJob.type !== "build-content-package" || oldJob.status !== "failed") { response.status(409).json({ error: "这个任务不能从这里重试" }); return; }
+  if (!oldJob || !["build-content-package", "draft-from-package", "draft-from-editorial-intake", "draft-from-intake-review", "explain-story", "hydrate-story-assets", "supplement-story-evidence"].includes(oldJob.type) || oldJob.status !== "failed") { response.status(409).json({ error: "这个任务不能从这里重试" }); return; }
   const storyId = oldJob.payload && typeof oldJob.payload === "object" && "storyId" in oldJob.payload ? String(oldJob.payload.storyId) : "";
   const story = storyById(await readState(), storyId);
-  if (!story) { response.status(404).json({ error: "原选题不存在" }); return; }
-  await updateState((state) => retainStoryForWriting(state, storyId));
-  response.status(202).json(retryPackageJob(database, oldJob.id, story.title));
+  if (story) await updateState((state) => retainStoryForWriting(state, storyId));
+  response.status(202).json(retryPackageJob(database, oldJob.id, story?.title));
 }));
 
 app.get(
@@ -482,10 +499,13 @@ app.get(
   "/api/today",
   asyncRoute(async (_request, response) => {
     const view = buildTodayView(await readState());
+    // Browsing must not enqueue legacy maintenance or invoke a provider.
+    if (_request.query.readOnly === "1") { response.json(view); return; }
     const database = await getLocalDatabase();
     for (const story of [...view.mustReads, ...(view.interesting ?? []), ...view.secondary].slice(0, 5)) {
       if ((story.localImageCount ?? 0) >= 2) continue;
       database.enqueueJob({
+        lane: "background",
         type: "hydrate-story-assets",
         idempotencyKey: `hydrate-story-assets:${story.id}:${story.lastSeenAt}`,
         payload: { storyId: story.id, minimumImages: 2 },
@@ -522,6 +542,7 @@ app.get(
     const evidenceRetryWindow = Math.floor(Date.now() / (6 * 60 * 60_000));
     for (const story of evidenceCandidates) {
       database.enqueueJob({
+        lane: "background",
         type: "supplement-story-evidence",
         idempotencyKey: `supplement-story-evidence:auto:${story.id}:${story.lastSeenAt}:${evidenceRetryWindow}`,
         payload: { storyId: story.id, trigger: "auto" },
@@ -550,6 +571,16 @@ app.get(
         && (job.payload as { storyId?: string; scope?: string } | undefined)?.storyId === storyId
         && (job.payload as { scope?: string }).scope === "article")?.result,
     });
+  }),
+);
+
+app.get(
+  "/api/stories/:storyId/reading",
+  asyncRoute(async (request, response) => {
+    const story = storyById(await readState(), routeParam(request.params.storyId));
+    if (!story) { response.status(404).json({ error: "Story 不存在" }); return; }
+    const database = await getLocalDatabase();
+    response.json(readStoredStorySources(story, database.latestContentPackageForStory<ContentPackage>(story.id), database));
   }),
 );
 
@@ -591,12 +622,7 @@ app.post(
       return;
     }
     const database = await getLocalDatabase();
-    const queued = database.enqueueJob({
-      type: "draft-from-editorial-intake",
-      idempotencyKey: `draft-from-editorial-intake:${editorialGeneratorRevision}:${runId}:${candidateId}:${resolvedIntent}:${candidate.fetchedAt}`,
-      payload: { runId, candidateId, intent: resolvedIntent },
-      maxAttempts: 2,
-    });
+    const queued = await queueEditorialDraft({ runId, candidateId, intent: resolvedIntent });
     if (queued.job.status === "complete") {
       const result = queued.job.result as { draftId?: string; packageId?: string; reused?: boolean } | undefined;
       const draft = result?.draftId ? (await readState()).drafts.find((entry) => entry.id === result.draftId) : undefined;
@@ -910,6 +936,13 @@ app.get(
     });
   }),
 );
+
+app.post("/api/editorial-memories/preview", asyncRoute(async (request,response) => {
+  const state=await readState();
+  const title=typeof request.body?.title === "string" ? request.body.title.slice(0,500) : "";
+  const intent=["news","community","source"].includes(request.body?.intent) ? request.body.intent : "news";
+  response.json(writingPreferencePlan(await getLocalDatabase(),{enabled:state.settings.writingMemoryEnabled,title,intent}));
+}));
 
 app.patch(
   "/api/editorial-system/profile",
@@ -2195,7 +2228,7 @@ app.post(
       ? request.params.candidateId[0]
       : request.params.candidateId;
     try {
-      response.status(201).json(await createCommunityDraft(runId, candidateId, mode));
+      response.status(202).json(await queueEditorialDraft({ runId, candidateId, intent: mode === "article" ? "news" : "source", sourceMode: mode === "article" ? undefined : mode }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/^(?:关联来源|这条社区线索|社区讨论|社区入稿|生成正文|模型没有为)/u.test(message)) {
@@ -2278,6 +2311,68 @@ app.post(
   }),
 );
 
+app.post("/api/drafts/:draftId/edit-observation", asyncRoute(async (request,response)=>{
+  const draft=(await readState()).drafts.find(draft=>draft.id===routeParam(request.params.draftId));
+  if(!draft){response.status(404).json({error:"草稿不存在"});return;}
+  response.json(recordEditObservation(await getLocalDatabase(),draft,request.body));
+}));
+app.get("/api/source-changes", asyncRoute(async (_request, response) => {
+  response.json(affectedDraftsForSourceChanges((await readState()).drafts, await getLocalDatabase()));
+}));
+app.get("/api/drafts/:draftId/quality-check", asyncRoute(async (request, response) => {
+  const draft = (await readState()).drafts.find(item => item.id === routeParam(request.params.draftId));
+  if (!draft) { response.status(404).json({error:"草稿不存在"}); return; }
+  response.json(reviewDraftQuality(draft, await getLocalDatabase()));
+}));
+app.post("/api/drafts/:draftId/review-fact", asyncRoute(async (request, response) => {
+  const database = await getLocalDatabase();
+  const draft = await updateState(state => {
+    const draft = state.drafts.find(item => item.id === routeParam(request.params.draftId));
+    if (!draft) throw new Error("草稿不存在");
+    const ids = request.body?.factIds;
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== "string") || !request.body?.binding) throw new Error("事实选择格式无效");
+    bindReviewedParagraph(draft, database, request.body.binding, request.body.index, ids);
+    draft.updatedAt = new Date(Math.max(Date.now(), Date.parse(draft.updatedAt) + 1)).toISOString();
+    draft.qualityWarnings = draftQualityFindingsFor(evaluateDraftPackageQuality({ draft, contentPackage: database.getContentPackage<ContentPackage>(draft.provenance.contentPackageId!)! }));
+    appendDraftRevision(state,draft,"manual"); return draft;
+  });
+  response.json(draft);
+}));
+app.post("/api/drafts/:draftId/review-source-change", asyncRoute(async (request, response) => {
+  const database = await getLocalDatabase();
+  const draft = await updateState(state => {
+    const draft = state.drafts.find(item => item.id === routeParam(request.params.draftId));
+    if (!draft) throw new Error("草稿不存在");
+    const report = reviewDraftQuality(draft,database);
+    const change = report.changes.find(change => change.url === request.body?.url && change.observedHash === request.body?.observedHash);
+    const reason = typeof request.body?.reason === "string" ? request.body.reason.trim() : "";
+    if (!change || report.binding.documentHash !== request.body?.documentHash || reason.length < 10 || reason.length > 1000) throw new Error("来源或正文已变化，或尚未填写具体核对结论（10–1000 字）");
+    draft.sourceChangeReviews = [...(draft.sourceChangeReviews ?? []).filter(review => review.url !== change.url), {url: change.url, observedHash: change.observedHash, packageHash: report.binding.packageHash, documentHash: report.binding.documentHash, reason, reviewedAt:new Date().toISOString()}];
+    draft.updatedAt = new Date(Math.max(Date.now(),Date.parse(draft.updatedAt)+1)).toISOString();
+    appendDraftRevision(state,draft,"manual"); return draft;
+  }); response.json(draft);
+}));
+
+app.get("/api/drafts/:draftId", asyncRoute(async (request, response) => {
+  const draft = (await readState()).drafts.find((entry) => entry.id === routeParam(request.params.draftId));
+  if (!draft) { response.status(404).json({ error: "草稿不存在" }); return; }
+  response.json(draft);
+}));
+
+app.post("/api/drafts/:draftId/confirm", asyncRoute(async (request, response) => {
+  const database = await getLocalDatabase();
+  const result = await updateState((state) => {
+    const draft = state.drafts.find((entry) => entry.id === routeParam(request.params.draftId));
+    if (!draft) throw new Error("草稿不存在");
+    return confirmDraftInState(state, draft, String(request.body?.updatedAt ?? ""));
+  });
+  if (!result.reused) {
+    database.recordWorkflowEvent({ type: "draft.confirmed", subjectType: "draft", subjectId: result.draft.id, payload: { confirmationId: result.draft.editorialBaseline?.confirmed?.id, revisionId: result.draft.revisionId, learningEligible: result.learningEligible } });
+    if (result.learningEligible && result.before && result.after) recordDraftEdit(database, { draftId: result.draft.id, before: result.before, after: result.after, saveMode: "manual", confirmed: true, confirmationId: result.draft.editorialBaseline?.confirmed?.id, context: `${result.draft.title} ${result.draft.topics.join(" ")} ${result.draft.draftStrategy ?? ""}` });
+  }
+  response.json(result.draft);
+}));
+
 app.patch(
   "/api/drafts/:draftId",
   asyncRoute(async (request, response) => {
@@ -2286,6 +2381,8 @@ app.patch(
       const target = state.drafts.find((entry) => entry.id === request.params.draftId);
       if (!target) return undefined;
       const body = request.body as Partial<ArticleDraft> & { _saveMode?: DraftSaveMode };
+      if (body.updatedAt && body.updatedAt !== target.updatedAt) throw new Error("草稿已在其他窗口变化，请刷新后再保存；本地内容仍保留");
+      if (!target.editorialBaseline) appendDraftRevision(state, target, "manual");
       const beforeDraft = structuredClone(target);
       const before = snapshotDraft(target);
       const saveMode: DraftSaveMode = body._saveMode === "auto" ? "auto" : "manual";
@@ -2311,22 +2408,17 @@ app.patch(
           draft: target,
         }));
       }
-      const updatedAt = new Date().toISOString();
+      const updatedAt = new Date(Math.max(Date.now(), Date.parse(beforeDraft.updatedAt) + 1)).toISOString();
       reconcileDraftPublicationAfterEdit(beforeDraft, target, updatedAt);
       target.updatedAt = updatedAt;
-      appendDraftRevision(state, target, saveMode);
+      if (body.aiAssistedSinceConfirmation === true) target.aiAssistedSinceConfirmation = true;
+      appendDraftRevision(state, target, body.aiAssistedSinceConfirmation ? "ai" : saveMode);
       return { draft: target, before, after: snapshotDraft(target), saveMode };
     });
     if (!result) {
       response.status(404).json({ error: "草稿不存在" });
       return;
     }
-    recordDraftEdit(database, {
-      draftId: result.draft.id,
-      before: result.before,
-      after: result.after,
-      saveMode: result.saveMode,
-    });
     response.json(result.draft);
   }),
 );
@@ -2378,8 +2470,9 @@ app.post(
   "/api/drafts/:draftId/completions",
   asyncRoute(async (request, response) => {
     const draftId = routeParam(request.params.draftId);
-    const before = typeof request.body?.before === "string" ? request.body.before.slice(-1_600) : "";
-    const after = typeof request.body?.after === "string" ? request.body.after.slice(0, 500) : "";
+    const before = typeof request.body?.before === "string" ? request.body.before : "";
+    const after = typeof request.body?.after === "string" ? request.body.after : "";
+    if (before.length + after.length > 200_000) { response.json({ available: false, reason: "正文过长，暂不自动补全" }); return; }
     if (before.trim().length < 4) {
       response.json({ available: false, reason: "再写几个字后才会出现补全" });
       return;
@@ -2423,13 +2516,15 @@ app.post(
     request.once("aborted", abort);
     response.once("close", abortIfUnfinished);
     try {
+      const preferencePlan = writingPreferencePlan(await getLocalDatabase(), { enabled: state.settings.writingMemoryEnabled, title: draft.title, topics: draft.topics, intent: contentPackage.intent, mode: contentPackage.mode });
       const prompt = buildInlineCompletionPrompt({
         contentPackage,
         title: draft.title,
         before,
         after,
+        factMappings: draft.factClaims,
         editorialProfile: editorialProfileForWriting(state),
-        writingGuidelines: activeWritingGuidelines(await getLocalDatabase(), state.settings.writingMemoryEnabled),
+        writingGuidelines: preferencePlan.selected.map(item => item.guideline),
       });
       if (wantsStream) {
         response.status(200);
@@ -2438,6 +2533,7 @@ app.post(
         response.setHeader("connection", "keep-alive");
         response.flushHeaders();
         const providerMeta = {
+          writingMemory: preferencePlan,
           providerName: provider.name,
           model: provider.inlineCompletionModel || provider.model,
         };
@@ -2476,6 +2572,7 @@ app.post(
       if (!controller.signal.aborted && !response.writableEnded) {
         response.json({
           ...prepareInlineCompletion({ raw, contentPackage, before, after }),
+          writingMemory: preferencePlan,
           providerName: provider.name,
           model: provider.inlineCompletionModel || provider.model,
         });
@@ -2678,6 +2775,10 @@ app.post(
       const latestState = await readState();
       const latestDraft = latestState.drafts.find((entry) => entry.id === draftId);
       if (!latestDraft) throw new Error("同步开始前本地草稿已被删除");
+      const database = await getLocalDatabase();
+      const quality = reviewDraftQuality(latestDraft, database);
+      if (!quality.ready) throw new Error(quality.blockers.join("；"));
+      const deliveryHash = publicationRevisionHash(latestDraft,"wechat");
       const author = typeof request.body?.author === "string"
         ? request.body.author.trim()
         : latestState.settings.wechat.defaultAuthor;
@@ -2695,6 +2796,13 @@ app.post(
       const receipt = await createWeChatDraftDesk({
         gateway,
         loadImage: loadWeChatPlacementImage,
+        beforeCommit: async () => {
+          const current = (await readState()).drafts.find(draft => draft.id === latestDraft.id);
+          if (!current) throw new Error("草稿已不存在");
+          assertPublicationRevision(current,"wechat",deliveryHash);
+          const currentQuality = reviewDraftQuality(current,database);
+          if (!currentQuality.ready || currentQuality.binding.documentHash !== quality.binding.documentHash || currentQuality.binding.packageHash !== quality.binding.packageHash) throw new Error("正文或来源在交付准备期间变化，请重新核对");
+        },
       }).syncDraft({
         draft: latestDraft,
         author,
@@ -3174,7 +3282,7 @@ app.post(
 );
 
 if (process.env.NODE_ENV === "production") {
-  const distPath = path.join(process.cwd(), "dist");
+  const distPath = process.env.AI_NEWS_DESK_DIST_ROOT || path.join(process.cwd(), "dist");
   await access(distPath);
   app.use(express.static(distPath));
   app.use((_request, response) => response.sendFile(path.join(distPath, "index.html")));
@@ -3349,6 +3457,11 @@ const durableJobDesk = createJobDesk({
       context.progress(0.98, "完成草稿入库");
       return { draftId: result.draft.id, reused: result.reused, imageCount: result.draft.images.length };
     },
+    "draft-from-intake-review": async (payload, context) => {
+      const input = payload as { reviewId?: string };
+      if (!input?.reviewId) throw new ClassifiedJobError("任务缺少导入复核 ID", "deterministic");
+      return executeReviewGeneration(input.reviewId, context.progress);
+    },
     "draft-from-editorial-intake": async (payload, context) => {
       const input = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
       const runId = typeof input.runId === "string" ? input.runId : "";
@@ -3358,7 +3471,7 @@ const durableJobDesk = createJobDesk({
         : undefined;
       if (!runId || !candidateId) throw new Error("任务缺少候选来源标识");
       const result = await editorialIntakeDesk.createDraft(
-        { runId, candidateId, intent },
+        { runId, candidateId, intent, sourceMode: ["source", "translation", "curation"].includes(String(input.sourceMode)) ? input.sourceMode as "source" | "translation" | "curation" : undefined },
         (progress, stage) => context.progress(progress, stage),
       );
       context.progress(0.99, "统一成稿链路已完成");

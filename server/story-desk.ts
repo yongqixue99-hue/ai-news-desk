@@ -1,3 +1,4 @@
+import { assessPracticeOpportunity } from "./practice-opportunity.js";
 import { matchesHomeKeyword } from "./home-layout.js";
 import { createHash } from "node:crypto";
 import { assessEditorialOpportunity, editorialExclusionFor, hasAnnouncementLead, mayShareEditorialEvent, normalizeEditorialText, opportunityPriority } from "./newsworthiness.js";
@@ -281,6 +282,15 @@ const clustersFor = (state: WorkflowState) => {
     const owner = exactIndex.get(normalizedUrl(record.candidate.evidenceGroupUrl));
     if (owner) owner.records.push(record);
   }
+  // Attach non-visible evidence only to an existing event. This pool cannot
+  // create recommendations of its own or borrow a different date section.
+  for (const run of state.runs) for (const candidate of run.evidenceCandidates ?? []) {
+    if (run.candidates.some(item => item.id === candidate.id)) continue;
+    const via = run.discoveryTrace?.find(entry => entry.rawId === candidate.rawId)?.candidateId;
+    const owner = clusters.find(cluster => cluster.records.some(record => record.runId === run.id && record.candidate.id === via))
+      ?? exactKeysFor(candidate).map(key => exactIndex.get(key)).find(Boolean);
+    if (owner && !owner.records.some(record => record.runId === run.id && record.candidate.id === candidate.id)) owner.records.push({ runId: run.id, candidate });
+  }
   return clusters;
 };
 
@@ -426,7 +436,7 @@ const explanationFor = (
       ? detailed.unknownsZh
       : basis === "title"
         ? ["当前只有标题级证据，正文细节、数据与实际影响仍未确认。"]
-        : ["当前为扫描级摘要；打开后会继续读取来源正文并补齐具体细节。"],
+        : ["当前为扫描级摘要；可显式补读来源正文并生成速读。"],
     qualityFlags: detailed?.qualityFlags ?? [],
     sources,
     generatedAt: selected.candidate.briefing?.generatedAt,
@@ -840,6 +850,11 @@ export const buildStories = (state: WorkflowState, now = new Date().toISOString(
       opportunity.label = "官方预告";
       opportunity.reason = "厂商已发布预告，正式上线时间和可用范围仍需核对。";
     }
+    if (opportunity.lane === "interesting") {
+      opportunity.practice = assessPracticeOpportunity({ official: originalSignal?.sourceRole === "official", title: story.originalTitle, excerpt: originalSignal?.excerpt ?? story.signals[0]?.excerpt,
+        urls: story.signals.filter(signal => signal.factBearing ?? !signal.isCommunity).map(signal => signal.url) });
+      if (opportunity.practice) opportunity.reason = opportunity.practice.angle;
+    }
     const strongest = story.signals.map((signal) => preferences.get(signal.candidateId)).filter((candidate) => candidate !== undefined)
       .sort((left, right) => Math.abs(right.personalizationScore ?? 0) - Math.abs(left.personalizationScore ?? 0))[0];
     const topicMatch = state.settings.editorialProfileEnabled !== false
@@ -865,6 +880,7 @@ const standardTodayWindowHours = 48;
 const confirmedModelLaunchCatchupHours = modelLaunchCatchupHours;
 
 const isWithinTodayWindow = (story: StoryView) => {
+  if (story.opportunity?.practice && story.ageHours <= 30 * 24) return true;
   if (story.ageHours <= standardTodayWindowHours) return true;
   const officialFacet = story.releaseDossier?.facets.find((facet) => facet.id === "official");
   const hasKnownFirstPartyOwner = story.signals.some((signal) => signal.factBearing
@@ -927,7 +943,17 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
   const autoUsableMaterials = state.materials.filter((material) => isNeutralImagePublishReady(material, now));
   const sourceImageReadyCount = active.filter((story) => (story.localImageCount ?? 0) >= 2).length;
   const publishReadyStoryCount = active.filter((story) => (story.publishReadyImageCount ?? 0) >= 2).length;
-  const interesting = focused ? ready.filter((story) => story.opportunity?.lane === "interesting").slice(0, 2) : [];
+  const practiceAuthors = new Set<string>();
+  const interesting = focused ? ready.filter((story) => {
+    if (!story.opportunity?.practice) return false;
+    const signal = story.signals.find(signal => !signal.isCommunity) ?? story.signals[0];
+    let publisher = signal?.sourceName || "unknown";
+    try { const url = new URL(signal?.url || ""); publisher = url.hostname + (url.hostname === "github.com" ? `/${url.pathname.split("/")[1]}` : ""); } catch { /* Keep recorded source identity. */ }
+    const author = signal?.author?.trim().toLocaleLowerCase();
+    const identity = author ? `author:${author}` : `publisher:${publisher}`;
+    if (practiceAuthors.has(identity)) return false;
+    practiceAuthors.add(identity); return true;
+  }).slice(0, 2) : [];
   const news = focused ? ready.filter((story) => story.opportunity?.lane !== "interesting") : ready;
   const visibleNews = news.slice(0, recommendationTarget - interesting.length);
   const visibleRecommendations = [...visibleNews, ...interesting];
@@ -947,7 +973,7 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
     "routine-update": 0,
   });
   const recommendationDropReasons = [
-    { code: "outside-window" as const, label: "超过常规 48 小时或模型发布 7 天窗口", count: dropCounts["outside-window"] },
+    { code: "outside-window" as const, label: "超过新闻 48 小时、发布 7 天或实践 30 天窗口", count: dropCounts["outside-window"] },
     { code: "already-drafted" as const, label: "已经进入成稿流程", count: dropCounts["already-drafted"] },
     { code: "evidence-blocked" as const, label: "证据不足，暂留观察", count: dropCounts["evidence-blocked"] },
     { code: "ignored-or-published" as const, label: "已忽略或已发布", count: dropCounts["ignored-or-published"] },

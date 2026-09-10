@@ -2,6 +2,7 @@ import { useEffect, useRef, type RefObject } from "react";
 
 const FOCUSABLE_SELECTOR = [
   "a[href]",
+  "summary",
   "button:not([disabled])",
   "input:not([disabled]):not([type='hidden'])",
   "select:not([disabled])",
@@ -23,7 +24,7 @@ export const getNextFocusIndex = (
 const getFocusableElements = (container: HTMLElement) =>
   Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
     const style = window.getComputedStyle(element);
-    return !element.hasAttribute("hidden") && style.visibility !== "hidden" && style.display !== "none";
+    return element.tabIndex >= 0 && element.getClientRects().length > 0 && !element.hasAttribute("hidden") && style.visibility !== "hidden" && style.display !== "none";
   });
 
 interface UseDialogA11yOptions {
@@ -80,21 +81,21 @@ export const useDialogA11y = <T extends HTMLElement = HTMLDivElement>({
         return;
       }
 
-      const currentIndex = focusableElements.indexOf(document.activeElement as HTMLElement);
-      const nextIndex = getNextFocusIndex(
-        focusableElements.length,
-        currentIndex,
-        event.shiftKey ? -1 : 1,
-      );
-      event.preventDefault();
-      focusableElements[nextIndex]?.focus();
+      const active = document.activeElement;
+      const outside = !dialog.contains(active);
+      if (event.shiftKey && (active === focusableElements[0] || active === dialog || outside)) {
+        event.preventDefault(); focusableElements.at(-1)?.focus();
+      } else if (!event.shiftKey && (active === focusableElements.at(-1) || outside)) {
+        event.preventDefault(); focusableElements[0]?.focus();
+      }
+
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", handleKeyDown);
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     };
   }, [closeOnEscape, initialFocusRef, open]);
 

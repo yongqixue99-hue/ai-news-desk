@@ -1,3 +1,4 @@
+import { confirmDraftInState } from "./draft-confirmation.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createDefaultState } from "./defaults.js";
@@ -90,4 +91,44 @@ test("image-post revisions preserve the Xiaoheihe editor surface", () => {
   restoreDraftRevision(state, draft, revision, new Date("2026-08-13T00:01:00.000Z"));
 
   assert.equal(draft.contentFormat, "image-post");
+});
+
+test("confirmation survives autosave and keeps the immutable initial baseline", () => {
+  const state = createDefaultState(); const draft = makeDraft();
+  appendDraftRevision(state, draft, "initial");
+  const initial = structuredClone(draft.editorialBaseline!.initial.snapshot);
+  for (let i = 0; i < 35; i++) { draft.title = `人工修改 ${i}`; appendDraftRevision(state, draft, "auto", new Date(Date.now() + i * 600000)); }
+  const result = confirmDraftInState(state, draft, draft.updatedAt);
+  assert.equal(result.learningEligible, true);
+  assert.deepEqual(result.before, initial);
+  assert.equal(result.after?.title, "人工修改 34");
+  assert.deepEqual(draft.editorialBaseline!.initial.snapshot, initial);
+  assert.ok(state.draftRevisions.some((revision) => revision.kind === "initial"));
+  assert.ok(state.draftRevisions.some((revision) => revision.kind === "confirmed"));
+  assert.equal(confirmDraftInState(state, draft, draft.updatedAt).reused, true);
+  assert.throws(() => confirmDraftInState(state, draft, "old-version"), /版本已变化/);
+});
+
+test("AI-assisted cycles do not train preferences; subsequent human edits can", () => {
+  const state = createDefaultState(); const draft = makeDraft();
+  appendDraftRevision(state, draft, "initial");
+  draft.title = "AI 修改的标题"; draft.aiAssistedSinceConfirmation = true;
+  appendDraftRevision(state, draft, "auto");
+  assert.equal(confirmDraftInState(state, draft, draft.updatedAt).learningEligible, false);
+  draft.title = "用户再次修改标题"; appendDraftRevision(state, draft, "auto");
+  const confirmed = confirmDraftInState(state, draft, draft.updatedAt);
+  assert.equal(confirmed.learningEligible, true);
+  assert.equal(confirmed.before?.title, "AI 修改的标题");
+  assert.equal(state.draftRevisions.filter((revision) => revision.kind === "confirmed").length, 2);
+});
+
+test("legacy drafts disclose missing initial history and only establish a first confirmation baseline", () => {
+  const state = createDefaultState(); const draft = makeDraft();
+  assert.equal(confirmDraftInState(state, draft, draft.updatedAt).learningEligible, false);
+  assert.equal(draft.editorialBaseline?.initial.origin, "legacy");
+});
+
+test("source-change review decisions remain attached to their historical document",()=>{
+ const state=createDefaultState(),draft=makeDraft();draft.sourceChangeReviews=[{url:"https://example.com",observedHash:"new",packageHash:"p",documentHash:"d",reason:"Reviewed this exact version",reviewedAt:"2026-09-10"}];
+ const revision=appendDraftRevision(state,draft,"manual");draft.sourceChangeReviews=[];restoreDraftRevision(state,draft,revision);assert.deepEqual(draft.sourceChangeReviews,revision.snapshot.sourceChangeReviews);assert.equal(draft.sourceChangeReviews?.[0]?.documentHash,"d");
 });

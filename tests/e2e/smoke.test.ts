@@ -175,6 +175,8 @@ test("production routes, strategy controls, completion, draft resumption and mob
     await page.getByText("还没有这个来源的选题", { exact: true }).waitFor();
     await page.getByRole("tab", { name: "V2EX", exact: true }).focus();
     await page.keyboard.press("ArrowLeft");
+    assert.equal(await page.getByRole("tab", { name: "GitHub", exact: true }).getAttribute("aria-selected"), "true");
+    await page.keyboard.press("Enter");
     assert.equal(await page.getByRole("tab", { name: "Hacker News", exact: true }).getAttribute("aria-selected"), "true");
     await page.getByRole("tab", { name: "知乎", exact: true }).click();
     await page.getByText("126 万热度 · 42 个回答", { exact: true }).waitFor();
@@ -182,12 +184,14 @@ test("production routes, strategy controls, completion, draft resumption and mob
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: path.join(os.tmpdir(), "newsdesk-swiss-zhihu-mobile.png"), fullPage: true });
+    await page.getByRole("button", { name: /我的待选题.*继续写作/u }).click();
     const pendingBox = await page.getByRole("region", { name: "我的待选题", exact: true }).boundingBox();
     assert.ok(pendingBox && pendingBox.width >= 300, "mobile pending list uses the full column");
     const railBoxes = await page.locator(".today-workspace-rail > section:visible").evaluateAll((elements) => elements.map((element) => {
       const rect = element.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom };
     }));
     assert.ok(railBoxes.every((box, index) => index === 0 || box.top >= railBoxes[index - 1]!.bottom), "mobile work sections do not overlap");
+    await page.getByRole("button", { name: "关闭选题队列", exact: true }).click();
     for (const width of [320, 820, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `topic layout at ${width}px`);
@@ -223,7 +227,7 @@ test("production routes, strategy controls, completion, draft resumption and mob
     // Replay a queued retry to verify the recovery controls without invoking an AI provider.
     let retryRequests = 0;
     let visibleJobSnapshot = [{ ...recoveryOriginal, status: "failed", error: "OpenAI 原文暂不可读：页面读取失败：HTTP 403" }];
-    await page.route(/\/api\/product\/jobs\?limit=12$/u, (route) => route.fulfill({ json: visibleJobSnapshot }));
+    await page.route(/\/api\/product\/jobs\?limit=100$/u, (route) => route.fulfill({ json: visibleJobSnapshot }));
     await page.route(`**/api/product/jobs/${recoveryOriginal.id}/retry`, (route) => {
       retryRequests++;
       const retry = { ...recoveryOriginal, id: "queued-recovery-fixture", status: "queued", stage: "核对原文", payload: { storyId: "recovery-fixture", retryOf: recoveryOriginal.id }, error: "" };
@@ -236,12 +240,12 @@ test("production routes, strategy controls, completion, draft resumption and mob
     await page.getByText("查看具体原因", { exact: true }).click();
     await page.getByText("OpenAI 原文暂不可读：页面读取失败：HTTP 403", { exact: true }).waitFor();
     await page.screenshot({ path: path.join(os.tmpdir(), "newsdesk-job-recovery.png") });
-    await page.getByRole("button", { name: "重试读取", exact: true }).click();
-    await page.getByText("核对原文 · 0%", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "重试任务", exact: true }).click();
+    await page.getByText("等待前面的主动任务完成", { exact: true }).waitFor();
     assert.equal(retryRequests, 1);
-    assert.equal(await page.getByRole("button", { name: "重试读取", exact: true }).count(), 0, "superseded failure is replaced by the new task");
+    assert.equal(await page.getByRole("button", { name: "重试任务", exact: true }).count(), 0, "superseded failure is replaced by the new task");
     await page.locator(".product-job-toggle").click();
-    await page.unroute(/\/api\/product\/jobs\?limit=12$/u);
+    await page.unroute(/\/api\/product\/jobs\?limit=100$/u);
     await page.unroute(`**/api/product/jobs/${recoveryOriginal.id}/retry`);
     for (const [route, heading] of [
       ["today", "今日编辑台"],
@@ -429,7 +433,7 @@ test("production routes, strategy controls, completion, draft resumption and mob
     readerStory.images = Array.from({ length: 4 }, (_, index) => ({ id: `figure-${index}`, url: `${origin}/fixture-chart.svg`, publicPath: "/fixture-chart.svg", localPath: "/fixture-only", sourceUrl: candidate.url, caption: `能力图表 ${index + 1}`, attribution: "测试来源", width: 900, height: 500, rights: "editorial-screenshot", captureKind: index === 1 ? "table" : "chart", selected: true }));
     readerStory.imageCount = readerStory.localImageCount = 4;
     await page.route("**/fixture-chart.svg", (route) => route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500"><rect width="900" height="500" fill="#eeeee8"/><text x="50" y="80" font-size="28">Capability chart fixture</text></svg>' }));
-    await page.route("**/api/today", (route) => route.fulfill({ json: readerToday }));
+    await page.route("**/api/today?*", (route) => route.fulfill({ json: readerToday }));
     await page.route(`**/api/stories/${readerStory.id}`, (route) => route.fulfill({ json: { story: readerStory, feedback: [], assetCollection: { sourceReports: [{ url: candidate.url, status: "partial", imageCount: 4, screenshotCount: 2, detail: "部分原图下载失败，已保留原链接" }] } } }));
     await page.route(`**/api/stories/${readerStory.id}/events`, (route) => route.fulfill({ json: {} }));
     let collected = false;
@@ -439,15 +443,19 @@ test("production routes, strategy controls, completion, draft resumption and mob
     });
     await page.getByRole("navigation", { name: "主导航", exact: true }).getByRole("button", { name: "今日", exact: true }).click();
     await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByRole("region", { name: "近期重要发布" }).getByRole("button").click();
+    await page.getByRole("button", { name: "查看 模型发布阅读器回归检查", exact: true }).click();
     const reader = page.getByRole("dialog", { name: "模型发布阅读器回归检查" });
     await reader.waitFor();
     assert.equal(await reader.locator(".story-package-builder").getAttribute("open"), null);
-    await reader.getByRole("navigation", { name: "事件视图" }).getByRole("button", { name: /图片与图表/u }).click();
+    await reader.getByRole("tablist", { name: "事件视图" }).getByRole("tab", { name: /图片与图表/u }).click();
     assert.equal(await reader.locator(".asset-contact-sheet button").count(), 4);
     await reader.getByRole("button", { name: "下一张图片", exact: true }).click();
     assert.equal(await reader.locator(".asset-kind").textContent(), "评测表格");
     assert.equal(await reader.getByRole("link", { name: "打开原文出处", exact: true }).getAttribute("href"), candidate.url);
+    await reader.getByRole("button", { name: "放大图片", exact: true }).click();
+    assert.equal(await reader.locator(".asset-preview-stage").evaluate(element => element.classList.contains("zoomed")), true);
+    await page.screenshot({ path: path.join(os.tmpdir(), "newsdesk-reader-image-zoom.png") });
+    await reader.getByRole("button", { name: "适应窗口", exact: true }).click();
     await reader.getByRole("button", { name: "收集原文图片与图表", exact: true }).click();
     await reader.getByText("这篇原文仍有素材缺口", { exact: true }).waitFor();
     assert.equal(collected, true);

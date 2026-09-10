@@ -53,6 +53,7 @@ export const publicationRevisionHash = (
   platform: PublicationPlatform,
 ) => sha256({
   platform,
+  evidence: { packageId: draft.provenance.contentPackageId, facts: draft.factClaims, sources: draft.sources, uncertainties: draft.uncertainties, sourceMaterial: draft.sourceMaterial },
   contentFormat: draft.contentFormat ?? "article",
   title: normalizedText(draft.title),
   bodyHtml: normalizedDraftBodyHtml(draft),

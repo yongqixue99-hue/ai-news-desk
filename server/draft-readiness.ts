@@ -1,3 +1,5 @@
+import { bindDraftCheck } from "./draft-check-binding.js";
+import { draftVisualFindings } from "./draft-visual-check.js";
 import { evaluateMaterialPublishEligibility, normalizeGovernedMaterial } from "./material-governance.js";
 import { inspectLocalImageFile } from "./image-readiness.js";
 import { buildDraftEvidenceView } from "./draft-evidence-view.js";
@@ -57,12 +59,14 @@ export const evaluateDraftReadiness = (
     };
   });
   const blockers = [
+    ...draftVisualFindings(draft).map(finding => finding.message),
     ...factBlockers,
     ...sourceMaterialBlockers,
     ...imageReviews.flatMap((review) => review.blockers.map((item) => `图片：${item}`)),
   ];
   const warnings = imageReviews.flatMap((review) => review.warnings);
   return {
+    binding: bindDraftCheck(draft),
     draftId: draft.id,
     checkedAt,
     platform,

@@ -1,3 +1,4 @@
+import { candidateFromRun } from "./candidate-pool.js";
 import { buildCandidateBriefingEvidence } from "./candidate-briefing.js";
 import { extractPage } from "./extractor.js";
 import { enrichCandidateBriefings } from "./horizon.js";
@@ -33,14 +34,14 @@ export const enrichStoryExplanation = async (storyId: string) => {
   const signal = preferredSignals[0];
   if (!signal) throw new Error("这个 Story 没有可读取的来源");
   const run = state.runs.find((entry) => entry.id === signal.runId);
-  const candidate = run?.candidates.find((entry) => entry.id === signal.candidateId);
+  const candidate = candidateFromRun(run, signal.candidateId);
   if (!run || !candidate) throw new Error("Story 来源已不存在");
 
   const extractedSourceText = new Map<string, string>();
   try {
     const page = await extractPage(candidate.canonicalUrl || candidate.url, 0);
     if (candidate.technicalArticle) await updateState(current => {
-      const target = current.runs.find(entry => entry.id === run.id)?.candidates.find(entry => entry.id === candidate.id);
+      const target = candidateFromRun(current.runs.find(entry => entry.id === run.id), candidate.id);
       if (target) applyTechnicalSourceMetadata(target, page);
     });
     if (page.text.trim().length >= 80) extractedSourceText.set(candidate.id, page.text.slice(0, 12_000));

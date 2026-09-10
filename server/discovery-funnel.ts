@@ -21,7 +21,7 @@ export const collectDiscoveryCandidates = (
   });
   const matched = dated.filter((item) => rawItemMatchesSearch(item, filters, timeOptions));
   const unique = deduplicateDiscoveryItems(matched);
-  const ranked = rankCandidatesWithDiagnostics(unique.map((item) => {
+  const evidenceCandidates = unique.map((item) => {
     const candidate = rawItemToCandidate(item, options.windowHours, options.topicIds, now);
     const sources = options.sources ?? [];
     const source = sources.find((entry) => entry.id === item.metadata?.source_id)
@@ -29,7 +29,8 @@ export const collectDiscoveryCandidates = (
         || (entry.kind === candidate.sourceType && sources.filter((other) => other.kind === entry.kind).length === 1));
     if (source && !candidate.sourceRole) candidate.sourceRole = sourceRoleFor(source);
     return candidate;
-  }), options.feedback, options.personalizationEnabled);
+  });
+  const ranked = rankCandidatesWithDiagnostics(evidenceCandidates, options.feedback, options.personalizationEnabled);
   const labels: Record<string, string> = {
     "missing-published-at": "缺少原始发布时间", "invalid-published-at": "发布时间无法识别",
     "future-published-at": "发布时间在未来", "outside-date-range": "超出所选日期", "outside-window": "超出采集时间窗口",
@@ -50,5 +51,15 @@ export const collectDiscoveryCandidates = (
     unavailable: items.filter((item) => item.metadata?.date_verification === "unavailable").length,
     deferred: items.filter((item) => item.metadata?.date_verification === "pending-limit").length,
   };
-  return { candidates: ranked.candidates, funnel };
+  const trace = items.map(item => {
+    const time = rawItemTimeRejectionReason(item, filters, timeOptions);
+    const duplicate = !unique.includes(item) && matched.includes(item);
+    const original = duplicate ? unique.find(other => deduplicateDiscoveryItems([other, item]).length === 1) : item;
+    const decision = ranked.decisions.find(entry => entry.rawId === original?.id);
+    return { rawId: item.id, url: item.url, title: item.title, sourceId: typeof item.metadata?.source_id === "string" ? item.metadata.source_id : undefined,
+      publishedAt: item.published_at, observedAt: item.fetched_at, dateBasis: typeof item.metadata?.date_basis === "string" ? item.metadata.date_basis : undefined,
+      stage: time ?? (!matched.includes(item) ? "keyword-mismatch" : duplicate ? "duplicate-url" : decision?.stage ?? "unknown"),
+      candidateId: decision?.candidateId, matchedBy: duplicate ? "url" as const : decision?.stage === "merged-event" ? "title" as const : undefined };
+  });
+  return { candidates: ranked.candidates, funnel, trace, evidenceCandidates };
 };

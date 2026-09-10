@@ -1,3 +1,5 @@
+import { candidatePool } from "./candidate-pool.js";
+import { captureRecommendationSnapshot } from "./discovery-trace.js";
 import { randomUUID } from "node:crypto";
 import { createSourceDesk } from "./source-desk.js";
 import { collectDiscoveryCandidates } from "./discovery-funnel.js";
@@ -205,7 +207,7 @@ const executeCandidateBriefingEnrichment = async (
   const state = await readState();
   const run = state.runs.find((entry) => entry.id === runId);
   if (!run) throw new Error("运行记录不存在");
-  const candidates = run.candidates.filter((candidate) =>
+  const candidates = candidatePool(run, candidateIds).filter((candidate) =>
     (!candidateIds || candidateIds.has(candidate.id)) && (
       force
       || !candidate.briefing
@@ -224,7 +226,7 @@ const executeCandidateBriefingEnrichment = async (
     const target = current.runs.find((entry) => entry.id === runId);
     if (!target) throw new Error("运行记录不存在");
     if (!canApplyCollectionResult(target, signal)) return target;
-    for (const candidate of target.candidates) {
+    for (const candidate of [...target.candidates, ...(target.evidenceCandidates ?? [])]) {
       const generatedCandidate = generatedById.get(candidate.id);
       if (generatedCandidate) {
         candidate.briefing = generatedCandidate.briefing;
@@ -539,13 +541,13 @@ export const executeCollection = async (runId: string) => {
     );
 
     const preferenceState = await readState();
-    const { candidates, funnel } = collectDiscoveryCandidates(rawItems, {
+    const { candidates, funnel, trace, evidenceCandidates } = collectDiscoveryCandidates(rawItems, {
       windowHours: run.windowHours, topicIds, now: Date.now(),
       filters: { dateFrom: run.dateFrom, dateTo: run.dateTo, keywords: run.keywords },
       sources: selectedSources, feedback: preferenceState.candidateFeedback,
       personalizationEnabled: preferenceState.settings.personalizationEnabled,
     });
-    await patchRun(runId, { filteredRawCount: funnel.matchedCount, collectionFunnel: funnel });
+    await patchRun(runId, { filteredRawCount: funnel.matchedCount, collectionFunnel: funnel, discoveryTrace: trace, evidenceCandidates });
     if (funnel.rejections.length) await appendLog(runId, "去重与评分",
       funnel.rejections.map((entry) => `${entry.label} ${entry.count} 条`).join("；"), "info");
     const sourceResults = sourceResultsForRun(selectedSources, rawItems, candidates, batch.failures, batch.routeResults);
@@ -598,6 +600,7 @@ export const executeCollection = async (runId: string) => {
       const targetRun = current.runs.find((entry) => entry.id === runId);
       if (!targetRun) return;
       if (!markCollectionReady(targetRun, completedAt)) return;
+      targetRun.recommendationSnapshot = captureRecommendationSnapshot(current, completedAt);
       clearResolvedCollectionFailures(current, runId);
       clearRetriedCollectionFailures(current, runId);
       appendWorkflowNotification(current, {

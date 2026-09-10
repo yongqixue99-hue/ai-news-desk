@@ -81,3 +81,44 @@ test("catch-up rejects rumours, recaps, promotional pages and modification-only 
   const verified = { ...base, metadata: { ...base.metadata, source_format: "sitemap", date_basis: "sitemap-lastmod", date_verification: "verified" } };
   assert.equal(collectDiscoveryCandidates([verified], { now, windowHours: 48, topicIds: ["ai"] }).candidates.length, 1);
 });
+
+test("event trace names the first rejection and retains merged factual candidates", () => {
+  const rows = [item("keep"), item("old", { published_at: "2026-08-01T00:00:00Z" }), item("missing", { published_at: undefined }), item("copy", { url: "https://example.com/keep?utm_source=x" }), item("official-copy", { url: "https://other.example/article" })];
+  const result = collectDiscoveryCandidates(rows, { now, windowHours: 24, topicIds: ["ai"] });
+  assert.equal(result.trace.find(row => row.rawId === "old")?.stage, "outside-window");
+  assert.equal(result.trace.find(row => row.rawId === "missing")?.stage, "missing-published-at");
+  assert.equal(result.trace.find(row => row.rawId === "copy")?.stage, "duplicate-url");
+  assert.equal(result.trace.filter(row => row.stage === "merged-event").length, 1);
+  assert.equal(result.evidenceCandidates.length, 2);
+  assert.ok(result.trace.find(row => row.stage === "merged-event")?.candidateId);
+});
+
+test("trace diagnoses an actual public release URL from saved observations without a fetch", async () => {
+  const { createDefaultState } = await import("./defaults.js");
+  const { traceDiscoveryUrl } = await import("./discovery-trace.js");
+  const state = createDefaultState();
+  const url = "https://openai.com/index/gpt-6-astra/";
+  const result = collectDiscoveryCandidates([item("real-link", { url, published_at: "2026-08-01T00:00:00Z" })], { now, windowHours: 24, topicIds: ["ai"] });
+  state.runs = [{ id: "replay", createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(), status: "ready", stage: "done", scheduled: false, sourceIds: [], windowHours: 24, rawCount: 1, candidates: result.candidates, discoveryTrace: result.trace, logs: [] }];
+  assert.equal(traceDiscoveryUrl(state, url + "?utm_source=x", new Date(now).toISOString()).observations[0]?.stage, "outside-window");
+  assert.match(traceDiscoveryUrl(state, "https://unobserved.example/news").displayReason, /不能断言/u);
+  assert.throws(() => traceDiscoveryUrl(state, "file:///secret"));
+});
+
+test("trace reports recorded recommendation time and never invents history for old runs",async()=>{
+ const {createDefaultState}=await import("./defaults.js");const {captureRecommendationSnapshot,traceDiscoveryUrl}=await import("./discovery-trace.js");
+ const state=createDefaultState();const url="https://openai.com/index/gpt-6-astra/";
+ const result=collectDiscoveryCandidates([item("launch",{url,title:"OpenAI launches GPT-6 Astra",content:"OpenAI releases the GPT-6 Astra AI model API.",metadata:{feed_name:"OpenAI",source_role:"official"}})],{now,windowHours:48,topicIds:["ai"]});
+ state.runs=[{id:"r",createdAt:new Date(now).toISOString(),updatedAt:new Date(now).toISOString(),status:"ready",stage:"done",scheduled:false,sourceIds:[],windowHours:48,rawCount:1,candidates:result.candidates,discoveryTrace:result.trace,logs:[]}];
+ const time=new Date(now).toISOString();assert.equal(traceDiscoveryUrl(state,url,time).firstRecordedRecommendationAt,undefined);
+ const snapshot=captureRecommendationSnapshot(state,time);assert.ok(snapshot.stories.length);
+ state.runs[0]!.recommendationSnapshot=snapshot;assert.equal(traceDiscoveryUrl(state,url,time).firstRecordedRecommendationAt,time);
+});
+
+test("explicit evidence selection remains addressable without expanding default model work",async()=>{
+ const {candidatePool,candidateFromRun}=await import("./candidate-pool.js");
+ const result=collectDiscoveryCandidates([item("visible"),item("merged",{url:"https://other.example/news"})],{now,windowHours:24,topicIds:["ai"]});
+ const run={id:"r",createdAt:new Date(now).toISOString(),updatedAt:new Date(now).toISOString(),status:"ready" as const,stage:"done",scheduled:false,sourceIds:[],windowHours:24,rawCount:2,candidates:result.candidates,evidenceCandidates:result.evidenceCandidates,logs:[]};
+ const hidden=result.evidenceCandidates.find(candidate=>!run.candidates.some(visible=>visible.id===candidate.id))!;assert.ok(hidden);
+ assert.equal(candidatePool(run).length,1);assert.equal(candidateFromRun(run,hidden.id)?.url,hidden.url);assert.equal(candidatePool(run,new Set([hidden.id]))[0]?.id,hidden.id);
+});

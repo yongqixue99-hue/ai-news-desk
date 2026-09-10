@@ -1,5 +1,5 @@
-import { composeCommunityFeed } from "./community-feed.js";
-import type { Candidate, WorkflowState } from "./types.js";
+import { composeCommunityFeed, type CommunitySupportingSource } from "./community-feed.js";
+import type { Candidate, SourceConfig, WorkflowState } from "./types.js";
 import type { ZhihuHotItem, ZhihuHotView } from "./zhihu-hotlist.js";
 
 export const communityPlatforms = ["zhihu", "hackernews", "v2ex", "github"] as const;
@@ -13,6 +13,9 @@ export interface TopicFeedItem {
   summary?: string;
   rank?: number;
   metric?: string;
+  supportingSources?: CommunitySupportingSource[];
+  metricBasis?: string;
+  basis?: "full-source" | "excerpt" | "title";
   observedAt?: string;
   selected: boolean;
   runId?: string;
@@ -29,6 +32,13 @@ export interface TopicFeedView {
 }
 
 const hostname = (value?: string) => { try { return new URL(value ?? "").hostname; } catch { return ""; } };
+const sourcePlatform = (source: SourceConfig): CommunityPlatform | undefined => {
+  if (source.kind === "hackernews" || source.kind === "github") return source.kind;
+  const host = hostname(source.homepageUrl || source.url);
+  if (host === "news.ycombinator.com") return "hackernews";
+  if (/(^|\.)v2ex\.com$/u.test(host)) return "v2ex";
+  return undefined;
+};
 const platformFor = (candidate: Candidate): CommunityPlatform | undefined => {
   const kind = candidate.sourceType.toLowerCase();
   const discussion = hostname(candidate.engagement?.discussionUrl);
@@ -69,19 +79,26 @@ export const buildTopicFeed = (state: WorkflowState, platform: CommunityPlatform
   // Filter before deduplication so a copy from another platform cannot replace
   // this platform's permalink or engagement units.
   const runs = state.runs.map((run) => ({ ...run, candidates: run.candidates.filter((candidate) => platformFor(candidate) === platform) }));
-  const feed = composeCommunityFeed(runs, { now, expiryHours: 7 * 24, limit: 80 });
-  const items = feed.items.map(({ runId, candidate }): TopicFeedItem => ({
-    id: `${runId}:${candidate.id}`, runId, candidateId: candidate.id,
+  const feed = composeCommunityFeed(state.runs, { now, expiryHours: 7 * 24, limit: 80, displayCandidate: candidate => platformFor(candidate) === platform });
+  const items = feed.items.map(({ runId, candidate, supportingSources, metrics }): TopicFeedItem => ({
+    id: `${runId}:${candidate.id}`, runId, candidateId: candidate.id, supportingSources, metricBasis: metrics?.basis,
     title: candidate.briefing?.titleZh || candidate.title,
     originalTitle: candidate.briefing?.titleZh ? candidate.title : undefined,
     url: candidate.url, discussionUrl: candidate.engagement?.discussionUrl,
-    summary: candidate.briefing?.summaryZh,
+    summary: candidate.briefing?.summaryZh, basis: candidate.briefing?.basis ?? (candidate.excerpt ? "excerpt" : "title"),
     observedAt: candidate.fetchedAt, selected: candidate.selected,
     metric: platform === "hackernews" ? [candidate.engagement?.points === undefined ? undefined : `${candidate.engagement.points} points`,
       candidate.engagement?.comments === undefined ? undefined : `${candidate.engagement.comments} 条评论`].filter(Boolean).join(" · ")
       : platform === "v2ex" && candidate.engagement?.comments !== undefined ? `${candidate.engagement.comments} 条回复` : undefined,
   }));
-  return { platform, kind: "collection", status: !items.length ? "empty" : feed.lastUpdatedAt && Date.parse(now) - Date.parse(feed.lastUpdatedAt) > 24 * 3_600_000 ? "stale" : "ready", items, updatedAt: feed.lastUpdatedAt };
+  const sourceIds = new Set(state.sources.filter(source => sourcePlatform(source) === platform).map(source => source.id));
+  const latest = [...state.runs].sort((a, b) => Date.parse(b.collectedAt || b.updatedAt) - Date.parse(a.collectedAt || a.updatedAt))
+    .map(run => run.sourceResults?.filter(result => sourceIds.has(result.sourceId))).find(results => results?.length);
+  const failure = latest?.find(result => result.healthImpact === "failure" || result.status === "error");
+  const hasRead = runs.some(run => run.candidates.length) || latest?.some(result => result.healthImpact === "success");
+  return { platform, kind: "collection", status: !items.length ? failure ? "unavailable" : hasRead ? "empty" : "unread"
+    : failure || (feed.lastUpdatedAt && Date.parse(now) - Date.parse(feed.lastUpdatedAt) > 24 * 3_600_000) ? "stale" : "ready",
+    items, updatedAt: feed.lastUpdatedAt, error: failure?.detail };
 };
 
 /** A user-selected headline enters StoryDesk as an explicitly unverified lead. */

@@ -1,8 +1,9 @@
+import { candidateFromRun } from "./candidate-pool.js";
 import { contentPackageDesk } from "./content-package-desk.js";
-import { createDraftFromPackage } from "./draft-desk.js";
+import { createDraftFromPackage, createSourceDraftFromPackage } from "./draft-desk.js";
 import { enrichStoryExplanation } from "./story-explanation-service.js";
 import { buildStories } from "./story-desk.js";
-import { readState } from "./storage.js";
+import { getLocalDatabase, readState } from "./storage.js";
 import type {
   AssignmentMode,
   ContentPackage,
@@ -21,6 +22,7 @@ export interface EditorialSignalRef {
 
 export interface EditorialDraftRequest extends EditorialSignalRef {
   intent?: EditorialIntent;
+  sourceMode?: "source" | "translation" | "curation";
 }
 
 export interface EditorialDraftResult {
@@ -35,9 +37,10 @@ export type EditorialProgressReporter = (progress: number, stage: string) => voi
 
 const signalIdFor = (input: EditorialSignalRef) => `${input.runId}:${input.candidateId}`;
 
-const candidateFor = (state: WorkflowState, input: EditorialSignalRef) => state.runs
-  .find((run) => run.id === input.runId)?.candidates
-  .find((candidate) => candidate.id === input.candidateId);
+const candidateFor = (state: WorkflowState, input: EditorialSignalRef) => {
+  const run = state.runs.find((entry) => entry.id === input.runId);
+  return candidateFromRun(run, input.candidateId);
+};
 
 const storyFor = (state: WorkflowState, input: EditorialSignalRef, now: string) => buildStories(state, now)
   .find((story) => story.signals.some((signal) => signal.runId === input.runId && signal.candidateId === input.candidateId));
@@ -168,7 +171,7 @@ export const createEditorialIntakeDesk = (overrides: Partial<EditorialIntakeDepe
     async createDraft(input: EditorialDraftRequest, progress?: EditorialProgressReporter): Promise<EditorialDraftResult> {
       progress?.(0.04, "识别来源与推荐稿型");
       let view = await open(input);
-      if ((view.intake.sourceKind === "linked-community" || view.story.technicalArticle) && view.story.explanation.basis !== "full-source") {
+      if ((view.intake.sourceKind !== "self-contained-community" || view.story.technicalArticle) && view.story.explanation.basis !== "full-source") {
         progress?.(0.1, "读取原始来源正文");
         await dependencies.enrichExplanation(view.story.id);
         view = await open(input);
@@ -181,15 +184,22 @@ export const createEditorialIntakeDesk = (overrides: Partial<EditorialIntakeDepe
       const packageResult = await dependencies.buildPackage(
         view.story.id,
         selected.mode,
-        progress,
+        (value, stage) => progress?.(0.12 + Math.min(1, Math.max(0, value)) * 0.55, stage),
         2,
         { intent, reason: view.intake.recommendationReason },
       );
       if (packageResult.contentPackage.status !== "ready") {
         throw new Error(packageResult.contentPackage.blockers[0] || "素材包没有达到成稿条件");
       }
-      progress?.(0.94, "通过统一素材包生成草稿");
-      const draftResult = await dependencies.createDraft(packageResult.contentPackage.id, progress);
+      if (input.sourceMode && intent === "source") {
+        const database = await getLocalDatabase();
+        const variant = { ...packageResult.contentPackage, id: `${packageResult.contentPackage.id}_${input.sourceMode}`, sourceMode: input.sourceMode };
+        packageResult.contentPackage = database.getContentPackage<ContentPackage>(variant.id) ?? database.saveContentPackage(variant);
+      }
+      progress?.(0.70, "通过统一素材包生成草稿");
+      const draftResult = input.sourceMode === "source"
+        ? await createSourceDraftFromPackage(packageResult.contentPackage.id)
+        : await dependencies.createDraft(packageResult.contentPackage.id, (value, stage) => progress?.(0.70 + Math.min(1, Math.max(0, value)) * 0.29, stage));
       return {
         ...view,
         contentPackage: packageResult.contentPackage,

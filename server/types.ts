@@ -224,6 +224,10 @@ export type WritingMemoryKind =
   | "higher-image-density";
 
 export interface WritingMemoryEvidence {
+  confirmationId?: string;
+  context?: string;
+  beforeExcerpt?: string;
+  afterExcerpt?: string;
   eventId: string;
   draftId: string;
   summary: string;
@@ -575,6 +579,12 @@ export interface CollectionSummary {
   candidateCount: number;
 }
 
+export interface DiscoveryTraceEntry {
+  rawId: string; url: string; title: string; sourceId?: string;
+  publishedAt?: string; observedAt?: string; dateBasis?: string;
+  stage: string; candidateId?: string; matchedBy?: "url" | "title";
+}
+
 export interface CollectionFunnel {
   rawCount: number;
   dateAcceptedCount: number;
@@ -606,6 +616,10 @@ export interface WorkflowRun {
   filteredRawCount?: number;
   /** Immutable counts from this collection, before later candidate edits. */
   collectionFunnel?: CollectionFunnel;
+  discoveryTrace?: DiscoveryTraceEntry[];
+  recommendationSnapshot?: { computedAt: string; stories: Array<{ storyId: string; signals: Array<{ runId: string; candidateId: string; url: string }> }> };
+  /** Collected evidence excluded from presentation ranking; never auto-generates a draft. */
+  evidenceCandidates?: Candidate[];
   sourceIds: string[];
   scheduled: boolean;
   retryOfRunId?: string;
@@ -837,6 +851,7 @@ export interface ArticleAgentThread {
   updatedAt: string;
   sourceSnapshot: ArticleAgentSourceSnapshot;
   draftSnapshot: {
+    documentKey?: string;
     title: string;
     text: string;
     capturedAt: string;
@@ -986,7 +1001,17 @@ export interface DraftWritingBrief {
   communityEvidenceLabel?: string;
 }
 
+export interface DraftEditorialBaseline {
+  initial: { snapshot: DraftRevisionSnapshot; capturedAt: string; origin: "initial" | "legacy" };
+  confirmed?: { id: string; revisionId: string; contentHash: string; confirmedAt: string; snapshot: DraftRevisionSnapshot; learningEligible: boolean; reason?: string };
+}
+
 export interface ArticleDraft {
+  sourceChangeReviews?: Array<{url: string; observedHash: string; packageHash?: string; documentHash: string; reason: string; reviewedAt: string}>;
+  editorialBaseline?: DraftEditorialBaseline;
+  revisionId?: string;
+  /** Sticky until explicit confirmation; AI-assisted cycles are excluded from automatic learning. */
+  aiAssistedSinceConfirmation?: boolean;
   id: string;
   runId: string;
   candidateId: string;
@@ -1020,6 +1045,7 @@ export interface ArticleDraft {
   community: string;
   topics: string[];
   provenance: {
+    writingMemory?: import("./writing-preference-retrieval.js").WritingPreferencePlan;
     horizonRunId?: string;
     originalUrl: string;
     generatedBy: string;
@@ -1090,6 +1116,7 @@ export interface DraftGenerationAttempt {
 export type DraftSaveMode = "auto" | "manual";
 
 export interface DraftRevisionSnapshot {
+  sourceChangeReviews?: ArticleDraft["sourceChangeReviews"];
   contentFormat?: "article" | "image-post";
   imagePostImageIds?: string[];
   title: string;
@@ -1111,7 +1138,7 @@ export interface DraftRevision {
   draftId: string;
   createdAt: string;
   updatedAt: string;
-  kind: "auto" | "manual" | "restore-backup";
+  kind: "auto" | "manual" | "restore-backup" | "initial" | "confirmed" | "ai";
   label: string;
   snapshot: DraftRevisionSnapshot;
 }
@@ -1160,6 +1187,7 @@ export interface ImageRightsReview {
 }
 
 export interface DraftReadinessResult {
+  binding?: import("./draft-check-binding.js").DraftCheckBinding;
   draftId: string;
   checkedAt: string;
   platform: string;

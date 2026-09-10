@@ -1,3 +1,5 @@
+import { articleBlockSchema, structuredDraftBodyHtml, renderArticleBlock, type ArticleBlockFormat } from "./article-blocks.js";
+import { parseProviderJson } from "./provider-schema.js";
 import { restoreTechnicalSourceBlocks, technicalDraftGuidelines, technicalSourceFragments } from "./technical-draft.js";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -48,6 +50,7 @@ import type {
 } from "./types.js";
 
 interface GeneratedArticle {
+  blocks?: ArticleBlockFormat[];
   strategy: Exclude<ArticleDraftStrategy, "skip">;
   title: string;
   paragraphs: string[];
@@ -94,13 +97,14 @@ const articleSchema = {
     "topics",
   ],
   properties: {
+    blocks: articleBlockSchema,
     strategy: { type: "string", enum: ["brief", "synthesis", "community", "playbook", "curate", "commentary"] },
     title: { type: "string", minLength: 8, maxLength: 60 },
     paragraphs: {
       type: "array",
       minItems: 1,
-      maxItems: 8,
-      items: { type: "string", minLength: 10 },
+      maxItems: 200,
+      items: { type: "string", minLength: 1, maxLength: 30000 },
     },
     take: { type: "string", maxLength: 320 },
     sources: {
@@ -125,7 +129,7 @@ const articleSchema = {
         additionalProperties: false,
         required: ["paragraphIndex", "sourceUrls"],
         properties: {
-          paragraphIndex: { type: "integer", minimum: 0, maximum: 7 },
+          paragraphIndex: { type: "integer", minimum: 0 },
           sourceUrls: {
             type: "array",
             minItems: 1,
@@ -141,7 +145,7 @@ const articleSchema = {
         additionalProperties: false,
         required: ["paragraphIndex", "factIds"],
         properties: {
-          paragraphIndex: { type: "integer", minimum: 0, maximum: 7 },
+          paragraphIndex: { type: "integer", minimum: 0 },
           factIds: {
             type: "array",
             minItems: 0,
@@ -159,7 +163,7 @@ const articleSchema = {
         required: ["imageId", "afterParagraph", "caption"],
         properties: {
           imageId: { type: "string" },
-          afterParagraph: { type: "integer", minimum: 0, maximum: 7 },
+          afterParagraph: { type: "integer", minimum: 0 },
           caption: { type: "string" },
         },
       },
@@ -174,7 +178,7 @@ const articleSchema = {
         properties: {
           url: { type: "string" },
           sourceUrl: { type: "string" },
-          afterParagraph: { type: "integer", minimum: 0, maximum: 7 },
+          afterParagraph: { type: "integer", minimum: 0 },
           caption: { type: "string" },
           attribution: { type: "string" },
         },
@@ -208,7 +212,7 @@ const cleanGenerated = (article: GeneratedArticle) => ({
     .replace(/([\p{Script=Han}])([A-Za-z0-9])/gu, "$1 $2")
     .replace(/([A-Za-z0-9])([\p{Script=Han}])/gu, "$1 $2")
     .replace(/\s{2,}/gu, " "),
-  paragraphs: article.paragraphs.map((paragraph) => paragraph
+  paragraphs: article.paragraphs.map((paragraph, index) => article.blocks?.find(block => block.paragraphIndex === index)?.kind === "code" ? paragraph : paragraph
     .trim()
     .replace(/^(?:需要区分的是|需要指出的是|值得注意的是|更重要的是)[，,]\s*/u, ""))
     .filter(Boolean),
@@ -227,6 +231,14 @@ const httpUrl = (value: unknown) => {
   } catch {
     return undefined;
   }
+};
+
+const evidenceUrl = (value: unknown) => {
+  if (typeof value === "string" && /^\/media\/[a-zA-Z0-9_./%~-]+$/u.test(value)) {
+    const decoded = decodeURIComponent(value);
+    if (!decoded.split("/").some((part) => part === ".." || part === ".") && !decoded.includes("\\")) return value;
+  }
+  return httpUrl(value);
 };
 
 const normalizedEvidenceUrl = sourceSnapshotKey;
@@ -403,7 +415,7 @@ export const parseGeneratedArticle = (rendered: string) => {
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/, "");
-  const parsed = JSON.parse(withoutFence) as Partial<GeneratedArticle>;
+  const parsed = parseProviderJson<GeneratedArticle>(withoutFence, articleSchema);
   if (
     !["brief", "synthesis", "community", "playbook", "curate", "commentary"].includes(String(parsed.strategy))
     || typeof parsed.title !== "string"
@@ -414,11 +426,22 @@ export const parseGeneratedArticle = (rendered: string) => {
   ) {
     throw new Error("模型返回的文章结构不完整，请重试或更换模型");
   }
-  const paragraphs = parsed.paragraphs.map((paragraph) => paragraph.trim()).filter(Boolean);
+  const paragraphs = parsed.paragraphs.map((paragraph, index) => parsed.blocks?.find(block => block.paragraphIndex === index)?.kind === "code" ? paragraph : paragraph.trim());
+  if (paragraphs.some(paragraph => !paragraph.trim())) throw new Error("正文块不能为空");
+  if (paragraphs.join("\n").length > 100_000) throw new Error("正文超过 100000 字符预算，请拆分稿件");
+  for (const entries of [parsed.paragraphEvidence, parsed.paragraphFactIds, parsed.blocks ?? []]) {
+    const seen = new Set<number>();
+    for (const entry of entries) {
+      if (entry.paragraphIndex >= paragraphs.length || seen.has(entry.paragraphIndex)) throw new Error("正文或证据块索引超出范围或重复");
+      seen.add(entry.paragraphIndex);
+    }
+  }
+  for (const image of [...parsed.imageSelections, ...parsed.discoveredImages]) if (image.afterParagraph >= paragraphs.length) throw new Error("图片索引超出正文范围");
+  for (const block of parsed.blocks ?? []) renderArticleBlock(paragraphs[block.paragraphIndex]!, block);
   if (!paragraphs.length) throw new Error("模型没有返回正文，请重试或更换模型");
   const sources = parsed.sources.flatMap<DraftSource>((source) => {
     if (!isRecord(source)) return [];
-    const url = httpUrl(source.url);
+    const url = evidenceUrl(source.url);
     const label = typeof source.label === "string" ? source.label.trim().slice(0, 160) : "";
     const kind = source.kind;
     if (!url || !label || !["original-report", "primary", "supporting"].includes(String(kind))) return [];
@@ -428,7 +451,7 @@ export const parseGeneratedArticle = (rendered: string) => {
     ? parsed.paragraphEvidence.flatMap<GeneratedArticle["paragraphEvidence"][number]>((entry) => {
         if (!isRecord(entry) || !Number.isInteger(entry.paragraphIndex) || !Array.isArray(entry.sourceUrls)) return [];
         const sourceUrls = [...new Set(entry.sourceUrls.flatMap((value) => {
-          const url = httpUrl(value);
+          const url = evidenceUrl(value);
           return url ? [url] : [];
         }))];
         return sourceUrls.length ? [{ paragraphIndex: Number(entry.paragraphIndex), sourceUrls }] : [];
@@ -470,6 +493,7 @@ export const parseGeneratedArticle = (rendered: string) => {
       })
     : [];
   return cleanGenerated({
+    blocks: parsed.blocks,
     strategy: parsed.strategy as GeneratedArticle["strategy"],
     title: parsed.title.slice(0, 80),
     paragraphs,
@@ -488,6 +512,8 @@ export const acceptGeneratedReview = (
   article: GeneratedArticle,
   reviewed: GeneratedArticle,
 ) => {
+  if (JSON.stringify(reviewed.blocks ?? []) !== JSON.stringify(article.blocks ?? [])) throw new Error("自动审校改变了正文结构");
+  for (const block of article.blocks ?? []) if (["table", "code", "quote"].includes(block.kind) && reviewed.paragraphs[block.paragraphIndex] !== article.paragraphs[block.paragraphIndex]) throw new Error("自动审校不能重写代码、表格或引用原文");
   if (reviewed.strategy !== article.strategy) throw new Error("自动审校改变了稿型");
   if (reviewed.paragraphs.length !== article.paragraphs.length) throw new Error("自动审校改变了段落数量");
   const factAudits = [
@@ -564,7 +590,7 @@ ${skills.filter((skill) => skill.compatibility === "codex-native").length
 14. 返回严格符合 JSON Schema 的 JSON，不要写 Markdown 或解释。
 `;
 
-const apiSystemPrompt = `你是新闻编辑工作台的中文成稿引擎。只能依据用户提供的候选新闻、正文摘录、ContentPackage 和来源信息写作，不能假装已经浏览网页。evidenceBoundary 为 content-package 时，素材包是唯一事实边界，不能补充模型记忆中的事实、来源或图片。先服从 contentIntent：news 必须以新闻或官方来源建立事实主干，社区只可作为选题发现线索，不能用评论替代新闻内容；source 只处理 sourceMaterials 中冻结的原始材料，按原文顺序保留具体信息和作者语气，中文原文做最小整理，外文做忠实中文翻译，不添加背景、评价、统一模板或虚构过渡，也不能把作者陈述写成已独立核验事实；community 先把事件事实讲清，再使用达到采样门槛的真实观点。再遵守 draftStrategy：brief 只把单一事件说清；按冻结事实的信息密度决定篇幅，覆盖关键事件、机制、影响与适用限制；短而完整即可，不为字数或段落数补背景，也不能同义改写凑字；synthesis 组织多源共识与差异；community 先写事实主干，再保留达到采样门槛的真实社区样本；playbook 只整理可验证步骤；curate 在 news 意图下只做导读与有限引用，在 source 意图下生成带明确来源归属的私有原文工作副本；commentary 只有存在明确 userAngle 时可采用。社区热度不能替代事实来源，少于 5 条社区样本时不得让评论主导正文。storyContext.discoveredViaCommunity 为 true 且 contentIntent 为 news 时，社区仍然只是发现渠道：标题、摘要和首句不得出现社区平台名、热议、讨论、受到关注或重新受到注意，必须直接说明非社区来源支持的项目、产品或公司事实；若项目不是当天发布，就写成项目介绍，不能虚构“重新走红”。只有 contentIntent 为 community 时讨论本身才可成为正文主角。不要为了制造新品新闻，把依赖升级、自动更新或 README 微调抬成标题。paragraphs 是直接交给普通读者的文章，严禁写“输入资料、证据文本、素材包、当前样本、讨论串标题、后续编辑、发布前核验”等后台处理语言。标题具体，开头直接交代谁做了什么；每段都要增加新信息。不要写无关的小时、分钟或 UTC，也不要用“需要指出的是、需要区分的是、值得注意的是”等模型路标。数字、人名、模型名和日期必须来自输入；素材包任务的日期只能取 facts 明确写出的事件日期，不能将 sources.publishedAt 自动写成事件发生日，未记载时省略。无法核实的内容放入 uncertainties。paragraphEvidence 必须逐段给出直接支持正文的来源 URL，社区链接不能冒充产品或公司事实来源。素材包任务的 paragraphFactIds 必须逐段列出实际使用的 ContentPackage fact ID，不能把未写入正文的事实登记为已使用。图片必须遵守 editorialPriority：1 原新闻图、2 原文截图、3 人物或公司身份图、4 事件相关图、5 AI 生成兜底；同一画面的不同分辨率只能选择一张，低优先级不能挤掉高优先级，只有 1–4 级都不可用时才能选择第 5 级。严格返回符合给定 JSON Schema 的 JSON，不要输出 Markdown。`;
+const apiSystemPrompt = `你是新闻编辑工作台的中文成稿引擎。只能依据用户提供的候选新闻、正文摘录、ContentPackage 和来源信息写作，不能假装已经浏览网页。evidenceBoundary 为 content-package 时，素材包是唯一事实边界，不能补充模型记忆中的事实、来源或图片。先服从 contentIntent：news 必须以新闻或官方来源建立事实主干，社区只可作为选题发现线索，不能用评论替代新闻内容；source 只处理 sourceMaterials 中冻结的原始材料，按原文顺序保留具体信息和作者语气，中文原文做最小整理，外文做忠实中文翻译，不添加背景、评价、统一模板或虚构过渡，也不能把作者陈述写成已独立核验事实；community 先把事件事实讲清，再使用达到采样门槛的真实观点。再遵守 draftStrategy：brief 只把单一事件说清；按冻结事实的信息密度决定篇幅，覆盖关键事件、机制、影响与适用限制；短而完整即可，不为字数或段落数补背景，也不能同义改写凑字；synthesis 组织多源共识与差异；community 先写事实主干，再保留达到采样门槛的真实社区样本；playbook 只整理可验证步骤；curate 在 news 意图下只做导读与有限引用，在 source 意图下生成带明确来源归属的私有原文工作副本；commentary 只有存在明确 userAngle 时可采用。社区热度不能替代事实来源，少于 5 条社区样本时不得让评论主导正文。storyContext.discoveredViaCommunity 为 true 且 contentIntent 为 news 时，社区仍然只是发现渠道：标题、摘要和首句不得出现社区平台名、热议、讨论、受到关注或重新受到注意，必须直接说明非社区来源支持的项目、产品或公司事实；若项目不是当天发布，就写成项目介绍，不能虚构“重新走红”。只有 contentIntent 为 community 时讨论本身才可成为正文主角。不要为了制造新品新闻，把依赖升级、自动更新或 README 微调抬成标题。blocks 逐个指定正文块的 paragraphIndex 与 kind（paragraph/heading/list/ordered-list/table/code/quote），内容仍存于对应 paragraphs；列表每行一项，表格用含完整表头的 TSV，代码保留换行缩进。每个块的事实与来源仍在相同索引的 paragraphFactIds/paragraphEvidence 中，图片可放在任一实际块后，不受 8 段限制。简讯只需正文，教程保留步骤、前提和代码，多源稿按证据组织比较与限制，原文整理保留原始逻辑，社区稿引用必须归属作者；不必用齐全部块型。paragraphs 是直接交给普通读者的文章，严禁写“输入资料、证据文本、素材包、当前样本、讨论串标题、后续编辑、发布前核验”等后台处理语言。标题具体，开头直接交代谁做了什么；每段都要增加新信息。不要写无关的小时、分钟或 UTC，也不要用“需要指出的是、需要区分的是、值得注意的是”等模型路标。数字、人名、模型名和日期必须来自输入；素材包任务的日期只能取 facts 明确写出的事件日期，不能将 sources.publishedAt 自动写成事件发生日，未记载时省略。无法核实的内容放入 uncertainties。paragraphEvidence 必须逐段给出直接支持正文的来源 URL，社区链接不能冒充产品或公司事实来源。素材包任务的 paragraphFactIds 必须逐段列出实际使用的 ContentPackage fact ID，不能把未写入正文的事实登记为已使用。图片必须遵守 editorialPriority：1 原新闻图、2 原文截图、3 人物或公司身份图、4 事件相关图、5 AI 生成兜底；同一画面的不同分辨率只能选择一张，低优先级不能挤掉高优先级，只有 1–4 级都不可用时才能选择第 5 级。严格返回符合给定 JSON Schema 的 JSON，不要输出 Markdown。`;
 
 const autoReviewGeneratedArticle = async ({
   runId,
@@ -605,7 +631,7 @@ const autoReviewGeneratedArticle = async ({
     article,
     diagnostics: before.diagnostics,
     rules: [
-      "只改 title、paragraphs 和 take；strategy、sources、paragraphEvidence、paragraphFactIds、uncertainties、imageSelections、discoveredImages、topics 原样返回。",
+      "只改 title、paragraphs 和 take；blocks、strategy、sources、paragraphEvidence、paragraphFactIds、uncertainties、imageSelections、discoveredImages、topics 原样返回。",
       "paragraphs 数量和顺序必须保持不变，每段仍由原来的 paragraphEvidence 支持。",
       "保留原段中的日期、数字、专名、产品名、限定条件和事实强度；不能补事实，不能联网，不能增加来源。",
       "把后台报告腔、英文式长定语和清单堆砌改成普通中文。普通读者不需要完整技术栈时，用功能或限制概括，避免一句塞入大量英文名词。",
@@ -702,6 +728,9 @@ export const generateCandidateDraft = async (
     onProgress?: (progress: number, stage: string) => void;
   },
 ): Promise<ArticleDraft> => {
+  if (!evidenceOverride?.contentPackage || evidenceOverride.contentPackage.status !== "ready" || evidenceOverride.contentPackage.blockers.length) {
+    throw new Error("成稿必须通过 DraftDesk 使用已冻结且通过预检的 ContentPackage");
+  }
   const state = await readState();
   const settings = state.settings;
   const configuredGenerationSkills = await loadArticleSkillsForTask(skills, "generation", 20_000);
@@ -1109,7 +1138,7 @@ export const generateCandidateDraft = async (
       contentPackageId: evidenceOverride?.contentPackage?.id,
     },
   };
-  draft.bodyHtml = legacyDraftBodyHtml(draft);
+  draft.bodyHtml = structuredDraftBodyHtml(draft, article.blocks);
   if (evidenceOverride?.contentPackage) restoreTechnicalSourceBlocks(draft, evidenceOverride.contentPackage);
   evidenceOverride?.onProgress?.(0.94, "组装可编辑草稿");
   return draft;
@@ -1124,178 +1153,20 @@ export interface GenerationRequestResult {
   providerName: string;
 }
 
-interface GenerationClaim extends GenerationRequestResult {
-  candidateIds: string[];
-  provider: AiProviderConfig;
-  skills: ArticleSkillConfig[];
-}
-
-const claimGeneration = async (runId: string, candidateIds?: string[]): Promise<GenerationClaim> =>
-  updateState((state) => {
-    const target = state.runs.find((entry) => entry.id === runId);
-    if (!target) throw new Error("运行记录不存在");
-    const provider = state.aiSettings.providers.find((entry) => entry.id === state.aiSettings.activeProviderId);
-    if (!provider) throw new Error("当前 AI Provider 不存在，请到 AI 设置重新选择");
-    if (provider.kind !== "codex-cli" && !provider.apiKeyConfigured) {
-      throw new Error(`请先在 AI 设置中配置 ${provider.name} 的 API Key`);
-    }
-    const skills = skillsForArticleTask(state.aiSettings.skills, "generation");
-    const requested = target.candidates.filter((candidate) =>
-      candidateIds?.length ? candidateIds.includes(candidate.id) : candidate.selected,
-    );
-    if (!requested.length) throw new Error("请先勾选至少一条候选新闻");
-    if (target.generation?.status === "running" || target.status === "generating") {
-      return {
-        accepted: false,
-        reused: true,
-        alreadyGenerated: false,
-        selectedCount: target.generation?.candidateIds.length ?? requested.length,
-        generationId: target.generation?.id,
-        providerName: provider.name,
-        candidateIds: target.generation?.candidateIds ?? requested.map((candidate) => candidate.id),
-        provider,
-        skills,
-      };
-    }
-    const existing = new Set(state.drafts.filter((draft) => draft.runId === runId).map((draft) => draft.candidateId));
-    const pending = requested.filter((candidate) => !existing.has(candidate.id));
-    if (!pending.length) {
-      return {
-        accepted: false,
-        reused: false,
-        alreadyGenerated: true,
-        selectedCount: requested.length,
-        providerName: provider.name,
-        candidateIds: [],
-        provider,
-        skills,
-      };
-    }
-    const startedAt = timestamp();
-    const generationId = `generation_${randomUUID().slice(0, 10)}`;
-    target.status = "generating";
-    target.stage = "分别生成文章";
-    target.error = undefined;
-    target.updatedAt = startedAt;
-    target.generation = {
-      id: generationId,
-      status: "running",
-      providerId: provider.id,
-      skillIds: skills.map((skill) => skill.id),
-      candidateIds: pending.map((candidate) => candidate.id),
-      startedAt,
-    };
-    return {
-      accepted: true,
-      reused: false,
-      alreadyGenerated: false,
-      selectedCount: pending.length,
-      generationId,
-      providerName: provider.name,
-      candidateIds: pending.map((candidate) => candidate.id),
-      provider,
-      skills,
-    };
-  });
-
-const executeClaimedGeneration = async (runId: string, claim: GenerationClaim) => {
-  if (!claim.accepted || !claim.generationId) return;
-  const initial = await readState();
-  const run = initial.runs.find((entry) => entry.id === runId);
-  if (!run) throw new Error("运行记录不存在");
-  const selected = run.candidates.filter((candidate) => claim.candidateIds.includes(candidate.id));
-  await appendRunLog(runId, "分别生成文章", `${claim.providerName} 将按事件复杂度生成 ${selected.length} 篇草稿`);
-
-  let failed = 0;
-  for (const candidate of selected) {
-    try {
-      await appendRunLog(runId, "分别生成文章", `正在核验并撰写：${candidate.title}`);
-      const draft = await generateCandidateDraft(runId, candidate, claim.provider, claim.skills);
-      await updateState((state) => {
-        const existingIndex = state.drafts.findIndex((entry) => entry.runId === runId && entry.candidateId === candidate.id);
-        if (existingIndex >= 0) state.drafts[existingIndex] = draft;
-        else state.drafts.unshift(draft);
-        const targetCandidate = state.runs
-          .find((entry) => entry.id === runId)
-          ?.candidates.find((entry) => entry.id === candidate.id);
-        if (targetCandidate) targetCandidate.status = "drafted";
-      });
-      await appendRunLog(runId, "分别生成文章", `已生成：${draft.title}`, "success");
-    } catch (error) {
-      failed += 1;
-      await appendRunLog(
-        runId,
-        "分别生成文章",
-        `${candidate.title}：${error instanceof Error ? error.message : String(error)}`,
-        "error",
-      );
-    }
-  }
-
-  await updateState((state) => {
-    const target = state.runs.find((entry) => entry.id === runId);
-    if (!target) return;
-    target.status = failed === selected.length ? "failed" : "complete";
-    target.stage = failed ? `成稿完成，${failed} 篇失败` : "成稿完成";
-    target.completedAt = timestamp();
-    target.updatedAt = timestamp();
-    if (failed === selected.length) target.error = "所有候选文章均生成失败，请查看运行日志";
-    const generation = target.generation;
-    if (generation && generation.id === claim.generationId) {
-      generation.status = failed === selected.length ? "failed" : "complete";
-      generation.completedAt = timestamp();
-    }
-    if (failed > 0) {
-      appendWorkflowNotification(state, {
-        type: "ai-failed",
-        severity: failed === selected.length ? "error" : "warning",
-        title: failed === selected.length ? "AI 成稿失败" : "部分文章生成失败",
-        message: `${selected.length} 篇候选中有 ${failed} 篇未能生成，请查看运行记录。`,
-        dedupeKey: `ai-failed:${claim.generationId}`,
-        target: { page: "runs", runId },
-      });
-    }
-  });
-};
-
-export const generateSelectedDrafts = async (runId: string, candidateIds?: string[]) => {
-  const claim = await claimGeneration(runId, candidateIds);
-  await executeClaimedGeneration(runId, claim);
-  return claim;
-};
-
+/** Compatibility batch entry: each signal reuses the same durable editorial job. */
 export const requestSelectedDraftGeneration = async (runId: string, candidateIds?: string[]) => {
-  const claim = await claimGeneration(runId, candidateIds);
-  if (claim.accepted) void executeClaimedGeneration(runId, claim).catch(async (error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    await updateState((state) => {
-      const run = state.runs.find((entry) => entry.id === runId);
-      if (!run) return;
-      const finishedAt = timestamp();
-      run.status = "failed";
-      run.stage = "成稿失败";
-      run.error = message;
-      run.updatedAt = finishedAt;
-      run.completedAt = finishedAt;
-      const generation = run.generation;
-      if (generation && generation.id === claim.generationId) {
-        generation.status = "failed";
-        generation.completedAt = finishedAt;
-      }
-      appendWorkflowNotification(state, {
-        type: "ai-failed",
-        severity: "error",
-        title: "AI 成稿失败",
-        message: "AI 服务未能完成成稿，请到运行记录查看错误分类和重试建议。",
-        dedupeKey: `ai-failed:${claim.generationId}`,
-        target: { page: "runs", runId },
-      }, { createdAt: finishedAt });
-    });
-    await appendRunLog(runId, "分别生成文章", message, "error");
-  });
-  const { candidateIds: _candidateIds, provider: _provider, skills: _skills, ...result } = claim;
-  return result;
+  const state = await readState();
+  const run = state.runs.find((entry) => entry.id === runId);
+  if (!run) throw new Error("运行记录不存在");
+  const selected = run.candidates.filter((candidate) => candidateIds?.length ? candidateIds.includes(candidate.id) : candidate.selected);
+  if (!selected.length) throw new Error("请先勾选至少一条候选新闻");
+  const { queueEditorialDraft } = await import("./editorial-jobs.js");
+  const jobs = [];
+  for (const candidate of selected) jobs.push(await queueEditorialDraft({ runId, candidateId: candidate.id }));
+  return { accepted: jobs.some((entry) => !entry.reused), reused: jobs.every((entry) => entry.reused), alreadyGenerated: jobs.every((entry) => entry.job.status === "complete"), selectedCount: selected.length, generationId: jobs[0]?.job.id, jobIds: jobs.map((entry) => entry.job.id), providerName: state.aiSettings.providers.find((entry) => entry.id === state.aiSettings.activeProviderId)?.name ?? "" };
 };
+
+export const generateSelectedDrafts = requestSelectedDraftGeneration;
 
 export const selectTopAndGenerate = async (runId: string, count: number) => {
   const ids = await updateState((state) => {

@@ -1,3 +1,5 @@
+import { bindDraftCheck, currentDraftParagraphs, currentDocumentClaims, type DraftCheckBinding } from "./draft-check-binding.js";
+import { draftVisualFindings } from "./draft-visual-check.js";
 import type { ContentPackage } from "./product-types.js";
 import type {
   ArticleDraft,
@@ -21,6 +23,7 @@ export interface EditorialQualityIssue {
 }
 
 export interface EditorialDraftQualityReport {
+  binding?: DraftCheckBinding;
   ready: boolean;
   blockers: EditorialQualityIssue[];
   warnings: EditorialQualityIssue[];
@@ -181,6 +184,8 @@ export const evaluateDraftPackageQuality = ({
   contentPackage,
   draft,
 }: EditorialDraftQualityInput): EditorialDraftQualityReport => {
+  const binding = bindDraftCheck(draft, contentPackage);
+  if (draft.bodyHtml?.trim() && contentPackage.intent !== "source") draft = { ...draft, paragraphs: currentDraftParagraphs(draft), factClaims: currentDocumentClaims(draft) };
   const blockers: EditorialQualityIssue[] = [];
   const warnings: EditorialQualityIssue[] = [];
   const discoveredViaCommunity = contentPackage.sources.some((source) => source.isCommunity)
@@ -232,6 +237,10 @@ export const evaluateDraftPackageQuality = ({
       fact.status === "supported" || fact.status === "partially-supported"));
     if (!titleIntegrity.passed) blockers.push({ id: "frozen-fact-integrity", blockId: "title",
       message: titleIntegrity.errors.map((issue) => issue.message).join("；") });
+    if (draft.take.trim()) {
+      const takeIntegrity = auditFrozenFactIntegrity(draft.take, contentPackage.facts.filter(fact => fact.status === "supported" || fact.status === "partially-supported"));
+      if (!takeIntegrity.passed) blockers.push({ id: "frozen-fact-integrity", blockId: "evidence", message: `文末判断：${takeIntegrity.errors.map(issue => issue.message).join("；")}` });
+    }
     const everyParagraphHasEvidence = claims.length >= draft.paragraphs.length
       && draft.paragraphs.every((_paragraph, index) => Boolean(claims[index]?.sourceUrls?.length || claims[index]?.sourceUrl));
     if (!everyParagraphHasEvidence) {
@@ -362,5 +371,6 @@ export const evaluateDraftPackageQuality = ({
     else warnings.push(issue);
   }
 
-  return { ready: blockers.length === 0, blockers, warnings };
+  for (const finding of draftVisualFindings(draft)) blockers.push({ id: finding.code, blockId: "images", message: finding.message });
+  return { ready: blockers.length === 0, blockers, warnings, binding };
 };

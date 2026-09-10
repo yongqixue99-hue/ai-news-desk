@@ -136,10 +136,42 @@ test("expired and disliked community items leave the square", () => {
 test("public discussion and recency affect community ranking", () => {
   const quiet = candidate("quiet", { recommendationScore: 78, engagement: { points: 3, comments: 1 } });
   const active = candidate("active", { recommendationScore: 70, engagement: { points: 800, comments: 320 } });
-  const feed = composeCommunityFeed([run("run", [quiet, active])], {
+  const feed = composeCommunityFeed([run("run", [quiet, active, ...[1,2,3].map(i => candidate(`cohort${i}`, { engagement: { points: i * 20, comments: i * 5 } }))])], {
     now: "2026-08-27T12:00:00.000Z",
   });
 
   assert.equal(feed.featured?.candidate.id, "active");
   assert.match(feed.featured?.reason ?? "", /320 条公开讨论/u);
+});
+
+test("missing metrics and interrupted observations never manufacture a rebound", () => {
+  const snapshots = [
+    candidate("m1", { fetchedAt: "2026-08-27T08:00:00Z", engagement: { points: 100, comments: 5, discussionUrl: "https://news.ycombinator.com/item?id=metric" } }),
+    candidate("m2", { fetchedAt: "2026-08-27T09:00:00Z", engagement: { comments: 5, discussionUrl: "https://news.ycombinator.com/item?id=metric" } }),
+    candidate("m3", { fetchedAt: "2026-08-27T10:00:00Z", engagement: { points: 400, comments: 5, discussionUrl: "https://news.ycombinator.com/item?id=metric" } }),
+  ];
+  const entry = composeCommunityFeed(snapshots.map((item, i) => run(String(i), [item])), { now: "2026-08-27T11:00:00Z" }).items[0]!;
+  assert.equal(entry.trend?.pointsDelta, undefined);
+  assert.doesNotMatch(entry.reason, /新增.*(?:300|400)|升温/u);
+});
+
+test("observed zero differs from unknown and long collection gaps have no velocity", () => {
+  const items = [0, 20].map((points, i) => candidate(`z${i}`, { fetchedAt: `2026-08-27T0${8+i}:00:00Z`, engagement: { points, discussionUrl: "https://news.ycombinator.com/item?id=zero" } }));
+  const entry = composeCommunityFeed(items.map((item, i) => run(String(i), [item])), { now: "2026-08-27T11:00:00Z" }).items[0]!;
+  assert.equal(entry.trend?.pointsDelta, 20);
+  items[1]!.fetchedAt = "2026-08-28T09:00:00Z";
+  assert.equal(composeCommunityFeed(items.map((item, i) => run(String(i), [item])), { now: "2026-08-28T11:00:00Z" }).items[0]?.trend, undefined);
+});
+
+test("percentile cohorts never compare different platforms, ages, or missing metric shapes", () => {
+  const values = Array.from({length: 5}, (_, i) => candidate(`hn-${i}`, {engagement: {points: i*10, comments: i, discussionUrl:`https://news.ycombinator.com/item?id=hn-${i}`}}));
+  const other = candidate("reddit", {sourceName:"Reddit",sourceType:"reddit",engagement:{points:99999,comments:99999,discussionUrl:"https://reddit.com/r/ai/comments/one"}});
+  const old = candidate("older", {publishedAt:"2026-08-26T00:00:00Z",engagement:{points:99999,comments:99999,discussionUrl:"https://news.ycombinator.com/item?id=older"}});
+  const missing = candidate("unknown",{engagement:undefined});
+  const feed=composeCommunityFeed([run("cohort",[...values,other,old,missing])],{now:"2026-08-27T12:00:00Z"});
+  const strongest=feed.items.find(item=>item.candidate.id==="hn-4")!;
+  assert.equal(strongest.metrics?.cohortSize,5); assert.equal(strongest.metrics?.percentile,90);
+  assert.equal(feed.items.find(item=>item.candidate.id==="reddit")?.metrics?.status,"insufficient");
+  assert.equal(feed.items.find(item=>item.candidate.id==="unknown")?.metrics?.status,"unknown");
+  assert.equal(feed.items.find(item=>item.candidate.id==="hn-0")?.metrics?.points,0);
 });
