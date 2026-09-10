@@ -1,26 +1,17 @@
-import { packageUncertaintiesFor } from "../../server/package-reading-status.js";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { waitForProductJob, deferredJobMessage } from "../product-job-wait";
+import { StoryReader, readingScope, absoluteTime } from "./StoryReader";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
-  BookOpen,
   Check,
   ChevronRight,
   Clock3,
-  ExternalLink,
   Eye,
   FileStack,
   Image as ImageIcon,
-  Images,
-  MessageSquareText,
-  Pencil,
   RefreshCw,
-  RotateCcw,
   Search,
-  ShieldCheck,
-  Sparkles,
-  TrendingUp,
-  X,
 } from "lucide-react";
 import { api, type DraftOverview, type ProductJob, type StoryDetailResult } from "../api";
 import { PageLoading } from "./PageLoading";
@@ -28,49 +19,15 @@ import { TodayWorkspaceRail } from "./TodayWorkspaceRail";
 import { TopicCategoryPanel, TopicCategoryTabs } from "./TopicCategoryPanel";
 import { HomeLayoutDialog } from "./HomeLayoutDialog";
 import { defaultHomeLayout, type HomeLayout } from "../../server/home-layout.js";
-import { StoryAssetGallery } from "./StoryAssetGallery";
 import { KnowledgeShelf } from "./KnowledgeShelf";
-import { useDialogA11y } from "../hooks/useDialogA11y";
-import { beginStarterDraft, starterDraftActionCopy } from "../starter-draft";
+import { beginStarterDraft } from "../starter-draft";
 import type {
   AppPage,
   AssignmentMode,
   ContentPackage,
-  EvidenceStrength,
-  StorySignalView,
   StoryView,
   TodayView,
 } from "../types";
-
-const modeLabels: Record<AssignmentMode, string> = {
-  brief: "快讯",
-  synthesis: "多源综合",
-  community: "社区观察",
-  playbook: "方案教程",
-  curate: "导读",
-  watch: "继续观察",
-  skip: "退出候选",
-};
-
-const evidenceLabels: Record<EvidenceStrength, string> = {
-  strong: "强证据",
-  moderate: "可用证据",
-  weak: "证据不足",
-};
-
-const explanationBasisLabels = {
-  "full-source": "已读来源正文",
-  excerpt: "依据来源摘要",
-  title: "目前仅有标题",
-} as const;
-
-const editorialAssetLabels = {
-  1: "原新闻图片",
-  2: "原文截图",
-  3: "人物／公司资料图",
-  4: "事件相关素材",
-  5: "AI 生成兜底",
-} as const;
 
 const relativeTime = (value: string) => {
   const deltaMinutes = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 60_000));
@@ -79,18 +36,6 @@ const relativeTime = (value: string) => {
   if (hours < 24) return `${hours} 小时前`;
   return `${Math.round(hours / 24)} 天前`;
 };
-
-const releaseStatusLabels = {
-  released: "已发布",
-  preview: "官方预告",
-  reported: "待核实发布状态",
-} as const;
-
-const dossierFacetStatusLabels = {
-  ready: "已齐",
-  partial: "待完善",
-  missing: "缺失",
-} as const;
 
 const terminalJobStatuses = new Set<ProductJob["status"]>(["complete", "failed", "cancelled"]);
 
@@ -105,30 +50,6 @@ const draftIdFromJob = (job: ProductJob) => {
   const value = (job.result as { draftId?: unknown }).draftId;
   return typeof value === "string" ? value : undefined;
 };
-
-const uniqueSourceSignals = (signals: StorySignalView[]) => {
-  const seen = new Set<string>();
-  return signals.filter((signal) => {
-    const rawUrl = signal.discussionUrl || signal.url;
-    let key = `${signal.sourceName}:${rawUrl}`;
-    try {
-      const url = new URL(rawUrl);
-      key = `${url.hostname}${url.pathname.replace(/\/$/u, "")}`;
-    } catch {
-      // Keep the stable source-and-URL fallback for malformed legacy records.
-    }
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
-
-const PackageStatus = ({ contentPackage }: { contentPackage: ContentPackage }) => (
-  <div className={`today-package-status ${contentPackage.status}`}>
-    {contentPackage.status === "ready" ? <Check size={16} /> : <AlertTriangle size={16} />}
-    <span>{contentPackage.status === "ready" ? "素材包已具备成稿条件" : "素材包仍有阻断项"}</span>
-  </div>
-);
 
 const StoryImage = ({ story, eager = false }: { story: StoryView; eager?: boolean }) => {
   const localCount = story.localImageCount
@@ -158,24 +79,6 @@ const StoryImage = ({ story, eager = false }: { story: StoryView; eager?: boolea
   );
 };
 
-const ReleaseDossierStrip = ({ story, compact = false }: { story: StoryView; compact?: boolean }) => {
-  const dossier = story.releaseDossier;
-  if (!dossier) return null;
-  return (
-    <div className={`release-dossier-strip${compact ? " compact" : ""}`}>
-      <div className="release-dossier-summary">
-        <span>{releaseStatusLabels[dossier.releaseStatus]}</span>
-        <strong>专题资料 {dossier.readyCount}/{dossier.totalCount}</strong>
-      </div>
-      <div className="release-dossier-facets" aria-label="模型发布资料完整度">
-        {dossier.facets.map((facet) => (
-          <span key={facet.id} className={`dossier-facet ${facet.status}`}>{facet.label}</span>
-        ))}
-      </div>
-    </div>
-  );
-};
-
 interface StoryRowProps {
   story: StoryView;
   rank?: number;
@@ -187,45 +90,25 @@ interface StoryRowProps {
   onQuickDraft: (story: StoryView) => void;
 }
 
-const StoryRow = ({ story, rank, featured = false, busy = false, processing = false, onOpen, onQueue, onQuickDraft }: StoryRowProps) => (
-  <article className={featured ? "today-story featured" : "today-story compact"}>
-    {rank ? <span className="today-story-rank">0{rank}</span> : null}
+const StoryRow = ({ story, featured = false, busy = false, onOpen, onQueue }: StoryRowProps) => (
+  <article className={`today-story ${featured ? "featured" : "compact"}${story.images.length ? "" : " text-only"}`} data-story-id={story.id}>
     <button type="button" className="today-story-open" onClick={() => onOpen(story)} aria-label={`查看 ${story.title}`}>
-      <StoryImage story={story} eager={featured && rank === 1} />
+      {story.images.length ? <StoryImage story={story} eager={featured} /> : null}
       <div className="today-story-copy">
         <div className="today-story-kicker">
-          <span className="today-source-name">{story.signals.find((signal) => !signal.isCommunity)?.sourceName || story.signals[0]?.sourceName || "来源待核对"}</span>
-          <span className={`assignment-pill mode-${story.assignment.mode}`}>{modeLabels[story.assignment.mode]}</span>
-          <span className={`evidence-pill evidence-${story.evidenceStrength}`}>{story.explanation.basis === "full-source" ? evidenceLabels[story.evidenceStrength] : "原文待读取"}</span>
-          <span>{relativeTime(story.publishedAt)}</span>
+          {featured ? <span className="today-source-name">重点选题</span> : null}
+          <span>{story.signals.find(signal => !signal.isCommunity)?.sourceName || story.signals[0]?.sourceName || "来源待核对"}</span>
+          <time title={story.publicationDateKnown === false ? "发布时间未知" : absoluteTime(story.publishedAt)}>{story.publicationDateKnown === false ? "发布时间未知" : relativeTime(story.publishedAt)}</time>
+          <span className="reading-scope">{readingScope(story.explanation.basis)}</span>
         </div>
         <h3>{story.title}</h3>
         <p className="today-story-summary">{story.summary}</p>
-        {story.opportunity ? <span className="today-opportunity"><strong>{story.opportunity.label}</strong>{story.opportunity.reason}</span> : null}
-        {story.preferenceReasons?.length ? <span className="today-opportunity">推荐偏好：{story.preferenceReasons.join("；")}</span> : null}
-        <ReleaseDossierStrip story={story} compact={!featured} />
-        {featured ? (
-          <div className="today-story-reasons">
-            <p><strong>编辑备注</strong>{story.explanation.editorNote || story.assignment.reason}</p>
-            {story.communitySummary ? <p><strong>社区线索</strong>{story.communitySummary}</p> : null}
-          </div>
-        ) : null}
-        <div className="today-story-meta">
-          <span><FileStack size={14} />{story.sourceCount} 个来源</span>
-          {story.communitySampleCount ? <span><MessageSquareText size={14} />{story.communitySampleCount} 条样本</span> : null}
-          {story.trend.direction !== "unknown" ? <span className={`trend-${story.trend.direction}`}><TrendingUp size={14} />{story.trend.summary}</span> : null}
-        </div>
-      </div>
-      <ChevronRight className="today-story-chevron" size={20} aria-hidden="true" />
+        <div className="today-story-meta"><span>材料：{story.sourceCount} 个来源{story.communitySampleCount ? ` · ${story.communitySampleCount} 条已读样本` : ""}</span><span>热度：{story.trend.direction === "unknown" ? "未知" : story.trend.summary}</span></div>
+      </div><ChevronRight className="today-story-chevron" size={20} aria-hidden="true" />
     </button>
-    <div className="today-story-actions" aria-label={`${story.title} 的快捷操作`}>
-      <button type="button" className="text-button" onClick={() => onOpen(story)}>查看证据</button>
-      <button type="button" className="secondary-button" aria-pressed={story.selected} disabled={busy || story.drafted} onClick={() => onQueue(story, !story.selected)}>
-        {story.selected ? <><Check size={14} />已加入待写</> : "加入待写"}
-      </button>
-      <button type="button" className="primary-button" disabled={busy || processing || !story.assignment.canDraft || story.drafted} onClick={() => onQuickDraft(story)}>
-        {story.drafted ? "已有草稿" : <><Pencil size={14} />生成基础稿<ArrowRight size={14} /></>}
-      </button>
+    <div className="today-story-actions"><span className="story-value">编辑价值：{story.opportunity?.reason || story.assignment.reason}</span>
+      <button type="button" className="text-button" onClick={() => onOpen(story)}>阅读并核对</button>
+      <button type="button" className="secondary-button" disabled={busy || story.drafted || story.selected} onClick={() => onQueue(story, true)}>{story.drafted ? "已有草稿" : story.selected ? <><Check size={14} />已保留</> : "留作选题"}</button>
     </div>
   </article>
 );
@@ -269,321 +152,6 @@ const Funnel = ({ data }: { data: TodayView["funnel"] }) => {
   );
 };
 
-interface StoryDrawerProps {
-  detail: StoryDetailResult;
-  busy: boolean;
-  activeJob?: ProductJob;
-  explanationLoading: boolean;
-  explanationError?: string;
-  onClose: () => void;
-  onRetryExplanation: () => void;
-  onSupplementEvidence: () => void;
-  onCollectAssets: () => void;
-  onSkip: () => void;
-  onQueue: (selected: boolean) => void;
-  onRestoreFeedback: () => void;
-  onBuildPackage: (mode: Exclude<AssignmentMode, "watch" | "skip">) => void;
-  onStartWriting: (contentPackage: ContentPackage) => void;
-  onGenerateDraft: (contentPackage: ContentPackage) => void;
-  onQuickWrite: (mode: Exclude<AssignmentMode, "watch" | "skip">) => void;
-}
-
-const StoryDrawer = ({
-  detail,
-  busy,
-  activeJob,
-  explanationLoading,
-  explanationError,
-  onClose,
-  onRetryExplanation,
-  onSupplementEvidence,
-  onCollectAssets,
-  onSkip,
-  onQueue,
-  onRestoreFeedback,
-  onBuildPackage,
-  onStartWriting,
-  onGenerateDraft,
-  onQuickWrite,
-}: StoryDrawerProps) => {
-  const { story } = detail;
-  const [readerView, setReaderView] = useState<"summary" | "images">("summary");
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useDialogA11y<HTMLElement>({ open: true, onClose: busy ? undefined : onClose, initialFocusRef: closeButtonRef });
-  const [mode, setMode] = useState<Exclude<AssignmentMode, "watch" | "skip">>(
-    story.technicalArticle ? "curate" : story.assignment.canDraft ? story.assignment.mode as Exclude<AssignmentMode, "watch" | "skip"> : "brief",
-  );
-  const contentPackage = detail.contentPackage;
-  const packageUncertainties = contentPackage ? packageUncertaintiesFor(contentPackage) : [];
-  const processing = Boolean(activeJob && !terminalJobStatuses.has(activeJob.status));
-  const factSignals = uniqueSourceSignals(story.signals.filter((signal) => !signal.isCommunity));
-  const communitySignals = uniqueSourceSignals(story.signals.filter((signal) => signal.isCommunity));
-
-  return (
-    <div className="story-drawer-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
-      <aside ref={dialogRef} className="story-drawer" role="dialog" aria-modal="true" aria-labelledby="story-drawer-title" tabIndex={-1}>
-        <header className="story-drawer-header">
-          <div>
-            <div className="today-story-kicker">
-              <span className={`assignment-pill mode-${story.assignment.mode}`}>{modeLabels[story.assignment.mode]}</span>
-              <span className={`evidence-pill evidence-${story.evidenceStrength}`}>{contentPackage?.sources.some((source) => source.basis === "full-source" && !source.isCommunity) ? "原文已核对" : story.explanation.basis === "full-source" ? evidenceLabels[story.evidenceStrength] : "原文待读取"}</span>
-            </div>
-            <h2 id="story-drawer-title">{story.title}</h2>
-            {story.originalTitle !== story.title ? <p className="story-original-title">原题：{story.originalTitle}</p> : null}
-          </div>
-          <button ref={closeButtonRef} type="button" className="icon-button" onClick={onClose} aria-label="关闭事件详情"><X size={19} /></button>
-        </header>
-
-        <nav className="story-reader-tabs" aria-label="事件视图">
-          <button type="button" aria-pressed={readerView === "summary"} onClick={() => setReaderView("summary")}><BookOpen size={15} />事件摘要</button>
-          <button type="button" aria-pressed={readerView === "images"} onClick={() => setReaderView("images")}><Images size={15} />图片与图表 <span>{story.imageCount}</span></button>
-          <small>阅读来源，再形成自己的文章</small>
-        </nav>
-        <div className="story-drawer-body story-reader-body">
-          {readerView === "images" ? <>
-            {processing ? <div className="asset-collection-progress" role="status"><RefreshCw className="spin" size={15} /><span>{activeJob?.stage || "正在准备素材"}</span><progress value={activeJob?.progress ?? 0} max={1} /></div> : null}
-            <StoryAssetGallery images={story.images} localCount={story.localImageCount ?? 0} publishReadyCount={story.publishReadyImageCount ?? 0} reports={detail.assetCollection?.sourceReports} busy={busy || processing} onCollect={onCollectAssets} />
-          </> : <div className="story-reader-layout">
-            <aside className="story-reader-sidebar" aria-label="事件来源与判断">
-              <section className="story-decision-band story-decision-stack">
-                <div><span>建议</span><strong>{story.assignment.reason}</strong></div>
-                <div><span>热度</span><strong>{story.trend.summary}</strong></div>
-              </section>
-
-              {story.assignment.blockers.length ? (
-                <div className="story-blockers"><AlertTriangle size={18} /><div><strong>当前不能成稿</strong>{story.assignment.blockers.map((item) => <p key={item}>{item}</p>)}</div></div>
-              ) : null}
-
-              {story.releaseDossier ? (
-                <section className="story-release-dossier" aria-label="模型发布专题资料">
-                  <div className="story-release-dossier-heading">
-                    <div><span>{releaseStatusLabels[story.releaseDossier.releaseStatus]}</span><strong>模型发布资料</strong></div>
-                    <em>{story.releaseDossier.readyCount}/{story.releaseDossier.totalCount}</em>
-                  </div>
-                  <ul>
-                    {story.releaseDossier.facets.map((facet) => (
-                      <li key={facet.id} className={facet.status}>
-                        <div><strong>{facet.label}</strong><span>{facet.detail}</span></div>
-                        <em>{dossierFacetStatusLabels[facet.status]}</em>
-                      </li>
-                    ))}
-                  </ul>
-                  <p>{story.releaseDossier.nextAction}</p>
-                </section>
-              ) : null}
-
-              <section className="story-detail-section story-source-section">
-                <div className="story-detail-heading">
-                  <h3>文章来源</h3><span>{story.sourceCount} 个</span>
-                  {story.evidenceStrength !== "strong" || Boolean(story.releaseDossier && story.releaseDossier.readyCount < story.releaseDossier.totalCount) ? (
-                    <button type="button" className="text-button" disabled={busy || processing} onClick={onSupplementEvidence}>
-                      {activeJob?.type === "supplement-story-evidence" && !terminalJobStatuses.has(activeJob.status)
-                        ? <><RefreshCw className="spin" size={13} />{activeJob.stage || "正在寻找来源与专题资料"}</>
-                        : <><ShieldCheck size={13} />{story.releaseDossier ? "自动补齐资料" : "自动补强证据"}</>}
-                    </button>
-                  ) : <span className="evidence-ready-copy"><Check size={13} />已达到强证据</span>}
-                </div>
-                <div className="story-source-groups">
-                  <div>
-                    <h4>事实来源</h4>
-                    {factSignals.length ? factSignals.slice(0, 8).map((signal) => (
-                      <a key={`${signal.runId}:${signal.candidateId}`} href={signal.url} target="_blank" rel="noreferrer" className="story-source-row">
-                        <span>{signal.sourceName}</span>
-                        <strong>{signal.titleZh || signal.title}</strong>
-                        <small>{signal.publicationDateKnown === false ? "日期待读取核对" : relativeTime(signal.publishedAt)} · {{ official: "官方来源", research: "研究资料", verification: "媒体核验", discovery: "发现线索", community: "社区讨论" }[signal.sourceRole || "discovery"]}</small>
-                        <ExternalLink size={14} />
-                      </a>
-                    )) : <p className="story-empty-copy">尚无可建立事实主干的来源。</p>}
-                  </div>
-                  <div>
-                    <h4>社区讨论</h4>
-                    {communitySignals.length ? communitySignals.slice(0, 6).map((signal) => (
-                      <a key={`${signal.runId}:${signal.candidateId}`} href={signal.discussionUrl || signal.url} target="_blank" rel="noreferrer" className="story-source-row">
-                        <span>{signal.sourceName}</span>
-                        <strong>{signal.summaryZh || signal.titleZh || signal.title}</strong>
-                        <small>{signal.engagement?.points ?? 0} 积分 · {signal.engagement?.comments ?? 0} 评论</small>
-                        <ExternalLink size={14} />
-                      </a>
-                    )) : <p className="story-empty-copy">当前没有关联社区讨论。</p>}
-                  </div>
-                </div>
-              </section>
-
-              <button className="story-material-shortcut" type="button" onClick={() => setReaderView("images")}><Images size={21} /><span><strong>查看原文图片与图表</strong><small>{story.imageCount} 张已发现 · {story.localImageCount ?? 0} 张已保存</small></span><ArrowRight size={17} /></button>
-            </aside>
-
-            <article className="story-reader-content">
-              <section className="story-explanation-section">
-                <div className="story-explanation-heading">
-                  <div><span>中文摘要</span><h3>这条新闻讲了什么</h3></div>
-                  <div className="story-explanation-heading-actions">
-                    <span className={`story-explanation-state ${story.explanation.status}`}>
-                      {explanationLoading ? <><RefreshCw className="spin" size={13} />正在读取正文</> : explanationBasisLabels[story.explanation.basis]}
-                    </span>
-                    {!explanationLoading && story.explanation.status === "ready" ? (
-                      <button type="button" className="text-button story-rephrase-button" onClick={onRetryExplanation}>
-                        <RefreshCw size={12} />换种说法
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-
-                {explanationLoading ? (
-                  <div className="story-explanation-progress"><span className="loading-mark" /><p><strong>先显示已有信息</strong><small>正文读完后会自动换成新版中文摘要，不影响继续浏览。</small></p></div>
-                ) : null}
-                {explanationError ? (
-                  <div className="story-explanation-error"><AlertTriangle size={16} /><p><strong>详细正文暂时没读完</strong><span>{explanationError}</span></p><button type="button" onClick={onRetryExplanation}>重试</button></div>
-                ) : null}
-
-                <div className="story-explanation-lead">
-                  <p>{story.explanation.readerBrief}</p>
-                </div>
-
-                {story.explanation.editorNote ? (
-                  <div className="story-editor-note">
-                    <span>编辑备注</span>
-                    <p>{story.explanation.editorNote}</p>
-                  </div>
-                ) : null}
-
-                {story.explanation.keyPoints.length > 1 ? (
-                  <div className="story-explanation-points">
-                    <h4>具体信息</h4>
-                    <ul>{story.explanation.keyPoints.slice(0, 4).map((point) => <li key={point}>{point}</li>)}</ul>
-                  </div>
-                ) : null}
-
-                {story.communitySummary || story.communityFocus.length ? (
-                  <div className="story-community-explanation">
-                    <span><MessageSquareText size={15} />社区里在讨论什么</span>
-                    {story.communitySummary ? <p>{story.communitySummary}</p> : null}
-                    {story.communityFocus.length ? <ul>{story.communityFocus.map((focus) => <li key={focus}>{focus}</li>)}</ul> : null}
-                    {story.disagreement ? <small>主要分歧：{story.disagreement}</small> : null}
-                  </div>
-                ) : null}
-
-                {story.explanation.unknowns.length ? (
-                  <div className="story-unknowns">
-                    <span>还缺的信息</span>
-                    <ul>{story.explanation.unknowns.slice(0, 2).map((item) => <li key={item}>{item}</li>)}</ul>
-                  </div>
-                ) : null}
-              </section>
-
-              {contentPackage ? (
-                <section className="story-detail-section package-section">
-              <div className="story-detail-heading">
-                <h3>成稿素材包</h3>
-                <span>{modeLabels[contentPackage.mode]}</span>
-                <button type="button" className="text-button" disabled={busy || processing} onClick={() => onBuildPackage(contentPackage.mode)}>
-                  {busy ? <><RefreshCw className="spin" size={13} />正在更新</> : <><RefreshCw size={13} />重新整理素材</>}
-                </button>
-              </div>
-              <PackageStatus contentPackage={contentPackage} />
-              {activeJob?.type === "build-content-package" && !terminalJobStatuses.has(activeJob.status) ? (
-                <div className="story-package-job" role="status">
-                  <div><RefreshCw className="spin" size={14} /><strong>{activeJob.stage || "正在建立素材包"}</strong><span>{Math.round(activeJob.progress * 100)}%</span></div>
-                  <progress value={activeJob.progress} max={1}>{Math.round(activeJob.progress * 100)}%</progress>
-                  <small>任务在后台运行；当前步骤会持续更新。</small>
-                </div>
-              ) : null}
-              {contentPackage.status === "ready" ? (
-                <div className="package-draft-action">
-                  <div><strong>素材边界已经冻结</strong><span>系统先按证据生成一版基础稿；你可以直接在编辑器里重写、删改，让它更像你。</span></div>
-                  <div className="package-draft-buttons">
-                    <button type="button" className="primary-button" disabled={busy || processing} onClick={() => onGenerateDraft(contentPackage)}>
-                      {busy ? <RefreshCw className="spin" size={16} /> : <Sparkles size={16} />}{starterDraftActionCopy.primary}
-                    </button>
-                    <button type="button" className="secondary-button" disabled={busy || processing} onClick={() => onStartWriting(contentPackage)}>
-                      <Pencil size={16} />{starterDraftActionCopy.blank}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-              {contentPackage.blockers.length ? (
-                <ul className="package-blocker-list">{contentPackage.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
-              ) : null}
-              <div className="package-fact-list">
-                {contentPackage.facts.map((fact) => (
-                  <article key={fact.id}>
-                    <span className={`claim-status ${fact.status}`}>{fact.status === "supported" ? "已支持" : fact.status === "partially-supported" ? "单源支持" : fact.status === "conflicted" ? "有冲突" : "待核验"}</span>
-                    <p>{fact.text}</p>
-                    <small>{fact.note}</small>
-                  </article>
-                ))}
-              </div>
-              {contentPackage.discussionSamples.length ? (
-                <div className="package-community-samples">
-                  <h4>社区原句 <span>{contentPackage.communityEvidenceLabel}</span></h4>
-                  {contentPackage.discussionSamples.slice(0, 6).map((sample) => (
-                    <blockquote key={sample.id}>
-                      <p>{sample.originalText}</p>
-                      <footer><a href={sample.permalink} target="_blank" rel="noreferrer">{sample.author} · {sample.platform}</a><span>{sample.kind}</span></footer>
-                    </blockquote>
-                  ))}
-                </div>
-              ) : null}
-              {contentPackage.assets.length ? (
-                <div className="package-assets-strip">
-                  {contentPackage.assets.slice(0, 8).map((asset) => (
-                    <figure key={asset.id} className={`rights-${asset.rightsDecision}`}>
-                      <img src={asset.url} alt={asset.caption || asset.role} loading="lazy" />
-                      <figcaption>
-                        <strong>优先级 {asset.editorialPriority ?? (asset.origin === "library" ? 4 : 1)} · {editorialAssetLabels[asset.editorialPriority ?? (asset.origin === "library" ? 4 : 1)]}</strong>
-                        <span>{asset.localReady ? "本地就绪" : "仅远程"} · {asset.rightsReason}</span>
-                      </figcaption>
-                    </figure>
-                  ))}
-                </div>
-              ) : null}
-                </section>
-              ) : (
-                <details className="story-package-builder">
-              <summary><FileStack size={16} /><span>想先核对依据？检查成稿素材包</span><ChevronRight size={15} /></summary>
-              <p>生成基础稿时会自动整理事实和原文图表。也可以先单独检查素材，再决定怎么写。</p>
-              {story.assignment.canDraft ? (
-                <div className="story-package-actions">
-                  <label>稿型<select value={mode} onChange={(event) => setMode(event.target.value as Exclude<AssignmentMode, "watch" | "skip">)}>
-                    {["brief", "synthesis", "community", "playbook", "curate"].map((value) => <option key={value} value={value}>{modeLabels[value as AssignmentMode]}</option>)}
-                  </select></label>
-                  <button type="button" className="secondary-button" disabled={busy || processing} onClick={() => onBuildPackage(mode)}>
-                    {busy ? <><RefreshCw className="spin" size={16} />正在整理原文素材</> : <><FileStack size={16} />先整理素材包</>}
-                  </button>
-                </div>
-              ) : null}
-              {activeJob?.type === "build-content-package" && !terminalJobStatuses.has(activeJob.status) ? (
-                <div className="story-package-job" role="status">
-                  <div><RefreshCw className="spin" size={14} /><strong>{activeJob.stage || "正在建立素材包"}</strong><span>{Math.round(activeJob.progress * 100)}%</span></div>
-                  <progress value={activeJob.progress} max={1}>{Math.round(activeJob.progress * 100)}%</progress>
-                </div>
-              ) : null}
-                </details>
-              )}
-            </article>
-          </div>}
-        </div>
-
-        <footer className="story-drawer-footer">
-          <p className="story-footer-note">原文图表随素材整理 · 生成后可以逐张删改</p>
-          {story.ignored ? (
-            <button type="button" className="secondary-button" disabled={busy} onClick={onRestoreFeedback}><RotateCcw size={15} />恢复到今日候选</button>
-          ) : (
-            <>
-              <button type="button" className="secondary-button" disabled={busy} onClick={onSkip}>跳过</button>
-              <button type="button" className="secondary-button" disabled={busy} onClick={() => onQueue(!story.selected)}>
-                {story.selected ? <><Check size={15} />移出待写</> : <><FileStack size={15} />加入待写</>}
-              </button>
-              <button type="button" className="primary-button" disabled={busy || processing || !story.assignment.canDraft} onClick={() => onQuickWrite(mode)}><Sparkles size={15} />{starterDraftActionCopy.primary}</button>
-            </>
-          )}
-        </footer>
-      </aside>
-    </div>
-  );
-};
-
 interface TodayPageProps {
   onNavigate: (page: AppPage) => void;
   onNotice: (kind: "success" | "info" | "error", message: string) => void;
@@ -595,6 +163,16 @@ interface TodayPageProps {
 
 export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, requestedStoryId, onRequestedStoryHandled }: TodayPageProps) {
   const [category, setCategory] = useState("news");
+  const [listQuery, setListQuery] = useState("");
+  const [listView, setListView] = useState("all");
+  const [listSort, setListSort] = useState("recommended");
+  const [listTime, setListTime] = useState("all");
+  const [incomingToday, setIncomingToday] = useState<TodayView>();
+  const todayRef = useRef<TodayView | undefined>(undefined);
+  const [actionError, setActionError] = useState<string>();
+  const [openingStory, setOpeningStory] = useState<Pick<StoryView, "id">>();
+  const [openError, setOpenError] = useState<string>();
+  const originRef = useRef<{ element: HTMLElement | null; x: number; y: number } | undefined>(undefined);
   const [layout, setLayout] = useState<HomeLayout>(defaultHomeLayout);
   const [customizing, setCustomizing] = useState(false);
   const [layoutLoaded, setLayoutLoaded] = useState(false);
@@ -604,7 +182,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
   const activeColumn = layout.columns.find((column) => column.id === category) ?? layout.columns[0];
   const applyLayout = (next: HomeLayout) => {
     setLayout(next);
-    setCategory((current) => next.columns.some((column) => column.id === current) ? current : next.columns[0].id);
+    setCategory((current) => next.columns.some(column => column.id === current) ? current : next.columns[Math.min(Math.max(0, layout.columns.findIndex(column => column.id === current)), next.columns.length - 1)]!.id);
   };
   useEffect(() => {
     let alive = true;
@@ -627,6 +205,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
     return () => { alive = false; };
   }, [activeColumn.id, activeColumn.keyword, activeColumn.source]);
   const [today, setToday] = useState<TodayView>();
+  useEffect(() => { todayRef.current = today; }, [today]);
   const [drafts, setDrafts] = useState<DraftOverview>();
   const [draftError, setDraftError] = useState<string>();
   const [openingDraftId, setOpeningDraftId] = useState<string>();
@@ -654,7 +233,17 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
     const [recommendations, overview] = await Promise.allSettled([api.today(), api.draftOverview()]);
     if (requestId !== loadRequestRef.current) return;
     if (recommendations.status === "fulfilled") {
-      setToday(recommendations.value);
+      const next = recommendations.value;
+      const current = todayRef.current;
+      if (quiet && current) {
+        const groups = ["mustReads", "secondary", "interesting", "backlog", "releaseHighlights", "knowledge"] as const;
+        const signature = (value: TodayView) => JSON.stringify(groups.map(key => (value[key] ?? []).map(story => [story.id, story.lastSeenAt, story.summary])));
+        if (signature(current) !== signature(next)) setIncomingToday(next);
+        const updated = new Map([...groups.flatMap(key => next[key] ?? []), ...(next.pending ?? []), ...next.watching].map(story => [story.id, story]));
+        const stable = { ...current, pending: next.pending, watching: next.watching, funnel: next.funnel };
+        for (const key of groups) stable[key] = (current[key] ?? []).map(story => updated.has(story.id) ? { ...story, selected: updated.get(story.id)!.selected, drafted: updated.get(story.id)!.drafted } : story);
+        setToday(stable);
+      } else { setToday(next); setIncomingToday(undefined); }
       setError(undefined);
     } else {
       setError(recommendations.reason instanceof Error ? recommendations.reason.message : String(recommendations.reason));
@@ -696,6 +285,9 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
     setExplanationLoading(false);
     setExplanationError(undefined);
     setDetail(undefined);
+    setBusy(false);
+    const origin = originRef.current;
+    window.requestAnimationFrame(() => { (origin?.element?.isConnected ? origin.element : document.querySelector<HTMLElement>(".rail-open"))?.focus({ preventScroll: true }); if (origin) window.scrollTo(origin.x, origin.y); });
   }, []);
 
   const hydrateExplanation = useCallback(async (storyId: string, requestId: number, force = false) => {
@@ -711,12 +303,10 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       }
       let job = queued.job;
       if (!job) throw new Error("正文讲解任务没有成功启动");
-      for (let attempt = 0; attempt < 160 && !["complete", "failed", "cancelled"].includes(job.status); attempt += 1) {
-        if (explanationRequestRef.current !== requestId) return;
-        await new Promise((resolve) => window.setTimeout(resolve, 1_500));
-        if (explanationRequestRef.current !== requestId) return;
-        job = await api.productJob(job.id);
-      }
+      const waited = await waitForProductJob(job, { read: api.productJob, current: () => explanationRequestRef.current === requestId });
+      job = waited.job;
+      if (explanationRequestRef.current !== requestId) return;
+      if (waited.deferred) { setExplanationError(deferredJobMessage(job)); return; }
       if (job.status !== "complete") throw new Error(job.error || "正文讲解暂时没有完成");
       const refreshed = await api.story(storyId);
       if (explanationRequestRef.current === requestId) {
@@ -736,19 +326,21 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
     explanationRequestRef.current = requestId;
     setExplanationError(undefined);
     setExplanationLoading(false);
+    setActionError(undefined); setOpenError(undefined); setOpeningStory(story);
+    originRef.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null, x: window.scrollX, y: window.scrollY };
     setBusy(true);
     try {
       const next = await api.story(story.id);
       if (explanationRequestRef.current !== requestId) return;
       setDetail(next);
       void api.recordStoryEvent(story.id, "opened").catch(() => undefined);
-      if (next.story.explanation.status !== "ready") void hydrateExplanation(story.id, requestId);
+      // Opening the reader is strictly cache-only. AI reading is explicit.
     } catch (openError) {
-      if (explanationRequestRef.current === requestId) onNotice("error", openError instanceof Error ? openError.message : String(openError));
+      if (explanationRequestRef.current === requestId) setOpenError(openError instanceof Error ? openError.message : String(openError));
     } finally {
-      if (explanationRequestRef.current === requestId) setBusy(false);
+      if (explanationRequestRef.current === requestId) { setBusy(false); setOpeningStory(undefined); }
     }
-  }, [hydrateExplanation, onNotice]);
+  }, [onNotice]);
 
   useEffect(() => {
     if (!requestedStoryId) return;
@@ -865,7 +457,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
         onNotice("info", "素材包已进入后台；可以关闭详情并继续选题，进度会实时更新。");
       }
     } catch (packageError) {
-      onNotice("error", packageError instanceof Error ? packageError.message : String(packageError));
+      setActionError(packageError instanceof Error ? packageError.message : String(packageError));
     } finally {
       setBusy(false);
     }
@@ -894,6 +486,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
     try {
       await generateDraftFromPackage(contentPackage);
     } catch (draftError) {
+      setActionError(draftError instanceof Error ? draftError.message : String(draftError));
       onNotice("error", draftError instanceof Error ? draftError.message : String(draftError));
     } finally {
       setBusy(false);
@@ -914,6 +507,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       if (onOpenDraft) await onOpenDraft(result.draft.id);
       else onNavigate("drafts");
     } catch (draftError) {
+      setActionError(draftError instanceof Error ? draftError.message : String(draftError));
       onNotice("error", draftError instanceof Error ? draftError.message : String(draftError));
     } finally {
       setBusy(false);
@@ -929,6 +523,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       return;
     }
     const mode = requestedMode ?? story.assignment.mode as Exclude<AssignmentMode, "watch" | "skip">;
+    setActionError(undefined);
     setBusy(true);
     try {
       if (!story.selected) await updateQueuedState(story, true);
@@ -948,6 +543,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       }
       await generateDraftFromPackage(queued.contentPackage);
     } catch (draftError) {
+      setActionError(draftError instanceof Error ? draftError.message : String(draftError));
       onNotice("error", draftError instanceof Error ? draftError.message : String(draftError));
     } finally {
       setBusy(false);
@@ -999,6 +595,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
         }
         await loadToday(true);
       } catch (jobError) {
+        setActionError(jobError instanceof Error ? jobError.message : String(jobError));
         onNotice("error", job.type === "build-content-package" && job.status === "failed"
           ? "文章资料暂未准备好，选题已保留。可在右下角任务中重试或回到选题。"
           : jobError instanceof Error ? jobError.message : String(jobError));
@@ -1007,16 +604,6 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       }
     })();
   }, [activeStoryJob, loadToday, onNotice]);
-
-  const coverage = today?.coverage;
-  const backgroundProcessing = Boolean(activeStoryJob && !terminalJobStatuses.has(activeStoryJob.status));
-  const metrics = useMemo(() => [
-    { label: "活跃事件", value: coverage?.activeStoryCount ?? 0, icon: BookOpen },
-    { label: "正在升温", value: coverage?.risingCount ?? 0, icon: TrendingUp },
-    { label: "来源图 2+", value: coverage?.sourceImageReadyCount ?? coverage?.imageReadyCount ?? 0, icon: ImageIcon },
-    { label: "发布图 2+", value: coverage?.publishReadyStoryCount ?? 0, icon: Images },
-    { label: "强证据", value: coverage?.strongEvidenceCount ?? 0, icon: ShieldCheck },
-  ], [coverage]);
 
   const submitSearch = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1043,6 +630,12 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       setOpeningDraftId(undefined);
     }
   };
+
+  const newsPool = activeColumn.keyword ? keywordNews : !today ? [] : listView === "important" ? today.mustReads : listView === "interesting" ? today.interesting ?? [] : listView === "backlog" ? today.backlog : [...today.mustReads, ...today.secondary, ...(today.interesting ?? []), ...today.backlog, ...(today.releaseHighlights ?? [])];
+  const visibleNews = newsPool.filter((story, i, all) => all.findIndex(s => s.id === story.id) === i)
+    .filter(story => `${story.title} ${story.originalTitle} ${story.summary}`.toLocaleLowerCase().includes(listQuery.trim().toLocaleLowerCase())
+      && (listTime === "all" || (story.publicationDateKnown !== false && Date.now() - Date.parse(story.publishedAt) <= Number(listTime) * 3_600_000)))
+    .sort((a, b) => listSort === "latest" ? (b.publicationDateKnown === false ? 0 : Date.parse(b.publishedAt) || 0) - (a.publicationDateKnown === false ? 0 : Date.parse(a.publishedAt) || 0) : 0);
 
   return (
     <div className="page today-page">
@@ -1075,7 +668,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
         <button type="submit" className="primary-button" disabled={!searchQuery.trim() || searching}>
           {searching ? <><RefreshCw className="spin" size={16} />搜索中</> : <><Search size={16} />搜索最近 7 天</>}
         </button>
-        <p id="today-search-help">实时读取已启用的官网与新闻来源；X 和社区帖子不参与这次事实搜索。</p>
+        <p id="today-search-help">联网搜索 · 最近 7 个香港自然日 · 已启用的官网与新闻来源；可能调用速读模型。X 和社区帖子不参与这次事实搜索。</p>
       </form>
 
       {today?.collection ? <aside className="today-collection-status" aria-label="最近一轮采集">
@@ -1088,75 +681,33 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
         </button> : null}
       </aside> : null}
 
-      {today ? <section className="today-metrics" aria-label="今日覆盖概览">
-        {metrics.map(({ label, value, icon: Icon }) => <div key={label}><Icon size={17} /><span>{label}</span><strong>{value}</strong></div>)}
-      </section> : null}
+
 
       {error ? (
-        <div className="today-error" role="alert"><AlertTriangle size={18} /><div><strong>今日推荐读取失败</strong><p>{error}</p></div><button type="button" onClick={() => void loadToday()}>重试</button></div>
+        <div className="today-error" role="alert"><AlertTriangle size={18} /><div><strong>{today ? "刷新失败，保留上次内容" : "今日推荐读取失败"}</strong><p>{today ? "已有列表和选题仍可查看。可以重试读取。" : "本地列表暂不可用，可以重试。"}</p><details><summary>具体原因</summary>{error}</details></div><button type="button" onClick={() => void loadToday()}>重试</button></div>
       ) : null}
 
       {loading && !today ? <PageLoading label="正在整理今天的选题与草稿…" /> : null}
 
+      {openingStory && !detail ? <p className="reader-task" role="status">正在读取已有材料…</p> : null}
+      {openError ? <div className="today-error" role="alert"><div><strong>阅读器暂未打开</strong><p>列表和选题仍然保留，请重新点击该条目重试。</p><details><summary>具体原因</summary>{openError}</details></div></div> : null}
+      {incomingToday ? <div className="news-update" role="status"><span>有更新的内容，当前列表保持原顺序。</span><button className="text-button" disabled={Boolean(detail)} onClick={() => { setToday(incomingToday); setIncomingToday(undefined); }}>显示更新</button></div> : null}
       <div className="today-editorial-grid">
         <div className="today-reading-column">
           <TopicCategoryTabs value={activeColumn.id} columns={layout.columns} onChange={setCategory} onCustomize={() => void customize()} />
           {activeColumn.source === "news" ? <div role="tabpanel" id={`topic-panel-${activeColumn.id}`} aria-labelledby={`topic-tab-${activeColumn.id}`} tabIndex={0}>
-            {activeColumn.keyword ? <section className="today-section home-keyword-news">
-              <div className="today-section-heading"><div><span>近 7 天已采集新闻 · 关键词「{activeColumn.keyword}」</span><h2>{activeColumn.label}</h2></div><small>{keywordNews.length} 条</small></div>
-              {keywordLoading ? <p role="status" className="story-empty-copy">正在整理栏目…</p> : keywordError ? <p role="alert" className="story-empty-copy">{keywordError}</p> : keywordNews.length ? keywordNews.map((story) => <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />) : <p className="story-empty-copy">已采集新闻中暂无匹配内容。可用上方搜索补充线索。</p>}
-            </section> : <>
-            {today ? <>
-          {today.releaseHighlights?.length ? <section className="today-release-highlights" aria-label="近期重要发布">
-            <div className="release-highlights-heading"><span>RELEASE RADAR</span><h2>近期重要发布</h2><small>过去 7 天 · 官方发布线索</small></div>
-            <div className="release-highlights-list">{today.releaseHighlights.map((story) => <button type="button" key={story.id} onClick={() => openStory(story)}>
-              <span className="release-status"><i />{story.drafted ? "已进入写作" : story.releaseDossier?.facets.find((facet) => facet.id === "official")?.status === "ready" ? "已定位官方原文" : "原文待核对"}<small>{relativeTime(story.publishedAt)}</small></span>
-              <strong>{story.title}</strong><span className="release-open">查看发布资料 <ArrowRight size={14} /></span>
-            </button>)}</div>
-          </section> : null}
-          <section className="today-section today-must-read">
-            <div className="today-section-heading">
-              <div><span>今日重点 / {String(today.mustReads.length).padStart(2, "0")}</span><h2>今天，先看这几件事</h2></div>
-              <span className="desk-section-caption">已合并同一事件的报道</span>
+            <div className="news-list-toolbar">
+              <label className="topic-filter-input"><Search size={16} /><input type="search" aria-label="筛选当前新闻列表" placeholder="筛选当前列表 · 不联网" value={listQuery} onChange={e => setListQuery(e.target.value)} /></label>
+              <label>视图<select aria-label="新闻视图" value={listView} onChange={e => setListView(e.target.value)}><option value="all">全部推荐</option><option value="important">今日重点</option><option value="interesting">有趣实践</option><option value="backlog">近期补看</option></select></label>
+              <label>排序<select aria-label="新闻排序" value={listSort} onChange={e => setListSort(e.target.value)}><option value="recommended">编辑推荐</option><option value="latest">发布时间</option></select></label>
+              <label>时间<select aria-label="新闻时间" value={listTime} onChange={e => setListTime(e.target.value)}><option value="all">当前范围</option><option value="48">近 48 小时</option><option value="168">近 7 天</option></select></label>
             </div>
-            {today.mustReads.length ? (
-              <div className="today-featured-list">{today.mustReads.map((story, index) => (
-                <StoryRow key={story.id} story={story} rank={index + 1} featured busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />
-              ))}</div>
-            ) : (
-              <div className="today-empty"><Eye size={28} /><div><strong>下一篇好文章，从一条线索开始</strong><p>暂时没有符合推荐条件的事件。搜索你关注的主题，或去工作台读取新闻源。</p></div><button type="button" className="secondary-button" onClick={() => onNavigate("workbench")}>打开新闻工作台 <ArrowRight size={15} /></button></div>
-            )}
-          </section>
-
-            <section className="today-section">
-              <div className="today-section-heading"><div><span>更多线索</span><h2>也值得花一分钟</h2></div><button type="button" className="text-button" onClick={() => onNavigate("workbench")}>全部新闻 <ArrowRight size={14} /></button></div>
-              <div className="today-secondary-list">
-                {today.secondary.length ? today.secondary.map((story) => (
-                  <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />
-                )) : <p className="story-empty-copy">当前没有额外可成稿候选。</p>}
-              </div>
+            <div className="news-scope"><span>{activeColumn.keyword ? `近 7 天已采集新闻 · 关键词「${activeColumn.keyword}」` : "已有推荐 · 新闻 48 小时 / 发布 7 天 / 实践 30 天"}</span><span>{visibleNews.length} 条</span></div>
+            <section className="today-section today-must-read">
+              <div className="today-section-heading"><div><h2>{activeColumn.keyword ? activeColumn.label : "值得阅读的选题"}</h2></div><span className="desk-section-caption">先核对，再决定写什么</span></div>
+              {keywordLoading ? <p role="status">正在读取已保存内容…</p> : keywordError ? <p role="alert">{keywordError}</p> : visibleNews.length ? <div className="today-featured-list">{visibleNews.map((story, index) => <StoryRow key={story.id} story={story} featured={index === 0} busy={busy} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />)}</div>
+                : <div className="today-empty"><Eye size={24} /><div><strong>{listQuery || listView !== "all" || listTime !== "all" ? "当前筛选没有结果" : today?.collection ? "本轮没有符合条件的推荐" : "还没有读取新闻"}</strong><p>{activeColumn.keyword ? "已采集新闻中暂无匹配内容。可用上方搜索补充线索。" : "可以调整筛选，或去工作台读取来源。没有合格选题时保留空位。"}</p></div><button className="secondary-button" onClick={() => { if (listQuery || listView !== "all" || listTime !== "all") { setListQuery(""); setListView("all"); setListTime("all"); } else onNavigate("workbench"); }}>{listQuery || listView !== "all" || listTime !== "all" ? "清除筛选" : "打开新闻工作台"}</button></div>}
             </section>
-
-          {today.interesting?.length ? <section className="today-section today-interesting">
-            <div className="today-section-heading"><div><span>不只追热度</span><h2>有趣，也有用</h2></div><small>具体实践与新鲜题材 · 最多 2 条</small></div>
-            <div className="today-secondary-list">{today.interesting.map((story) => <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />)}</div>
-          </section> : null}
-          {today.backlog.length ? (
-            <section className="today-section today-backlog">
-              <div className="today-section-heading">
-                <div><span>近 7 日补看</span><h2>错过但仍值得写的事件</h2></div>
-                <p>不挤占 48 小时内的今日推荐；只补回尚未写过、证据足够的旧事件。</p>
-              </div>
-              <div className="today-secondary-list">
-                {today.backlog.map((story) => (
-                  <StoryRow key={story.id} story={story} busy={busy} processing={backgroundProcessing} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-
-            </> : null}</>}
           </div> : <TopicCategoryPanel key={activeColumn.id} columnId={activeColumn.id} keyword={activeColumn.keyword} platform={activeColumn.source} onOpenStory={openStory}
             onChanged={() => void loadToday(true)} onNavigate={onNavigate} onNotice={onNotice} />}
         </div>
@@ -1180,9 +731,9 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
           </div>
       </> : null}
 
-      {customizing ? <HomeLayoutDialog initial={layout} onClose={() => setCustomizing(false)} onSaved={(next) => { applyLayout(next); setCustomizing(false); }} /> : null}
+      {customizing ? <HomeLayoutDialog initial={layout} onClose={() => setCustomizing(false)} onSaved={(next) => { const removed = !next.columns.some(column => column.id === activeColumn.id); const index = Math.min(layout.columns.findIndex(column => column.id === activeColumn.id), next.columns.length - 1); applyLayout(next); setCustomizing(false); if (removed) window.requestAnimationFrame(() => document.getElementById(`topic-tab-${next.columns[Math.max(0, index)]!.id}`)?.focus()); }} /> : null}
       {detail ? (
-        <StoryDrawer
+        <StoryReader
           detail={detail}
           busy={busy}
           activeJob={activeStoryJob && activeStoryJob.payload && typeof activeStoryJob.payload === "object"
@@ -1192,6 +743,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
             : undefined}
           explanationLoading={explanationLoading}
           explanationError={explanationError}
+          actionError={actionError}
           onClose={closeStory}
           onRetryExplanation={retryExplanation}
           onSupplementEvidence={() => void supplementEvidence()}

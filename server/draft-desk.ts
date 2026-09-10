@@ -1,8 +1,10 @@
+import { inspectLocalImageFile } from "./image-readiness.js";
+import { legacyDraftBodyHtml } from "./article-html.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { generateCandidateDraft } from "./generator.js";
 import { getLocalDatabase, readState, updateState } from "./storage.js";
-import { activeWritingGuidelines } from "./learning-desk.js";
+import { writingPreferencePlan } from "./writing-preference-retrieval.js";
 import { appendDraftRevision } from "./draft-revisions.js";
 import { createDraftGenerationAttempt, recordDraftGenerationAttempt } from "./draft-generation-attempt.js";
 import { draftQualityWarningsFor, evaluateDraftPackageQuality } from "./editorial-quality-desk.js";
@@ -15,7 +17,7 @@ const inFlight = new Map<string, Promise<{ draft: ArticleDraft; reused: boolean 
 const humanInFlight = new Map<string, Promise<{ draft: ArticleDraft; reused: boolean }>>();
 
 /** Bump only when routing/evidence/prompt behavior materially changes. */
-export const editorialGeneratorRevision = "source-first-v14";
+export const editorialGeneratorRevision = "package-boundary-v17";
 export const humanDraftRevision = "human-first-v1";
 
 const writingBriefFor = (contentPackage: ContentPackage): ArticleDraft["writingBrief"] => ({
@@ -103,6 +105,7 @@ export const sourceImagesFromContentPackage = async (
     if (!/^[a-f0-9]{64}$/u.test(expected)) {
       throw new Error(`素材包图片 ${asset.sourceImageId} 缺少有效 SHA-256 指纹`);
     }
+    if (!inspectLocalImageFile(image).available) throw new Error(`素材包图片 ${asset.sourceImageId} 的文件缺失或路径不属于本机`);
     let bytes: Buffer;
     try {
       bytes = await readFile(image.localPath);
@@ -262,7 +265,7 @@ export const createHumanDraftInState = ({
 
   state.drafts.unshift(draft);
   state.drafts = normalizeDraftCatalog(state.drafts);
-  appendDraftRevision(state, draft, "manual", new Date(now));
+  appendDraftRevision(state, draft, "initial", new Date(now));
   const target = state.runs.find((run) => run.id === runId)
     ?.candidates.find((entry) => entry.id === candidate.id);
   if (target) target.status = "drafted";
@@ -271,9 +274,12 @@ export const createHumanDraftInState = ({
 
 export type DraftProgressReporter = (progress: number, stage: string) => void;
 
+interface DraftCreationOptions { draftId?: string; intake?: ArticleDraft["intake"]; }
+
 const create = async (
   packageId: string,
   onProgress?: DraftProgressReporter,
+  options: DraftCreationOptions = {},
 ): Promise<{ draft: ArticleDraft; reused: boolean }> => {
   onProgress?.(0.08, "校验冻结素材包");
   const database = await getLocalDatabase();
@@ -314,13 +320,14 @@ const create = async (
   });
 
   try {
+    const preferencePlan = writingPreferencePlan(database, { enabled: initialState.settings.writingMemoryEnabled, title: contentPackage.title, intent: contentPackage.intent, mode: contentPackage.mode });
     const communitySource = contentPackage.sources.find((source) => source.isCommunity);
     const draft = await generateCandidateDraft(
       runId,
       candidate as Candidate,
       provider,
       initialState.aiSettings.skills,
-      undefined,
+      options.draftId,
       {
         extractedText: packageEvidenceText(contentPackage),
         canonicalUrl: contentPackage.sources.find((source) => !source.isCommunity)?.url ?? candidate.canonicalUrl ?? candidate.url,
@@ -328,7 +335,7 @@ const create = async (
         skipExtraction: true,
         contentPackage,
         draftStrategy: contentPackage.mode,
-        writingGuidelines: activeWritingGuidelines(database, initialState.settings.writingMemoryEnabled),
+        writingGuidelines: [...preferencePlan.selected.map(item => item.guideline), ...(contentPackage.sourceMode === "translation" ? ["将冻结原文忠实翻译为中文，保留作者归属、条件和顺序，不加评论或外部背景。"] : [])],
         communityDiscovery: communitySource ? {
           platform: communitySource.label,
           discussionUrl: communitySource.url,
@@ -341,11 +348,13 @@ const create = async (
         onProgress,
       },
     );
+    draft.provenance.writingMemory = preferencePlan;
+    if (options.intake) draft.intake = structuredClone(options.intake);
     const frozenSource = contentPackage.sourceMaterials?.[0];
     if (contentPackage.intent === "source" && frozenSource) {
       draft.sourceMaterial = {
         kind: frozenSource.sourceKind === "community-post" ? "community" : "article",
-        mode: "source",
+        mode: contentPackage.sourceMode ?? "source",
         sourceUrl: frozenSource.url,
         sourceLabel: frozenSource.sourceLabel,
         author: frozenSource.author,
@@ -391,7 +400,7 @@ const create = async (
       if (duplicate) return { draft: duplicate, reused: true };
       state.drafts.unshift(draft);
       state.drafts = normalizeDraftCatalog(state.drafts);
-      appendDraftRevision(state, draft, "manual");
+      appendDraftRevision(state, draft, "initial");
       const target = state.runs.find((run) => run.id === runId)
         ?.candidates.find((entry) => entry.id === candidate.id);
       if (target) target.status = "drafted";
@@ -434,10 +443,10 @@ const create = async (
  * passes a locked ContentPackage to the model, so raw feeds and model memory
  * cannot silently expand the article's fact boundary.
  */
-export const createDraftFromPackage = (packageId: string, onProgress?: DraftProgressReporter) => {
+export const createDraftFromPackage = (packageId: string, onProgress?: DraftProgressReporter, options: DraftCreationOptions = {}) => {
   const current = inFlight.get(packageId);
   if (current) return current;
-  const operation = create(packageId, onProgress).finally(() => inFlight.delete(packageId));
+  const operation = create(packageId, onProgress, options).finally(() => inFlight.delete(packageId));
   inFlight.set(packageId, operation);
   return operation;
 };
@@ -491,4 +500,28 @@ export const createHumanDraftFromPackage = (packageId: string) => {
   })().finally(() => humanInFlight.delete(packageId));
   humanInFlight.set(packageId, operation);
   return operation;
+};
+
+/** Source mode is a literal private working copy; no model call is needed. */
+export const createSourceDraftFromPackage = async (packageId: string) => {
+  const database = await getLocalDatabase();
+  const contentPackage = database.getContentPackage<ContentPackage>(packageId);
+  if (!contentPackage || contentPackage.intent !== "source" || contentPackage.status !== "ready" || contentPackage.blockers.length || !contentPackage.sourceMaterials?.length) {
+    throw new ClassifiedJobError("完整冻结原文尚未就绪，不能建立原文副本", "repairable");
+  }
+  const images = await sourceImagesFromContentPackage(contentPackage);
+  return updateState((state) => {
+    const existing = state.drafts.find((draft) => draft.provenance.contentPackageId === packageId);
+    if (existing) return { draft: existing, reused: true };
+    const result = createHumanDraftInState({ state, contentPackage, images });
+    const draft = result.draft;
+    draft.paragraphs = contentPackage.sourceMaterials!.flatMap((material) => material.originalText.split(/\n\s*\n/u).filter(Boolean));
+    draft.factClaims = [];
+    draft.bodyHtml = legacyDraftBodyHtml(draft);
+    state.draftRevisions = state.draftRevisions.filter((revision) => revision.draftId !== draft.id);
+    draft.editorialBaseline = undefined;
+    draft.provenance.authoringMode = "human-first";
+    appendDraftRevision(state, draft, "initial");
+    return result;
+  });
 };

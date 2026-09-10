@@ -1,3 +1,4 @@
+import { waitForProductJob, deferredJobMessage } from "./product-job-wait";
 import { chooseWorkbenchRun } from "./workbench-run";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { completionAvailability } from "../server/editorial-controls.js";
@@ -671,7 +672,12 @@ function App() {
   ) => {
     setActionBusy(true);
     try {
-      const draft = await api.createCommunityDraft(runId, candidateId, mode);
+      const queued = await api.createCommunityDraft(runId, candidateId, mode);
+      const waited = await waitForProductJob(queued.job, { read: api.productJob });
+      if (waited.deferred) { setNotice({ kind: "success", message: deferredJobMessage(waited.job) }); return; }
+      const result = waited.job.result as { draftId?: string } | undefined;
+      if (waited.job.status !== "complete" || !result?.draftId) throw new Error(waited.job.error || "成稿任务未完成");
+      const draft = await api.draft(result.draftId);
       await refresh();
       setActiveDraftId(draft.id);
       navigate("drafts");
@@ -700,14 +706,12 @@ function App() {
       let draftId = queued.draft?.id;
       let imageCount = queued.draft?.images.filter((image) => image.afterParagraph >= 0).length ?? 0;
       let job = queued.job;
-      for (let attempt = 0; !draftId && attempt < 150 && ["queued", "running", "retrying"].includes(job.status); attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
-        job = await api.productJob(job.id);
-        if (job.result && typeof job.result === "object") {
-          const result = job.result as { draftId?: unknown; imageCount?: unknown };
-          if (typeof result.draftId === "string") draftId = result.draftId;
-          if (typeof result.imageCount === "number") imageCount = result.imageCount;
-        }
+      const waited = await waitForProductJob(job, { read: api.productJob });
+      job = waited.job;
+      if (waited.deferred) { setNotice({ kind: "success", message: deferredJobMessage(job) }); return; }
+      if (job.result && typeof job.result === "object") {
+        const result = job.result as { draftId?: string; imageCount?: number };
+        draftId = result.draftId ?? draftId; imageCount = result.imageCount ?? imageCount;
       }
       if (!draftId || job.status !== "complete") {
         throw new Error(job.error || "成稿任务没有完成，请在任务进度中查看原因。");

@@ -104,7 +104,7 @@ export function EditorialReadingPane({
         <div className="editorial-reader-refresh" role="status"><LoaderCircle className="spin" size={15} />正在补齐来源正文，当前信息可以先看。</div>
       ) : null}
       {error ? (
-        <div className="editorial-reader-inline-error"><AlertTriangle size={15} /><span>{error}</span>{onRetry ? <button type="button" onClick={onRetry}>重试</button> : null}</div>
+        <div className={error.startsWith("任务仍在") ? "editorial-reader-pending" : "editorial-reader-inline-error"} role={error.startsWith("任务仍在") ? "status" : "alert"}><span>{error}</span>{onRetry && !error.startsWith("任务仍在") ? <button type="button" onClick={onRetry}>重试</button> : null}</div>
       ) : null}
 
       <section className="editorial-reader-brief">

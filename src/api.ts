@@ -285,6 +285,7 @@ export interface ShellView {
 }
 
 export interface ProductJob {
+  lane?: "foreground" | "background";
   id: string;
   type: string;
   idempotencyKey: string;
@@ -307,7 +308,7 @@ export interface ProductJob {
 export const api = {
   bootstrap: () => request<WorkflowState>("/api/bootstrap"),
   shell: () => request<ShellView>("/api/shell"),
-  today: () => request<TodayView>("/api/today"),
+  today: () => request<TodayView>("/api/today?readOnly=1"),
   homeNews: (keyword: string) => request<StoryView[]>(`/api/home-news?keyword=${encodeURIComponent(keyword)}`),
   homeLayout: () => request<HomeLayout>("/api/home-layout"),
   saveHomeLayout: (layout: HomeLayout) => request<HomeLayout>("/api/home-layout", { method: "PATCH", body: JSON.stringify(layout) }),
@@ -316,6 +317,7 @@ export const api = {
   refreshZhihuHotlist: () => request<TopicFeedView>("/api/topic-feeds/zhihu/refresh", { method: "POST", body: "{}" }),
   retainZhihuTopic: (id: string) => request<{ runId: string; candidateId: string }>(`/api/topic-feeds/zhihu/${encodeURIComponent(id)}/select`, { method: "POST", body: "{}" }),
   draftOverview: () => request<DraftOverview>("/api/drafts/overview"),
+  storyReading: (storyId: string) => request<import("../server/product-types.js").SourceMaterialSnapshot[]>(`/api/stories/${encodeURIComponent(storyId)}/reading`),
   story: (storyId: string) => request<StoryDetailResult>(`/api/stories/${storyId}`),
   editorialIntake: (runId: string, candidateId: string) => request<EditorialIntakeResult>(
     `/api/editorial-intakes/${encodeURIComponent(runId)}/${encodeURIComponent(candidateId)}`,
@@ -585,10 +587,12 @@ export const api = {
     runId: string,
     candidateId: string,
     mode: "article" | "source" | "translation" | "curation",
-  ) => request<ArticleDraft>(`/api/runs/${runId}/candidates/${candidateId}/community-draft`, {
+  ) => request<{ job: ProductJob }>(`/api/runs/${runId}/candidates/${candidateId}/community-draft`, {
     method: "POST",
     body: JSON.stringify({ mode }),
   }),
+  draft: (draftId: string) => request<ArticleDraft>(`/api/drafts/${encodeURIComponent(draftId)}`),
+  confirmDraft: (draftId: string, updatedAt: string) => request<ArticleDraft>(`/api/drafts/${encodeURIComponent(draftId)}/confirm`, { method: "POST", body: JSON.stringify({ updatedAt }) }),
   saveDraft: (draftId: string, draft: Partial<ArticleDraft>, saveMode: DraftSaveMode = "manual") =>
     request<ArticleDraft>(`/api/drafts/${draftId}`, {
       method: "PATCH",

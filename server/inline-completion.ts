@@ -9,6 +9,7 @@ export interface InlineCompletionPromptInput {
   after?: string;
   editorialProfile?: EditorialProfile;
   writingGuidelines?: string[];
+  factMappings?: Array<{ claim: string; factIds?: string[] }>;
 }
 
 export interface InlineCompletionResult {
@@ -54,16 +55,21 @@ export const buildInlineCompletionPrompt = ({
   after = "",
   editorialProfile,
   writingGuidelines = [],
+  factMappings = [],
 }: InlineCompletionPromptInput) => {
   const evidence = supportedEvidence(contentPackage);
   const beforeContext = bounded(before, 2_400, true);
   const beforeParagraphs = beforeContext.split(/\n+/u).map((paragraph) => paragraph.trim()).filter(Boolean);
   const currentParagraph = beforeParagraphs.at(-1) ?? beforeContext;
   const previousParagraph = beforeParagraphs.at(-2) ?? "";
-  const compactBefore = `${beforeContext}\n${after}`.normalize("NFKC").replace(/\s+/gu, "").toLocaleLowerCase("zh-CN");
+  const compactBefore = `${before}\n${after}`.normalize("NFKC").replace(/\s+/gu, "").toLocaleLowerCase("zh-CN");
+  const mappedIds = new Set(factMappings.filter((mapping) => {
+    const claim = normalizeAnchor(mapping.claim);
+    return claim.length >= 8 && compactBefore.includes(claim);
+  }).flatMap((mapping) => mapping.factIds ?? []));
   const uncoveredFacts = contentPackage.facts
     .filter((fact) => fact.status === "supported")
-    .filter((fact) => !compactBefore.includes(
+    .filter((fact) => !mappedIds.has(fact.id) && !compactBefore.includes(
       fact.text.normalize("NFKC").replace(/\s+/gu, "").toLocaleLowerCase("zh-CN"),
     ))
     .map((fact) => `[${fact.id}] ${fact.text}`)
@@ -118,27 +124,11 @@ const completionParagraphs = (value: string) => {
     .replace(/\s*```$/u, "")
     .replace(/^(?:续写|建议|补全)[：:]\s*/u, "")
     .trim();
-  const paragraphs = unwrapped.split(/\r?\n\s*\r?\n+/u).flatMap((paragraph) => {
-    const compact = paragraph
-      .replace(/^\s*(?:[-*+]\s+|#{1,6}\s+)/u, "")
-      .replace(/\s+/gu, " ")
-      .trim();
-    if (!compact) return [];
-    const sentence = compact.match(/^[\s\S]*?[。！？!?](?:[”’"）】])?/u)?.[0] ?? compact;
-    const boundedSentence = [...sentence.trim()].slice(0, 120).join("");
-    return boundedSentence ? [boundedSentence] : [];
-  });
-  const accepted: string[] = [];
-  let characters = 0;
-  for (const paragraph of paragraphs.slice(0, 2)) {
-    const remaining = 220 - characters;
-    if (remaining <= 0) break;
-    const boundedParagraph = [...paragraph].slice(0, remaining).join("").trim();
-    if (!boundedParagraph) continue;
-    accepted.push(boundedParagraph);
-    characters += [...boundedParagraph].length;
-  }
-  return accepted;
+  const paragraphs = unwrapped.split(/\r?\n\s*\r?\n+/u).map((paragraph) => paragraph.replace(/\s+/gu, " ").trim()).filter(Boolean);
+  // Never make a model result fit by dropping its last clause or paragraph.
+  if (!paragraphs.length || paragraphs.length > 2 || [...paragraphs.join("")].length > 220) return [];
+  if (paragraphs.some((paragraph) => !/[。！？.!?][”’"）】]?$/u.test(paragraph))) return [];
+  return paragraphs;
 };
 
 export const prepareInlineCompletion = ({
@@ -154,7 +144,7 @@ export const prepareInlineCompletion = ({
 }): InlineCompletionResult => {
   const paragraphs = completionParagraphs(raw);
   const text = paragraphs.join("\n\n");
-  if (!text) return { available: false, reason: "模型没有返回可用建议" };
+  if (!text) return { available: false, reason: "建议未完整结束或超过长度限制，已拒绝；可重试补全" };
   const surrounding = [normalizeAnchor(before), normalizeAnchor(after)];
   const repeated = paragraphs.some((paragraph) => {
     const fingerprint = normalizeAnchor(paragraph);

@@ -43,7 +43,7 @@ export const inlineCompletionTransaction = (
   text: string,
 ): Transaction => {
   const paragraphs = insertionParagraphs(text);
-  const transaction = state.tr;
+  const transaction = state.tr.setMeta("newsdesk-ai-insertion", true);
   if (!paragraphs.length) return transaction;
   transaction.insertText(paragraphs[0]);
   for (const paragraph of paragraphs.slice(1)) {

@@ -1,0 +1,10 @@
+import {useEffect,useRef,useState} from "react";
+import type {WritingPreferencePlan} from "../../server/writing-preference-retrieval.js";
+export function WritingPreferencePreview({version}:{version:string}){
+ const [title,setTitle]=useState("");const [intent,setIntent]=useState("news");const [plan,setPlan]=useState<WritingPreferencePlan>();const [error,setError]=useState("");const [busy,setBusy]=useState(false);
+ const requestSequence=useRef(0);
+ useEffect(()=>{requestSequence.current++;setPlan(undefined);setBusy(false);},[version,title,intent]);
+ return <details className="strategy-details"><summary>预览当前选题会用哪些偏好</summary><form className="preference-preview" onSubmit={async event=>{event.preventDefault();const ticket=++requestSequence.current;setBusy(true);setPlan(undefined);setError("");try{const response=await fetch("/api/editorial-memories/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,intent})});const data=await response.json();if(!response.ok)throw new Error(data.error);if(ticket===requestSequence.current)setPlan(data);}catch(e){if(ticket===requestSequence.current)setError(e instanceof Error?e.message:"检索失败");}finally{if(ticket===requestSequence.current)setBusy(false);}}}>
+ <label>当前选题<input value={title} maxLength={500} onChange={event=>{setTitle(event.target.value);setPlan(undefined);}} placeholder="例如：本地推理性能实测"/></label><label>写作方向<select value={intent} onChange={event=>{setIntent(event.target.value);setPlan(undefined);}}><option value="news">新闻</option><option value="community">社区观点</option><option value="source">原文工作副本</option></select></label><button className="secondary-button" disabled={busy}>{busy?"检索中…":"只预览，不调用模型"}</button>
+ {error?<p role="alert">{error}</p>:null}{plan?<div role="status"><p>{plan.reason}</p>{plan.selected.map(item=><article key={item.memoryId}><strong>{item.guideline}</strong><p>{item.reason} · {item.evidence.length} 条可追溯依据</p><small>{item.evidence.map(e=>e.draftId).join("、")}</small></article>)}<small>只组织表达；旧稿事实不会加入本篇素材。</small></div>:null}</form></details>;
+}

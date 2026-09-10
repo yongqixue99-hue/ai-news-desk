@@ -4,6 +4,7 @@ export interface EditorialOpportunity {
   lane: "important" | "interesting" | "routine";
   label: string;
   reason: string;
+  practice?: import("./practice-opportunity.js").PracticeOpportunity;
 }
 
 const promotion = /\b(?:webinar|(?:co)?workshop|register now|join us|sponsorship|sponsored|limited.time offer)\b|\[推广\]|注册送|报名|活动预告|限时优惠/iu;

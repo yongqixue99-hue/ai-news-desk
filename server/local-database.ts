@@ -9,6 +9,7 @@ export const LOCAL_DATABASE_SCHEMA_VERSION = 6;
 export type DurableJobStatus = "queued" | "running" | "retrying" | "complete" | "failed" | "cancelled";
 
 export interface DurableJobRecord {
+  lane?: "foreground" | "background";
   id: string;
   type: string;
   idempotencyKey: string;
@@ -86,6 +87,7 @@ export interface SourceSnapshotRecord<T> {
 }
 
 interface JobRow {
+  lane: "foreground" | "background";
   id: string;
   type: string;
   idempotency_key: string;
@@ -124,7 +126,7 @@ export interface EditorialMemoryRecord {
   enabled: boolean;
   firstSeenAt: string;
   lastSeenAt: string;
-  evidence: Array<{ eventId: string; draftId: string; summary: string; createdAt: string }>;
+  evidence: import("./types.js").WritingMemoryEvidence[];
 }
 
 const checksum = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -132,6 +134,7 @@ const json = (value: unknown) => JSON.stringify(value);
 const parseJson = (value: string | null) => value ? JSON.parse(value) as unknown : undefined;
 
 const jobFromRow = (row: JobRow): DurableJobRecord => ({
+  lane: row.lane,
   id: row.id,
   type: row.type,
   idempotencyKey: row.idempotency_key,
@@ -310,6 +313,10 @@ export class LocalDatabase {
     const workflowJobColumns = new Set(
       (this.db.prepare("PRAGMA table_info(workflow_jobs)").all() as Array<{ name: string }>).map((column) => column.name),
     );
+    if (!workflowJobColumns.has("lane")) {
+      this.db.exec("ALTER TABLE workflow_jobs ADD COLUMN lane TEXT NOT NULL DEFAULT 'foreground'");
+      this.db.exec("UPDATE workflow_jobs SET lane = 'background' WHERE type = 'hydrate-story-assets' OR idempotency_key LIKE 'supplement-story-evidence:auto:%'");
+    }
     if (!workflowJobColumns.has("stage")) this.db.exec("ALTER TABLE workflow_jobs ADD COLUMN stage TEXT");
     if (!workflowJobColumns.has("heartbeat_at")) this.db.exec("ALTER TABLE workflow_jobs ADD COLUMN heartbeat_at TEXT");
     this.db.prepare(`
@@ -425,6 +432,7 @@ export class LocalDatabase {
   }
 
   enqueueJob(input: {
+    lane?: "foreground" | "background";
     type: string;
     idempotencyKey: string;
     payload: unknown;
@@ -432,11 +440,16 @@ export class LocalDatabase {
   }): { job: DurableJobRecord; reused: boolean } {
     const current = this.db.prepare("SELECT * FROM workflow_jobs WHERE idempotency_key = ?").get(input.idempotencyKey) as JobRow | undefined;
     if (current && ["queued", "running", "retrying", "complete"].includes(current.status)) {
+      if (input.lane !== "background" && current.lane === "background" && current.status !== "complete") {
+        this.db.prepare("UPDATE workflow_jobs SET lane = 'foreground' WHERE id = ?").run(current.id);
+        current.lane = "foreground";
+      }
       return { job: jobFromRow(current), reused: true };
     }
     const createdAt = this.now();
     const job: DurableJobRecord = {
       id: `job_${randomUUID()}`,
+      lane: input.lane ?? "foreground",
       type: input.type,
       idempotencyKey: input.idempotencyKey,
       status: "queued",
@@ -449,12 +462,13 @@ export class LocalDatabase {
     };
     this.db.prepare(`
       INSERT INTO workflow_jobs(
-        id, type, idempotency_key, status, payload_json, progress,
+        id, type, idempotency_key, status, payload_json, progress, lane,
         attempts, max_attempts, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(idempotency_key) DO UPDATE SET
         id = excluded.id,
         type = excluded.type,
+        lane = excluded.lane,
         status = excluded.status,
         payload_json = excluded.payload_json,
         result_json = NULL,
@@ -476,6 +490,7 @@ export class LocalDatabase {
       job.status,
       json(job.payload),
       job.progress,
+      job.lane!,
       job.attempts,
       job.maxAttempts,
       job.createdAt,
@@ -486,7 +501,7 @@ export class LocalDatabase {
 
   listJobs(limit = 100): DurableJobRecord[] {
     return (this.db.prepare(`
-      SELECT * FROM workflow_jobs ORDER BY created_at DESC LIMIT ?
+      SELECT * FROM workflow_jobs ORDER BY CASE WHEN status IN ('queued','running','retrying') THEN 0 ELSE 1 END, CASE lane WHEN 'foreground' THEN 0 ELSE 1 END, created_at DESC LIMIT ?
     `).all(Math.max(1, Math.min(500, Math.floor(limit)))) as unknown as JobRow[]).map(jobFromRow);
   }
 
@@ -524,6 +539,7 @@ export class LocalDatabase {
   claimNextJob(input: {
     workerId: string;
     types?: string[];
+    foregroundOnly?: boolean;
     leaseMs?: number;
   }): DurableJobRecord | undefined {
     const now = this.now();
@@ -546,7 +562,8 @@ export class LocalDatabase {
         WHERE status IN ('queued','retrying')
           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
           ${typeClause}
-        ORDER BY created_at ASC
+          ${input.foregroundOnly ? "AND lane = 'foreground'" : ""}
+        ORDER BY CASE lane WHEN 'foreground' THEN 0 ELSE 1 END, created_at ASC, rowid ASC
         LIMIT 1
       `).get(now, ...types) as JobRow | undefined;
       if (!row) {
@@ -790,6 +807,7 @@ export class LocalDatabase {
   }
 
   recordEditorialMemoryEvidence(input: {
+    confirmationId?: string; context?: string; beforeExcerpt?: string; afterExcerpt?: string;
     kind: string;
     label: string;
     eventId: string;
@@ -807,6 +825,8 @@ export class LocalDatabase {
         : [];
       const duplicate = currentEvidence.some((entry) => entry.eventId === input.eventId);
       const evidence = duplicate ? currentEvidence : [{
+        confirmationId: input.confirmationId, context: input.context?.slice(0, 600),
+        beforeExcerpt: input.beforeExcerpt?.slice(0, 400), afterExcerpt: input.afterExcerpt?.slice(0, 400),
         eventId: input.eventId,
         draftId: input.draftId,
         summary: input.summary.slice(0, 500),

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   Bell,
   Bot,
@@ -182,9 +182,8 @@ export function AppShell({
           {navigation.map((item) => {
             const Icon = item.icon;
             return (
-              <button
+              <Fragment key={item.id}>{item.id === "sources" ? <span className="nav-section-label nav-management">管理与配置</span> : null}<button
                 type="button"
-                key={item.id}
                 className={`${page === item.id ? "nav-item active" : "nav-item"} nav-item-${item.id}`}
                 aria-label={item.label}
                 aria-current={page === item.id ? "page" : undefined}
@@ -193,7 +192,7 @@ export function AppShell({
               >
                 <Icon size={19} strokeWidth={1.8} />
                 <span>{item.label}</span>
-              </button>
+              </button></Fragment>
             );
           })}
 

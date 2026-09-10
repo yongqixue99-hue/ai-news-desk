@@ -80,14 +80,14 @@ test("inline completion prompt exposes supported package facts and keeps unknown
   assert.match(prompt.user, /尚未覆盖的事实/u);
 });
 
-test("inline completion keeps one short sentence and rejects new protected fact anchors", () => {
+test("inline completion preserves complete clauses and rejects new protected fact anchors", () => {
   const accepted = prepareInlineCompletion({
     raw: "```\n开放 API 让开发者可以更快开始测试。第二句话不应返回。\n```",
     contentPackage: packageData,
   });
   assert.deepEqual(accepted, {
     available: true,
-    text: "开放 API 让开发者可以更快开始测试。",
+    text: "开放 API 让开发者可以更快开始测试。第二句话不应返回。",
   });
 
   const rejected = prepareInlineCompletion({
@@ -103,9 +103,9 @@ test("inline completion keeps one short sentence and rejects new protected fact 
 test("inline completion may predict two evidence-bound paragraphs but never a third", () => {
   const result = prepareInlineCompletion({
     raw: [
-      "开放 API 让开发者可以更快开始测试。这里不应成为同段第二句。",
+      "开放 API 让开发者可以更快开始测试。",
       "对团队来说，下一步可以先验证 Model X 的接口。",
-      "第三段不应进入灰字建议。",
+
     ].join("\n\n"),
     contentPackage: packageData,
     before: "Acme 这次发布最值得关注的是",
@@ -130,4 +130,22 @@ test("inline completion rejects a paragraph that is already present around the c
     available: false,
     reason: "模型建议与现有正文重复",
   });
+});
+
+test("a fact at the beginning of a long article is still covered", () => {
+  const prompt = buildInlineCompletionPrompt({ contentPackage: packageData, title: packageData.title,
+    before: packageData.facts[0].text + "\n\n" + "已经写过的其他内容。".repeat(400) });
+  const uncovered = prompt.user.split("【尚未覆盖的事实】")[1].split("【不可补写的未知项】")[0];
+  assert.doesNotMatch(uncovered, /fact-supported/);
+});
+
+test("completion never cuts off a trailing limitation or returns an unfinished sentence", () => {
+  for (const raw of ["这个功能已开放，但仅限", "这个功能已开放。" + "原文里的说明。".repeat(50) + "但仅限测试用户。", "已开放。\n\n可以测试。\n\n但仅限受邀用户。"] ) {
+    assert.equal(prepareInlineCompletion({ raw, contentPackage: packageData }).available, false);
+  }
+});
+
+test("verified paragraph-to-fact mapping suppresses repeated paraphrases across the whole document", () => {
+  const prompt = buildInlineCompletionPrompt({ contentPackage: packageData, title: packageData.title, before: "Acme 的新模型已提供接口。" + "说明文字。".repeat(600), factMappings: [{ claim: "Acme 的新模型已提供接口。", factIds: ["fact-supported"] }] });
+  assert.doesNotMatch(prompt.user.split("【尚未覆盖的事实】")[1].split("【不可补写的未知项】")[0], /fact-supported/);
 });

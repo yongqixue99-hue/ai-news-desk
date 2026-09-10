@@ -57,15 +57,19 @@ export const createJobDesk = ({
   const workerId = `worker_${process.pid}_${randomUUID().slice(0, 8)}`;
   const maxConcurrency = Math.max(1, Math.min(4, Math.floor(concurrency)));
   let activeJobs = 0;
+  let activeBackgroundJobs = 0;
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
 
   const tick = async () => {
     if (activeJobs >= maxConcurrency || stopped || !canClaim()) return;
     activeJobs += 1;
+    let background = false;
     try {
-      const job = database.claimNextJob({ workerId, types: Object.keys(handlers), leaseMs });
+      const job = database.claimNextJob({ workerId, types: Object.keys(handlers), leaseMs, foregroundOnly: maxConcurrency > 1 && activeBackgroundJobs >= maxConcurrency - 1 });
       if (!job) return;
+      background = job.lane === "background";
+      if (background) activeBackgroundJobs += 1;
       const handler = handlers[job.type];
       if (!handler) {
         database.failJob(job.id, workerId, `没有注册任务处理器：${job.type}`, 60_000, false);
@@ -117,6 +121,7 @@ export const createJobDesk = ({
       }
     } finally {
       activeJobs -= 1;
+      if (background) activeBackgroundJobs -= 1;
     }
   };
 

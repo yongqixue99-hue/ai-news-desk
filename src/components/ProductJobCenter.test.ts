@@ -38,3 +38,11 @@ test("active job summary exposes the real stage, elapsed time and stale heartbea
     stale: true,
   });
 });
+
+test("a queued task with an old heartbeat is waiting, not a failed worker", () => {
+  const job = { id: "queued", status: "queued", lane: "background", createdAt: "2026-08-31T11:00:00Z", updatedAt: "2026-08-31T11:00:00Z" } as ProductJob;
+  const summary = jobActivitySummary(job, Date.parse("2026-08-31T12:00:00Z"));
+  assert.equal(summary.stale, false);
+  assert.match(summary.stage, /等待空闲资源/);
+  assert.match(summary.elapsed, /已等待/);
+});

@@ -353,6 +353,7 @@ export interface SourceMaterialSnapshot {
 }
 
 export interface ContentPackage {
+  sourceMode?: "source" | "translation" | "curation";
   technicalArticle?: import("./technical-article.js").TechnicalArticlePolicy;
   id: string;
   storyId: string;

@@ -1,3 +1,4 @@
+import { auditVisualContext } from "./visual-context.js";
 export interface EditorialImageCandidate {
   id: string;
   url: string;
@@ -190,7 +191,7 @@ export const planEditorialImagePlacements = ({
 
   const articleText = paragraphs.join("\n");
   const eligible = uniqueEligibleEditorialImages(availableImages)
-    .filter((image) => !hasEditorialImageVersionConflict(image.caption, articleText));
+    .filter((image) => !hasEditorialImageVersionConflict(image.caption, articleText) && !auditVisualContext(image, "").length);
   if (!eligible.length) return [];
 
   // The frozen package exposes both an asset ID and its source-image ID.
@@ -237,7 +238,7 @@ export const planEditorialImagePlacements = ({
     const modelSelection = modelSelectionById.get(image.id);
     if (!modelSelection || !Number.isFinite(modelSelection.afterParagraph)) continue;
     const index = Math.max(0, Math.min(paragraphs.length - 1, Math.floor(modelSelection.afterParagraph)));
-    if (hasEditorialImageVersionConflict(image.caption, paragraphs[index])) continue;
+    if ((hasEditorialImageVersionConflict(image.caption, paragraphs[index]) || auditVisualContext(image, paragraphs[index]).length)) continue;
     requestedPositions.set(image.id, index);
     occupied.add(index);
   }
@@ -266,7 +267,7 @@ export const planEditorialImagePlacements = ({
       && !hasEditorialImageVersionConflict(image.caption, paragraph));
     const compatible = paragraphs.findIndex((paragraph) => !hasEditorialImageVersionConflict(image.caption, paragraph));
     const afterParagraph = semantic ?? fallback ?? (available >= 0 ? available : compatible);
-    if (afterParagraph < 0) return;
+    if (afterParagraph < 0 || auditVisualContext(image, paragraphs[afterParagraph]!).length) return;
     occupied.add(afterParagraph);
     placements.push({ imageId: image.id, afterParagraph, caption });
   });

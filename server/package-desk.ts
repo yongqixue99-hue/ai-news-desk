@@ -1,3 +1,4 @@
+import { candidateFromRun } from "./candidate-pool.js";
 import { packageUncertaintiesFor } from "./package-reading-status.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -50,7 +51,7 @@ const domainFor = (value: string) => {
 };
 
 const candidateForSignal = (state: WorkflowState, runId: string, candidateId: string) =>
-  state.runs.find((run) => run.id === runId)?.candidates.find((candidate) => candidate.id === candidateId);
+  candidateFromRun(state.runs.find(run => run.id === runId), candidateId);
 
 const evidenceClaimsFor = (state: WorkflowState, story: StoryView): EvidenceClaim[] => {
   const candidates = story.signals
@@ -332,10 +333,14 @@ const assetsFor = (
     return { image, index, editorialPriority, editorialOrigin };
   })
   .sort((left, right) => left.editorialPriority - right.editorialPriority || left.index - right.index)
-  .map(({ image, editorialPriority, editorialOrigin }, index) => {
+  .map(({ image, editorialPriority, editorialOrigin }, index) => assetFromSourceImage({ ...image, editorialPriority, editorialOrigin }, story.id, index, checkedAt));
+
+export const assetFromSourceImage = (image: SourceImage, scopeId: string, index = 0, checkedAt = new Date().toISOString()): AssetCandidate => {
+  const editorialPriority = editorialPriorityFor(image);
+  const editorialOrigin = editorialOriginFor(image, editorialPriority);
   const sourceImage = sourceImageSnapshot({ ...image, editorialPriority, editorialOrigin });
   return {
-    id: `asset_${createHash("sha1").update(`${story.id}:${sourceImage.id}:${sourceImage.url}`).digest("hex").slice(0, 12)}`,
+    id: `asset_${createHash("sha1").update(`${scopeId}:${sourceImage.id}:${sourceImage.url}`).digest("hex").slice(0, 12)}`,
     sourceImageId: sourceImage.id,
     sourceImage,
     url: sourceImage.publicPath || sourceImage.url,
@@ -354,7 +359,7 @@ const assetsFor = (
     editorialOrigin,
     localReady: isLocalImageFileReady(sourceImage),
   };
-});
+};
 
 const normalizedAssetGovernanceSnapshot = (asset: AssetCandidate) => {
   const image = asset.sourceImage;

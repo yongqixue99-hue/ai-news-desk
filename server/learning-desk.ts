@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { LocalDatabase } from "./local-database.js";
 import { load } from "cheerio";
 import type {
@@ -27,9 +28,14 @@ const htmlText = (value = "") => value
   .replace(/\s+/gu, " ")
   .trim();
 
-const paragraphText = (snapshot: DraftRevisionSnapshot) => snapshot.paragraphs
-  .map((paragraph) => paragraph.replace(/\s+/gu, " ").trim())
-  .filter(Boolean);
+const paragraphText = (snapshot: DraftRevisionSnapshot) => {
+  if (snapshot.bodyHtml !== undefined) {
+    const $ = load(`<article>${snapshot.bodyHtml}</article>`, null, false);
+    return $("article").children("p").filter((_i,node) => !($(node).prev().is("img") && $(node).text().startsWith("图：")))
+      .map((_i,node) => $(node).text().replace(/\s+/gu," ").trim()).get().filter(Boolean);
+  }
+  return snapshot.paragraphs.map(paragraph => paragraph.replace(/\s+/gu," ").trim()).filter(Boolean);
+};
 
 const countMatches = (value: string, pattern: RegExp) => value.match(pattern)?.length ?? 0;
 const headingCount = (snapshot: DraftRevisionSnapshot) =>
@@ -134,18 +140,25 @@ export const recordDraftEdit = (
     before: DraftRevisionSnapshot;
     after: DraftRevisionSnapshot;
     saveMode: DraftSaveMode;
+    confirmed?: boolean;
+    confirmationId?: string;
+    context?: string;
   },
 ) => {
-  if (input.saveMode !== "manual" || !isEffectiveEdit(input.before, input.after)) return undefined;
+  if (!input.confirmed || input.saveMode !== "manual" || !isEffectiveEdit(input.before, input.after)) return undefined;
+  const confirmationId = input.confirmationId ?? createHash("sha256").update(JSON.stringify([input.draftId,input.before,input.after])).digest("hex");
+  if (database.listFeedback("draft", input.draftId, 2000).some(event => event.type === "edited" && (event.payload as {confirmationId?: string})?.confirmationId === confirmationId)) return undefined;
   const inferred = inferWritingPreferences(input.before, input.after);
   const event = database.recordFeedback({
     type: "edited",
     subjectType: "draft",
     subjectId: input.draftId,
-    payload: { effective: true, saveMode: input.saveMode, inferred: inferred.map((entry) => entry.kind) },
+    payload: { effective: true, confirmed: true, confirmationId, saveMode: input.saveMode, inferred: inferred.map((entry) => entry.kind) },
   });
   for (const preference of inferred) database.recordEditorialMemoryEvidence({
     ...preference,
+    confirmationId, context: input.context ?? `${input.after.title} ${input.after.topics.join(" ")}`,
+    beforeExcerpt: visibleText(input.before).slice(0,400), afterExcerpt: visibleText(input.after).slice(0,400),
     eventId: event.id,
     draftId: input.draftId,
     createdAt: event.createdAt,
@@ -201,7 +214,7 @@ export const recordPublishedWritingSignals = (database: LocalDatabase, draft: Ar
 };
 
 const isEffectivePayload = (payload: unknown) => Boolean(
-  payload && typeof payload === "object" && (payload as { effective?: unknown }).effective === true,
+  payload && typeof payload === "object" && (payload as { effective?: unknown }).effective === true && (payload as { confirmed?: unknown }).confirmed === true,
 );
 
 export const writingMemoryView = (database: LocalDatabase, enabled = true): WritingMemoryView => {
@@ -211,7 +224,7 @@ export const writingMemoryView = (database: LocalDatabase, enabled = true): Writ
   const memories = database.listEditorialMemories().map((memory): WritingMemory => ({
     ...memory,
     kind: memory.kind as WritingMemoryKind,
-    applicable: enabled && memory.enabled && applicationUnlocked,
+    applicable: enabled && memory.enabled && applicationUnlocked && new Set(memory.evidence.filter(entry => entry.confirmationId).map(entry => entry.draftId)).size >= 3,
   }));
   return {
     effectiveEditCount,
@@ -219,11 +232,4 @@ export const writingMemoryView = (database: LocalDatabase, enabled = true): Writ
     applicationUnlocked,
     memories,
   };
-};
-
-export const activeWritingGuidelines = (database: LocalDatabase, enabled = true) => {
-  const view = writingMemoryView(database, enabled);
-  return view.applicationUnlocked
-    ? view.memories.filter((memory) => memory.applicable).map((memory) => memory.label)
-    : [];
 };

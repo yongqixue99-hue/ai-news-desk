@@ -42,7 +42,7 @@ test("writing memory learns image density from inserted images rather than the r
   assert.equal(preference?.summary, "正文图片由 1 张增加到 2 张。");
 });
 
-test("writing preferences stay dormant until five effective manual edits and remain user-controllable", async () => {
+test("writing preferences stay dormant until five confirmed human edits and remain user-controllable", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "ai-news-learning-"));
   const legacyStatePath = path.join(root, "state.json");
   await writeFile(legacyStatePath, JSON.stringify({ version: 11 }), "utf8");
@@ -57,7 +57,7 @@ test("writing preferences stay dormant until five effective manual edits and rem
         draftId: `draft-${index}`,
         before: snapshot(`这是一段重磅导语，${"背景信息".repeat(20)}`),
         after: snapshot(`公司发布版本 ${index + 1}.0，成本下降 ${10 + index}%。`),
-        saveMode: "manual",
+        saveMode: "manual", confirmed: true,
       });
     }
     const view = writingMemoryView(database);
@@ -94,6 +94,7 @@ test("autosave does not train writing memory", async () => {
       after: snapshot("公司发布了版本 2.0。"),
       saveMode: "auto",
     });
+    recordDraftEdit(database, { draftId: "draft-manual-unconfirmed", before: snapshot("重磅发布，背景信息很多。"), after: snapshot("公司发布了版本 2.0。"), saveMode: "manual" });
     assert.equal(writingMemoryView(database).effectiveEditCount, 0);
     assert.deepEqual(database.listEditorialMemories(), []);
   } finally {

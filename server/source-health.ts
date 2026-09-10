@@ -115,3 +115,17 @@ export const applySourceRunResult = (
   }
   return source;
 };
+
+export interface SourceHealthLayers {
+  connection: "ok" | "failed" | "unknown";
+  parsing: "ok" | "empty" | "unknown";
+  selection: "yielding" | "empty";
+  originals: "read" | "partial" | "unknown";
+}
+export const sourceHealthLayers = (result: SourceRunResult, candidates: Candidate[]): SourceHealthLayers => ({
+  connection: result.healthImpact === "neutral" ? "unknown" : result.healthImpact === "failure" ? "failed" : "ok",
+  parsing: result.healthImpact !== "success" ? "unknown" : result.rawCount ? "ok" : "empty",
+  selection: result.candidateCount ? "yielding" : "empty",
+  originals: !candidates.length ? "unknown" : candidates.every(candidate => candidate.briefing?.basis === "full-source") ? "read"
+    : candidates.some(candidate => candidate.briefing?.basis === "full-source") ? "partial" : "unknown",
+});

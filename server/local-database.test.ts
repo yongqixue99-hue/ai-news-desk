@@ -194,3 +194,15 @@ test("a verified SQLite snapshot replaces every application table in one transac
     assert.equal(store.hasWorkflowEvent("old.event", "old"), false);
   });
 });
+
+test("foreground jobs pass queued maintenance and priority survives reopening", async () => {
+  await withDatabase(async (root, store) => {
+    const background = store.enqueueJob({ type: "images", idempotencyKey: "bg", payload: {}, lane: "background" }).job;
+    const foreground = store.enqueueJob({ type: "draft", idempotencyKey: "fg", payload: {} }).job;
+    assert.equal(store.claimNextJob({ workerId: "worker" })?.id, foreground.id);
+    assert.equal(store.getJob(background.id)?.lane, "background");
+    const reopened = await LocalDatabase.open({ workflowRoot: root, legacyStatePath: path.join(root, "state.json"), initialState: () => ({}) });
+    try { assert.equal(reopened.getJob(background.id)?.lane, "background"); }
+    finally { reopened.close(); }
+  });
+});

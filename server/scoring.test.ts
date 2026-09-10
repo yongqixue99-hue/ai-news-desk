@@ -266,3 +266,9 @@ test("candidate sorting applies the bounded editorial preference as a separate s
   assert.ok(ranked.personalizationScore > 0);
   assert.ok(ranked.personalizationReasons.length > 0);
 });
+
+test("global news ranking does not reuse uncalibrated community point totals",()=>{
+ const candidate=rawItemToCandidate(item({source_type:"hackernews",metadata:{score:9000,descendants:300,discussion_url:"https://news.ycombinator.com/item?id=1"}}),24);
+ const [observed]=sortCandidates([candidate]);const [unknown]=sortCandidates([{...candidate,engagement:undefined}]);
+ assert.equal(observed.recommendationScore,unknown.recommendationScore);
+});

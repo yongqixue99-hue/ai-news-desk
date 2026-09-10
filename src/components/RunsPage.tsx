@@ -1,3 +1,6 @@
+import { SourceChangeImpactPanel } from "./SourceChangeImpactPanel";
+import { sourceHealthLayers } from "../../server/source-health.js";
+import { DiscoveryTracePanel } from "./DiscoveryTracePanel";
 import { useMemo, useState } from "react";
 import { AlertCircle, ArrowLeft, Ban, CheckCircle2, ChevronDown, Clock3, ExternalLink, Filter, LoaderCircle, RotateCcw, TriangleAlert } from "lucide-react";
 import type { AiRunTrace, WorkflowRun } from "../types";
@@ -46,6 +49,8 @@ export function RunsPage({
   return (
     <div className="page settings-page runs-page">
       <header className="page-header"><div><h1>运行记录</h1><p>每次采集、成稿和错误都有可追溯记录。</p></div><button className="secondary-button" onClick={onOpenSchedule}><ArrowLeft size={16} />返回定时任务</button></header>
+      <DiscoveryTracePanel />
+      <SourceChangeImpactPanel />
       <div className="run-history-filters" aria-label="筛选运行记录">
         <span><Filter size={14} />筛选</span>
         <select aria-label="按状态筛选" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">全部状态</option><option value="active">运行中</option><option value="success">已完成</option><option value="failed">失败／取消</option></select>
@@ -81,6 +86,11 @@ export function RunsPage({
                 || trace.subjectId && run.candidates.some((candidate) => candidate.id === trace.subjectId));
               const failedSources = (run.sourceResults ?? []).filter((source) => source.status !== "healthy");
               return <div className="run-detail-panel">
+                <div><strong>来源分层</strong>{(run.sourceResults ?? []).map(source => {
+                  const layers = sourceHealthLayers(source, run.candidates.filter(candidate => candidate.sourceName === source.sourceName));
+                  const connection = { ok: "读取成功", failed: "读取失败", unknown: "未确认" }[layers.connection];
+                  return <small key={source.sourceId}>{source.sourceName} · 连接 {connection} · 解析 {layers.parsing === "ok" ? `${source.rawCount} 条` : layers.parsing === "empty" ? "返回空内容" : "未知"} · 选题 {source.candidateCount} 条 · 原文 {layers.originals === "read" ? "已读" : layers.originals === "partial" ? "部分已读" : "尚无全文读取记录"}</small>;
+                })}</div>
                 <div><strong>来源结果</strong><span>{run.sourceResults?.length ?? 0} 个来源 · {failedSources.filter((source) => source.healthImpact === "failure").length} 个读取失败 · {failedSources.filter((source) => source.healthImpact !== "failure").length} 条提示</span>{failedSources.map((source) => <small key={source.sourceId}>{source.sourceName}：{source.detail}</small>)}</div>
                 {run.sourceResults?.some((source) => source.routes?.length) ? <div><strong>读取明细</strong>{run.sourceResults.flatMap((source) => (source.routes ?? []).map((route) => <small key={`${source.sourceId}:${route.url}`}>
                   {source.sourceName} · {routeHost(route.url)}：{route.status === "error" ? route.detail || "读取失败" : route.cacheStatus === "not-modified" ? `已核对，内容未变化 · ${route.rawCount} 条` : `读取 ${route.rawCount} 条`}

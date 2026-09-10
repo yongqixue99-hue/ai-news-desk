@@ -18,7 +18,7 @@ export const buildIntakeContentPackage = (record: IntakeReviewRecord): ContentPa
   const normalized = assertEvidenceReadyForDraft(
     normalizeEvidenceSelection(record.bundle, record.selection ?? {}),
   );
-  const sourceSignalId = `intake:${record.id}`;
+  const sourceSignalId = record.runId ? `${record.runId}:candidate_${record.id}` : `intake:${record.id}`;
   const sourceUrl = sourceUrlFor(record);
   const facts: EvidenceClaim[] = normalized.textBlocks.map((block) => ({
     id: `claim_${createHash("sha1")
@@ -36,6 +36,8 @@ export const buildIntakeContentPackage = (record: IntakeReviewRecord): ContentPa
       reviewId: record.id,
       evidenceBundleId: normalized.evidenceBundleId,
       sourceUrl,
+      sourceSignalId,
+      selectedImages: normalized.images,
       facts: facts.map((fact) => ({ id: fact.id, text: fact.text })),
     }))
     .digest("hex")
@@ -53,6 +55,7 @@ export const buildIntakeContentPackage = (record: IntakeReviewRecord): ContentPa
     communityFocus: [],
     discussionSamples: [],
     sourceSignalIds: [sourceSignalId],
+    sourceEvidence: [{ signalId: sourceSignalId, sourceKind: "article", sourceLabel: normalized.source.label, url: sourceUrl, originalTitle: normalized.title, originalText: normalized.text, originalLanguage: "mixed", basis: "full-source", capturedAt: normalized.capturedAt, truncated: false, rightsNotice: "用户确认的导入资料；来源身份、文字及图片权利仍需核对。" }],
     sources: [{
       signalId: sourceSignalId,
       label: normalized.source.label,

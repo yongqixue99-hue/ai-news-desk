@@ -1,3 +1,4 @@
+import { assessPracticeOpportunity } from "./practice-opportunity.js";
 import { createHash } from "node:crypto";
 import { normalizeTopicIds, topicDefinitionsFor } from "./topics.js";
 import { keywordTerms } from "./source-routing.js";
@@ -33,6 +34,7 @@ const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value));
 
 const finiteMetadataNumber = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return undefined;
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : undefined;
 };
@@ -311,7 +313,8 @@ export const rawItemTimeRejectionReason = (
       && item.metadata?.source_format !== "sitemap"))
     && Boolean(firstPartyModelVendorFor({ url: item.url }))
     && isModelAnnouncementText(item.title, item.content);
-  const windowHours = Math.max(1, options.windowHours ?? 1, catchup ? modelLaunchCatchupHours : 0);
+  const practice = assessPracticeOpportunity({ title: item.title, excerpt: item.content, urls: [item.url] });
+  const windowHours = Math.max(1, options.windowHours ?? 1, catchup ? modelLaunchCatchupHours : 0, practice ? 30 * 24 : 0);
   return publishedAt < currentTime - windowHours * 3_600_000 ? "outside-window" : undefined;
 };
 
@@ -401,7 +404,7 @@ export const rankCandidatesWithDiagnostics = (
   personalizationEnabled = true,
 ) => {
   const eligible = candidates.filter(
-    (candidate) => Boolean(candidate.technicalArticle) || (candidate.score >= 7 && candidate.scoreBreakdown.relevance > 0),
+    (candidate) => Boolean(candidate.technicalArticle) || (candidate.scoreBreakdown.relevance > 0 && (candidate.score >= 7 || candidate.score >= 5 && Boolean(assessPracticeOpportunity({ title: candidate.title, excerpt: candidate.excerpt, urls: [candidate.canonicalUrl || candidate.url] })))),
   );
   const clusters: Candidate[][] = [];
   for (const candidate of eligible) {
@@ -433,10 +436,9 @@ export const rankCandidatesWithDiagnostics = (
         scoreBreakdown,
         heatScore,
         heatBreakdown: { engagement, sourceReach: 0, crossSource, freshness: 0 },
-        // Missing public propagation data is unknown, not a negative signal.
-        // Observable pickup/interaction may add a small bonus, never erase
-        // otherwise strong editorial value.
-        recommendationScore: Math.round((score / 15) * 100 + heatScore * 0.25),
+        // Global news ordering uses editorial value and independent pickup.
+        // Platform interactions are compared only in age-matched community cohorts.
+        recommendationScore: Math.round((score / 15) * 100 + crossSource * 0.25),
         clusterSize: cluster.length,
         relatedSources,
       };
@@ -459,7 +461,17 @@ export const rankCandidatesWithDiagnostics = (
     });
   const personalized = personalizeCandidates(baseRanking, feedback, personalizationEnabled);
   const selected = [...personalized.filter(candidate => !candidate.technicalArticle).slice(0, 60), ...personalized.filter(candidate => candidate.technicalArticle).slice(0, 54)];
-  return { candidates: selected, eligibleCount: eligible.length, clusterCount: clusters.length,
+  const selectedIds = new Set(selected.map(candidate => candidate.id));
+  const decisions = candidates.map(candidate => {
+    const clusterIndex = clusters.findIndex(cluster => cluster.includes(candidate));
+    if (clusterIndex < 0) return { rawId: candidate.rawId, stage: "score-or-topic" };
+    // ranked is sorted in place above, so find the actual representative by membership.
+    const ids = new Set(clusters[clusterIndex]!.map(item => item.id));
+    const winner = ranked.find(item => ids.has(item.id))!;
+    return { rawId: candidate.rawId, candidateId: winner.id,
+      stage: !selectedIds.has(winner.id) ? "candidate-limit" : winner.id === candidate.id ? "candidate" : "merged-event" };
+  });
+  return { candidates: selected, decisions, eligibleCount: eligible.length, clusterCount: clusters.length,
     scoreRejected: candidates.length - eligible.length, mergedCount: eligible.length - clusters.length,
     limitRejected: clusters.length - selected.length };
 };

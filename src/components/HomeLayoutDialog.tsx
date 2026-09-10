@@ -31,7 +31,7 @@ export function HomeLayoutDialog({ initial, onClose, onSaved }: { initial: HomeL
   return <div className="home-layout-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
     <section className="home-layout-dialog" role="dialog" aria-modal="true" aria-labelledby="home-layout-title" tabIndex={-1} ref={ref}>
       <header><div><span className="desk-eyebrow">我的首页</span><h2 id="home-layout-title">自定义栏目</h2></div><button type="button" className="home-icon-button" aria-label="关闭栏目设置" disabled={busy} onClick={onClose}><X size={20} /></button></header>
-      <div className="home-layout-body"><p className="home-dialog-hint">调整顺序，保留常看的来源；也可以按关键词建立关注栏目。</p>
+      <div className="home-layout-body"><p className="home-dialog-hint">前五栏作为常用项，其他栏目从“更多”进入。可以上下移动来调整常用项。</p>
         <ol className="home-column-settings">{layout.columns.map((column, index) => <li key={column.id}>
           <span className="home-column-number">{String(index + 1).padStart(2, "0")}</span>
           <div><strong>{column.label}</strong><small>{defaultHomeLayout.columns.find((item) => item.source === column.source)?.label}{column.keyword ? ` · ${column.keyword}` : ""}</small></div>
@@ -44,7 +44,7 @@ export function HomeLayoutDialog({ initial, onClose, onSaved }: { initial: HomeL
           <label>栏目名称<input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：AI 编程" maxLength={24} disabled={busy} /></label>
           <label>内容来源<select value={source} disabled={busy} onChange={(event) => setSource(event.target.value as HomeSource)}>{defaultHomeLayout.columns.map((preset) => <option key={preset.source} value={preset.source}>{preset.label}</option>)}</select></label>
           <label>关键词<input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="选填，例如 Codex" maxLength={120} disabled={busy} /></label>
-        </div><div className="home-new-column-footer"><small>筛选已有内容；添加栏目不会自动启用新来源或调用 AI。</small><button type="button" className="secondary-button" disabled={busy || !name.trim() || layout.columns.length >= 12} onClick={add}><Plus size={14} />添加栏目</button></div></div>
+        </div><div className="home-new-column-footer"><small>基于已接入来源和已有数据建立筛选视图，不会自动接入新平台或调用 AI。</small><button type="button" className="secondary-button" disabled={busy || !name.trim() || layout.columns.length >= 12} onClick={add}><Plus size={14} />添加栏目</button></div></div>
         <label className="home-drafts-toggle"><span><strong>显示“继续写作”</strong><small>在右侧保留最近编辑的一篇稿件</small></span><input type="checkbox" checked={layout.showDrafts} disabled={busy} onChange={(event) => setLayout((current) => ({ ...current, showDrafts: event.target.checked }))} /></label>
         {error ? <p className="home-layout-error" role="alert">{error}</p> : null}
       </div>

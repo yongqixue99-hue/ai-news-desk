@@ -203,3 +203,23 @@ test("JobDesk stops after one deterministic failure instead of scheduling identi
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("maintenance cannot occupy the capacity reserved for a later user task", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "newsdesk-priority-"));
+  const database = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({ version: 11 }) });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let first: Promise<void> | undefined;
+  const desk = createJobDesk({ database, concurrency: 2, handlers: { background: async () => gate, foreground: async () => ({ done: true }) } });
+  try {
+    database.enqueueJob({ type: "background", idempotencyKey: "bg-1", payload: {}, lane: "background" });
+    const second = database.enqueueJob({ type: "background", idempotencyKey: "bg-2", payload: {}, lane: "background" }).job;
+    first = desk.tick();
+    await desk.tick();
+    assert.equal(database.getJob(second.id)?.status, "queued");
+    const user = database.enqueueJob({ type: "foreground", idempotencyKey: "user", payload: {} }).job;
+    await desk.tick();
+    assert.equal(database.getJob(user.id)?.status, "complete");
+    assert.equal(database.getJob(second.id)?.status, "queued");
+  } finally { release(); await first; desk.stop(); database.close(); await rm(root, { recursive: true, force: true }); }
+});

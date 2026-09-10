@@ -233,3 +233,17 @@ test("a repeated sync skips unchanged content and later updates the existing WeC
   assert.equal(contentUploads, 2, "unchanged content should not upload its image again");
   assert.equal(coverUploads, 2, "unchanged content should not upload its cover again");
 });
+
+test("delivery rechecks current evidence before create, update and unchanged receipts", async()=>{
+ let writes=0,blocked=false;
+ const desk=createWeChatDraftDesk({
+  loadImage:async()=>({bytes:new Uint8Array([1,2,3]),fileName:"test.png",contentType:"image/png"}),
+  beforeCommit:async()=>{if(blocked)throw new Error("来源或正文已变化");},
+  gateway:{countDrafts:async()=>0,uploadContentImage:async()=>({url:"https://mmbiz.qpic.cn/test"}),uploadPermanentImage:async()=>({mediaId:"cover"}),addDraft:async()=>{writes++;return{mediaId:"draft"};},updateDraft:async()=>{writes++;}},
+ });
+ const draft=articleDraft();const receipt=await desk.syncDraft({draft});assert.equal(writes,1);blocked=true;
+ await assert.rejects(desk.syncDraft({draft}),/已变化/u);
+ await assert.rejects(desk.syncDraft({draft:{...draft,title:"新标题"},previousReceipt:receipt}),/已变化/u);
+ await assert.rejects(desk.syncDraft({draft,previousReceipt:receipt}),/已变化/u);
+ assert.equal(writes,1);
+});

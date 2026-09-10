@@ -1,3 +1,4 @@
+import { waitForProductJob, deferredJobMessage } from "../product-job-wait";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
@@ -66,8 +67,8 @@ const formatRelativeTime = (iso: string) => {
 
 const sortEntries = (items: CommunityFeedEntry[], mode: CommunitySortMode) => [...items].sort((left, right) => {
   if (mode === "hot") {
-    const leftHeat = (left.candidate.engagement?.comments ?? 0) * 2 + (left.candidate.engagement?.points ?? 0);
-    const rightHeat = (right.candidate.engagement?.comments ?? 0) * 2 + (right.candidate.engagement?.points ?? 0);
+    const leftHeat = left.metrics?.percentile ?? -1;
+    const rightHeat = right.metrics?.percentile ?? -1;
     return rightHeat - leftHeat || right.trendScore - left.trendScore;
   }
   if (mode === "latest") return Date.parse(right.candidate.publishedAt) - Date.parse(left.candidate.publishedAt);
@@ -168,9 +169,11 @@ export function CommunityWorkspace({
       if (next.story.explanation.status !== "ready" || force) {
         const queued = await api.explainStory(next.story.id, force);
         let job = queued.job;
-        for (let attempt = 0; job && attempt < 100 && !terminalStatuses.has(job.status); attempt += 1) {
-          await new Promise((resolve) => window.setTimeout(resolve, 1_200));
-          job = await api.productJob(job.id);
+        if (job) {
+          const waited = await waitForProductJob(job, { read: api.productJob, current: () => readingRequest.current === requestId });
+          job = waited.job;
+          if (readingRequest.current !== requestId) return;
+          if (waited.deferred) { setReadingError(deferredJobMessage(job)); return; }
         }
         if (job && job.status !== "complete") throw new Error(job.error || "原始来源暂时没有读取完成");
         next = await api.editorialIntake(entry.runId, entry.candidate.id);

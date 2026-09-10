@@ -1,3 +1,8 @@
+import { EditObservationForm } from "./EditObservationForm";
+import { DraftQualityPanel } from "./DraftQualityPanel";
+import { confirmationTextDiff } from "../confirmation-diff";
+import { draftDocumentKey } from "../../server/draft-document.js";
+import { api } from "../api";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
@@ -265,7 +270,7 @@ export function DraftWorkspace({
   const visibleDrafts = showShelvedDrafts ? drafts : currentDrafts;
   const selected = visibleDrafts.find((draft) => draft.id === activeDraftId) ?? currentDrafts[0] ?? drafts[0];
   const [editing, setEditing] = useState<ArticleDraft | undefined>(() => editableDraft(selected));
-  const [viewMode, setViewMode] = useState<ViewMode>(() => isCompactViewport() ? "edit" : "split");
+  const [viewMode, setViewMode] = useState<ViewMode>("edit");
   const [compactLayout, setCompactLayout] = useState(isCompactViewport);
   const [draftLibraryOpen, setDraftLibraryOpen] = useState(false);
   const [utilityTab, setUtilityTab] = useState<UtilityTab | null>(null);
@@ -313,6 +318,10 @@ export function DraftWorkspace({
   const [deliveryBusy, setDeliveryBusy] = useState(false);
   const deliveryLock = useRef(false);
   const [preflightError, setPreflightError] = useState("");
+  const [confirmingDraft, setConfirmingDraft] = useState(false);
+  const proposalKeys = useRef<Record<string, string>>({});
+  const [optimizationUndo, setOptimizationUndo] = useState<{ before: ArticleDraft; afterKey: string; afterClaimsKey: string }>();
+  const persistedUpdatedAt = useRef(selected?.updatedAt);
   const [confirmingPublication, setConfirmingPublication] = useState(false);
   const [publishedImageStatuses, setPublishedImageStatuses] = useState<PublishedImagePromotionPublicStatus[]>([]);
   const [publishedImageStatusLoading, setPublishedImageStatusLoading] = useState(false);
@@ -337,6 +346,8 @@ export function DraftWorkspace({
       : undefined;
     const next = editableDraft(recovered ?? selected);
     editingRef.current = next;
+    persistedUpdatedAt.current = selected?.updatedAt;
+    setOptimizationUndo(undefined);
     setEditing(next);
     setWechatMetadata(wechatMetadataFor(next, wechatSettings));
     setDistributionBusy(false);
@@ -430,10 +441,11 @@ export function DraftWorkspace({
     setSaving(true);
     setSavingMode(mode);
     setSaveError("");
-    const operation = saveHandlerRef.current(current.id, requestContent, mode);
+    const operation = saveHandlerRef.current(current.id, { ...requestContent, updatedAt: persistedUpdatedAt.current }, mode);
     activeSaveRef.current = operation;
     try {
       const saved = await operation;
+      if (editingRef.current?.id === saved.id) persistedUpdatedAt.current = saved.updatedAt;
       const latest = editingRef.current;
       const requestStillCurrent = latest?.id === saved.id && editVersionRef.current === versionAtStart
         && JSON.stringify(editableDraftContent(latest)) === requestContentSnapshot;
@@ -498,7 +510,7 @@ export function DraftWorkspace({
         if (!current) return;
         const versionAtStart = editVersionRef.current;
         try {
-          await saveHandlerRef.current(current.id, editableDraftContent(current), "auto");
+          await saveHandlerRef.current(current.id, { ...editableDraftContent(current), updatedAt: persistedUpdatedAt.current }, "auto");
           if (editingRef.current?.id === current.id && editVersionRef.current === versionAtStart) {
             dirtyRef.current = false;
             clearDraftRecoverySnapshot(window.localStorage, current.id);
@@ -606,12 +618,11 @@ export function DraftWorkspace({
   }
 
   const updateEditing = (patch: Partial<ArticleDraft>) => {
-    setEditing((current) => {
-      if (!current) return current;
-      const next = { ...current, ...patch };
-      editingRef.current = next;
-      return next;
-    });
+    const current = editingRef.current;
+    if (!current) return;
+    const next = { ...current, ...patch };
+    editingRef.current = next;
+    setEditing(next);
     editVersionRef.current += 1;
     setEditVersion(editVersionRef.current);
     dirtyRef.current = true;
@@ -626,6 +637,30 @@ export function DraftWorkspace({
     setWechatMetadata(metadata);
     setDistributionResult(undefined);
     setDistributionError("");
+  };
+
+  const confirmEditorialDraft = async () => {
+    setConfirmingDraft(true); setSaveError("");
+    try {
+      const saved = await save("manual");
+      if (!saved || dirtyRef.current) throw new Error("正文仍有新修改，请保存后再确认");
+      const confirmed = await api.confirmDraft(saved.id, saved.updatedAt);
+      persistedUpdatedAt.current = confirmed.updatedAt;
+      if (dirtyRef.current) { setSaveError("已确认刚才保存的版本；新的修改尚未确认"); return; }
+      editingRef.current = confirmed; setEditing(confirmed); setLastSavedAt(confirmed.updatedAt);
+      setRevisions(await onLoadRevisions(confirmed.id));
+    } catch (error) { setSaveError(error instanceof Error ? error.message : "确认失败，请重试"); }
+    finally { setConfirmingDraft(false); }
+  };
+
+  const undoOptimization = () => {
+    if (!optimizationUndo) return;
+    const current = editingRef.current!;
+    if (draftDocumentKey(current) !== optimizationUndo.afterKey || JSON.stringify(current.factClaims ?? []) !== optimizationUndo.afterClaimsKey) { setAgentError("正文已有后续修改，不能直接撤销；可在版本中查看采用前的内容"); return; }
+    const before = optimizationUndo.before;
+    updateEditing({ title: before.title, paragraphs: before.paragraphs, take: before.take, bodyHtml: before.bodyHtml, factClaims: before.factClaims, aiAssistedSinceConfirmation: true });
+    if (activeAgentThread) proposalKeys.current[activeAgentThread.id] = draftDocumentKey(editingRef.current!);
+    setOptimizationDecisions({}); setOptimizationUndo(undefined); void save("manual").catch(() => undefined);
   };
 
   const selectDraft = async (draftId: string) => {
@@ -1078,6 +1113,8 @@ export function DraftWorkspace({
     const proposal = activeAgentThread?.optimization;
     if (!proposal || !requestedChanges.length) return;
     const current = editingRef.current ?? editing;
+    const expectedKey = proposalKeys.current[activeAgentThread!.id] ?? activeAgentThread!.draftSnapshot.documentKey;
+    if (!expectedKey || expectedKey !== draftDocumentKey(current)) { setAgentError("正文或素材版本已变化，旧建议已过期，请重新生成修改建议"); return; }
     const changes = requestedChanges.filter((change) => {
       if (!safeOnly || change.factCheckPassed) return true;
       return false;
@@ -1086,10 +1123,7 @@ export function DraftWorkspace({
       setAgentError("没有可自动应用且通过事实保护的修改");
       return;
     }
-    if (!safeOnly && changes.some((change) => !change.factCheckPassed)) {
-      const confirmed = window.confirm("这项修改没有通过事实锚点检查。仍要应用吗？应用前会保存当前版本。");
-      if (!confirmed) return;
-    }
+    if (changes.some((change) => !change.factCheckPassed)) { setAgentError("这项修改未通过事实保护，不能采用；请重新生成或自行核对正文"); return; }
     setAgentBusy("optimization");
     setAgentError("");
     try {
@@ -1125,19 +1159,30 @@ export function DraftWorkspace({
         };
       });
       updateEditing({
+        aiAssistedSinceConfirmation: true,
         title: titleResult.draft.title,
         paragraphs: nextParagraphs,
         take: nextTake,
         bodyHtml: htmlResult.html,
         ...(nextFactClaims ? { factClaims: nextFactClaims } : {}),
       });
+      const nextDocument = editingRef.current!;
+      setOptimizationUndo({ before: structuredClone(current), afterKey: draftDocumentKey(nextDocument), afterClaimsKey: JSON.stringify(nextDocument.factClaims ?? []) });
+      proposalKeys.current[activeAgentThread!.id] = draftDocumentKey(nextDocument);
+      const appliedVersion = editVersionRef.current;
+      const persisted = await save("manual");
+      if (persisted && editVersionRef.current === appliedVersion) {
+        const persistedKey = draftDocumentKey(editingRef.current!);
+        setOptimizationUndo({ before: structuredClone(current), afterKey: persistedKey, afterClaimsKey: JSON.stringify(persisted.factClaims ?? []) });
+        proposalKeys.current[activeAgentThread!.id] = persistedKey;
+      }
       setOptimizationDecisions((decisions) => ({
         ...decisions,
         ...Object.fromEntries(appliedChanges.map((change) => [change.id, "applied" as const])),
       }));
       const conflicts = [...htmlResult.conflicts, ...titleResult.conflicts];
       if (conflicts.length) setAgentError(conflicts.map((conflict) => conflict.reason).join("；"));
-      setViewMode(compactLayout ? "edit" : "split");
+      setViewMode("edit");
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1272,7 +1317,7 @@ export function DraftWorkspace({
   };
 
   const editorPane = (
-    <section className="draft-pane editor-pane" aria-label="正文编辑区">
+    <section data-testid="draft-editor" className="draft-pane editor-pane" aria-label="正文编辑区">
       <div className="draft-pane-heading">
         <strong><Pencil size={15} />正文</strong>
         <span>约 {articleCharCount} 字</span>
@@ -1285,7 +1330,7 @@ export function DraftWorkspace({
         content={editing.bodyHtml || ""}
         preview={false}
         theme={editing.layoutTheme ?? "news-clean"}
-        onChange={(bodyHtml) => updateEditing({ bodyHtml })}
+        onChange={(bodyHtml, origin) => updateEditing({ bodyHtml, ...(origin === "ai" ? { aiAssistedSinceConfirmation: true } : {}) })}
         onUploadFile={uploadImage}
         onImportUrl={importImage}
         completion={editing.provenance.contentPackageId ? completion : { ready: false, reason: "当前稿件没有冻结素材包，暂不自动补全" }}
@@ -1339,7 +1384,7 @@ export function DraftWorkspace({
           />
           <div className={saveError ? "draft-save-state error" : "draft-save-state"}>
             <Cloud size={13} />
-            <span>{saveStateText}</span>
+            <span role="status">{saveStateText} · {editing.revisionId ? `修订 ${editing.revisionId.slice(-6)}` : "尚无修订"}{editing.editorialBaseline?.confirmed ? ` · ${draftDocumentKey(editing) === draftDocumentKey({ ...editing.editorialBaseline.confirmed.snapshot, provenance: editing.provenance }) ? "已确认" : "待再次确认，上次"} ${formatSaved(editing.editorialBaseline.confirmed.confirmedAt)}` : " · 未确认定稿"}{dirty ? "（当前有新修改）" : ""}</span>
             {editing.draftStrategy ? <em className="draft-strategy-badge">{strategyLabels[editing.draftStrategy]}</em> : null}
             <i aria-hidden="true" />
             <label className="draft-lifecycle-control">
@@ -1372,6 +1417,8 @@ export function DraftWorkspace({
             <button className={viewMode === "split" ? "active" : ""} aria-pressed={viewMode === "split"} onClick={() => setViewMode("split")}><Columns2 size={14} />对照</button>
             <button className={viewMode === "preview" ? "active" : ""} aria-pressed={viewMode === "preview"} onClick={() => setViewMode("preview")}>仅预览</button>
           </div>
+          <button className="secondary-button" onClick={() => void confirmEditorialDraft()} disabled={saving || confirmingDraft}>{confirmingDraft ? "正在确认…" : "确认定稿"}</button>
+          {optimizationUndo ? <button className="secondary-button" onClick={undoOptimization}>撤销上次 AI 修改</button> : null}
           <button className="draft-quick-save" aria-label="保存草稿" title="保存草稿并创建版本（⌘/Ctrl+S）" onClick={() => void save("manual").catch(() => undefined)} disabled={saving}>
             {saving ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}
           </button>
@@ -1532,7 +1579,7 @@ export function DraftWorkspace({
                     <div className="agent-empty">
                       <span className="agent-empty-icon">{agentMode === "analysis" ? <BrainCircuit size={25} /> : <WandSparkles size={25} />}</span>
                       <strong>{agentMode === "analysis" ? "先弄懂，再决定怎么写" : "先找问题，再生成可审阅的改稿"}</strong>
-                      <p>{agentMode === "analysis" ? "Agent 会同时读取原文证据和你正在编辑的草稿，讲清事件、术语、遗漏和可能误读。" : "Agent 会核对事实边界，指出表达问题并给出一版优化稿；不会自动覆盖当前正文。"}</p>
+                      <p>{agentMode === "analysis" ? "Agent 会同时读取原文证据和你正在编辑的草稿，讲清事件、术语、遗漏和可能误读。" : "Agent 会核对冻结事实与表达问题，给出逐项修改建议。你可以查看差异，再选择采用。"}</p>
                       <button className="primary-button full" disabled={Boolean(agentBusy) || !selectedAgentProvider} onClick={() => void runAgent(agentMode)}>
                         {agentBusy === agentMode ? <LoaderCircle className="spin" size={16} /> : agentMode === "analysis" ? <Sparkles size={16} /> : <WandSparkles size={16} />}
                         {agentMode === "analysis" ? "理解本篇文章" : "检查并优化文稿"}
@@ -1652,13 +1699,17 @@ export function DraftWorkspace({
               ) : null}
 
               {utilityTab === "sources" ? (
-                <DraftEvidencePanel
+                <><DraftQualityPanel draft={editing} dirty={dirty} onReviewed={reviewed => {
+                  persistedUpdatedAt.current = reviewed.updatedAt;
+                  if (dirtyRef.current) return;
+                  editingRef.current = reviewed; setEditing(reviewed); setLastSavedAt(reviewed.updatedAt);
+                }} /><DraftEvidencePanel
                   draft={editing}
                   onUpdateFactClaim={updateFactClaim}
                   onResolveFactUncertainty={(item) => updateEditing({
                     uncertainties: editing.uncertainties.filter((entry) => entry !== item),
                   })}
-                />
+                /></>
               ) : null}
 
               {utilityTab === "images" ? (
@@ -1738,6 +1789,7 @@ export function DraftWorkspace({
 
               {utilityTab === "history" ? (
                 <>
+                  <EditObservationForm draft={editing} dirty={dirty} />
                   <section className="utility-section history-current-card">
                     <span className="history-current-mark"><Cloud size={15} />当前内容</span>
                     <strong>{editing.title || "未命名草稿"}</strong>
@@ -1746,10 +1798,19 @@ export function DraftWorkspace({
                       <Save size={14} />立即创建版本
                     </button>
                   </section>
+                  {editing.editorialBaseline?.confirmed ? <section className="utility-section confirmation-diff">
+                    <h3>{editing.editorialBaseline.initial.origin === "initial" ? "初稿 → 确认稿" : "最早可用稿 → 确认稿"}</h3>
+                    <p>{editing.editorialBaseline.confirmed.reason || "此次确认的人工编辑可作为表达偏好样本；事实评分保持独立。"}</p>
+                    <div className="confirmation-diff-lines">{confirmationTextDiff(
+                      [editing.editorialBaseline.initial.snapshot.title, textFromHtml(editing.editorialBaseline.initial.snapshot.bodyHtml || "") || editing.editorialBaseline.initial.snapshot.paragraphs.join("\n\n")].join("\n\n"),
+                      [editing.editorialBaseline.confirmed.snapshot.title, textFromHtml(editing.editorialBaseline.confirmed.snapshot.bodyHtml || "") || editing.editorialBaseline.confirmed.snapshot.paragraphs.join("\n\n")].join("\n\n"),
+                    ).map((change, index) => <p key={index} className={`diff-${change.kind}`}><span>{change.kind === "added" ? "新增" : change.kind === "removed" ? "删除" : "保留"}</span>{change.text}</p>)}</div>
+                    <details><summary>查看确认前后的全文</summary><h4>初稿</h4><pre>{editing.editorialBaseline.initial.snapshot.title}{"\n\n"}{textFromHtml(editing.editorialBaseline.initial.snapshot.bodyHtml || "") || editing.editorialBaseline.initial.snapshot.paragraphs.join("\n\n")}</pre><h4>确认稿</h4><pre>{editing.editorialBaseline.confirmed.snapshot.title}{"\n\n"}{textFromHtml(editing.editorialBaseline.confirmed.snapshot.bodyHtml || "") || editing.editorialBaseline.confirmed.snapshot.paragraphs.join("\n\n")}</pre></details>
+                  </section> : null}
                   <section className="utility-section history-list-section">
                     <div className="inspector-heading">
                       <h3>历史快照</h3>
-                      <span>最多保留 30 个</span>
+                      <span>初稿与确认稿保留，另存 30 个快照</span>
                     </div>
                     {revisionsLoading ? (
                       <div className="history-loading"><LoaderCircle className="spin" size={17} />正在读取版本…</div>

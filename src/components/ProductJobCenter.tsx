@@ -16,11 +16,12 @@ export const jobActivitySummary = (job: ProductJob, now = Date.now()) => {
     ? Math.max(0, Math.floor((now - startedAt) / 60_000))
     : 0;
   const heartbeatAge = Number.isFinite(heartbeatAt) ? Math.max(0, now - heartbeatAt) : Number.POSITIVE_INFINITY;
-  const stale = heartbeatAge > 60_000;
+  const waiting = job.status === "queued" || job.status === "retrying";
+  const stale = !waiting && heartbeatAge > 60_000;
   return {
-    stage: job.stage?.trim() || statusLabel(job),
-    elapsed: elapsedMinutes < 1 ? "已运行不到 1 分钟" : `已运行 ${elapsedMinutes} 分钟`,
-    freshness: stale ? "超过 1 分钟没有响应，可能已中断" : "刚刚有响应",
+    stage: job.status === "queued" ? (job.lane === "background" ? "等待空闲资源，优先处理你的主动任务" : "等待前面的主动任务完成") : job.stage?.trim() || statusLabel(job),
+    elapsed: waiting ? `已等待 ${elapsedMinutes} 分钟` : elapsedMinutes < 1 ? "已运行不到 1 分钟" : `已运行 ${elapsedMinutes} 分钟`,
+    freshness: waiting ? "任务已保存，刷新后可继续查看" : stale ? "超过 1 分钟没有响应，可能已中断" : "刚刚有响应",
     stale,
   };
 };
@@ -31,7 +32,7 @@ const jobLabel = (job: ProductJob) => {
   if (job.type === "supplement-story-evidence") return "补强独立新闻来源";
   if (job.type === "hydrate-story-assets") return "缓存新闻来源图片";
   if (job.type.includes("draft")) return "生成新闻草稿";
-  if (job.type.includes("explanation")) return "读取新闻正文";
+  if (job.type.includes("explanation") || job.type === "explain-story") return "读取新闻正文";
   return "后台处理任务";
 };
 
@@ -86,7 +87,7 @@ export function ProductJobCenter({ onOpenDraft, onOpenStory }: ProductJobCenterP
 
   const refresh = useCallback(async () => {
     try {
-      setJobs(await api.productJobs(12));
+      setJobs(await api.productJobs(100));
       setError(undefined);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -157,13 +158,14 @@ export function ProductJobCenter({ onOpenDraft, onOpenStory }: ProductJobCenterP
                 <li key={job.id} className={`status-${job.status}${activity?.stale ? " status-stale" : ""}`}>
                   <span className="product-job-icon">{activeStatuses.has(job.status) ? <LoaderCircle className="spin" size={14} /> : job.status === "complete" ? <Check size={14} /> : <TriangleAlert size={14} />}</span>
                   <div>
+                    <small>任务 {job.id.slice(-8)}</small>
                     <strong>{storyTitleFrom(job) || jobLabel(job)}</strong>
-                    <span>{active ? `${activity?.stage} · ${progressPercent}%` : statusLabel(job)}</span>
-                    {active ? <progress value={job.progress} max={1}>{progressPercent}%</progress> : null}
+                    <span>{active ? job.status === "running" ? `${activity?.stage} · ${progressPercent}%` : activity?.stage : statusLabel(job)}</span>
+                    {job.status === "running" ? <progress value={job.progress} max={1}>{progressPercent}%</progress> : null}
                     {activity ? <small>{activity.elapsed} · {activity.freshness}</small> : null}
                     {job.error ? <><small className="product-job-failure-copy">{failureCopy(job)}</small><details className="product-job-details"><summary>查看具体原因</summary><p>{job.error}</p></details></> : null}
                     <div className="product-job-row-actions">
-                      {job.status === "failed" && job.type === "build-content-package" && storyId ? <button type="button" disabled={Boolean(retryingId)} onClick={() => void retry(job)}><RotateCcw size={13} />{retryingId === job.id ? "正在重试…" : "重试读取"}</button> : null}
+                      {job.status === "failed" && ["build-content-package", "draft-from-package", "draft-from-editorial-intake", "draft-from-intake-review", "explain-story", "hydrate-story-assets", "supplement-story-evidence"].includes(job.type) ? <button type="button" disabled={Boolean(retryingId)} onClick={() => void retry(job)}><RotateCcw size={13} />{retryingId === job.id ? "正在重试…" : "重试任务"}</button> : null}
                       {!active && storyId ? <button type="button" onClick={() => { onOpenStory(storyId); setOpen(false); }}>{job.status === "complete" ? "继续写作" : "回到选题"}<ArrowRight size={13} /></button> : null}
                     </div>
                   </div>

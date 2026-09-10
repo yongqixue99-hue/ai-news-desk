@@ -1,3 +1,6 @@
+import { hasOfficialUpdateAnchor, areDistinctOfficialUpdates } from "./official-update-url.js";
+import { mayShareEditorialEvent } from "./newsworthiness.js";
+import { compareCommunityMetrics, observedMetric, type CommunityMetricComparison } from "./community-metrics.js";
 import type {
   Candidate,
   CollectionTopicId,
@@ -32,16 +35,16 @@ const storyTitleSimilarity = (left: string, right: string) => {
 
 export interface CommunityTrendSnapshot {
   fetchedAt: string;
-  points: number;
-  comments: number;
+  points?: number;
+  comments?: number;
 }
 
 export interface CommunityTrend {
   windowHours: number;
-  pointsDelta: number;
-  commentsDelta: number;
-  pointsPerHour: number;
-  commentsPerHour: number;
+  pointsDelta?: number;
+  commentsDelta?: number;
+  pointsPerHour?: number;
+  commentsPerHour?: number;
   direction: "rising" | "steady" | "cooling";
   snapshots: CommunityTrendSnapshot[];
 }
@@ -61,6 +64,7 @@ export interface CommunityFeedEntry {
   platform: string;
   reason: string;
   trendScore: number;
+  metrics?: CommunityMetricComparison;
   ageHours: number;
   snapshotCount: number;
   trend?: CommunityTrend;
@@ -82,6 +86,8 @@ export interface CommunityFeedOptions {
   expiryHours?: number;
   limit?: number;
   personalizationEnabled?: boolean;
+  /** Presentation filtering must not remove factual supporting sources. */
+  displayCandidate?: (candidate: Candidate) => boolean;
 }
 
 interface CandidateRecord {
@@ -107,7 +113,7 @@ const normalizedUrl = (value: string | undefined) => {
     for (const key of [...url.searchParams.keys()]) {
       if (/^(?:utm_|ref$|source$)/iu.test(key)) url.searchParams.delete(key);
     }
-    url.hash = "";
+    if (!hasOfficialUpdateAnchor(url)) url.hash = "";
     url.pathname = url.pathname.replace(/\/+$/u, "") || "/";
     return url.toString();
   } catch {
@@ -182,9 +188,8 @@ const trendFor = (records: CandidateRecord[]): CommunityTrend | undefined => {
     const fetchedAt = record.candidate.fetchedAt || record.runCreatedAt;
     const at = Date.parse(fetchedAt);
     if (!Number.isFinite(at)) continue;
-    const points = record.candidate.engagement?.points ?? 0;
-    const comments = record.candidate.engagement?.comments ?? 0;
-    if (!points && !comments) continue;
+    const points = observedMetric(record.candidate.engagement?.points);
+    const comments = observedMetric(record.candidate.engagement?.comments);
     byTimestamp.set(at, { fetchedAt, points, comments });
   }
   const snapshots = [...byTimestamp.entries()]
@@ -196,38 +201,29 @@ const trendFor = (records: CandidateRecord[]): CommunityTrend | undefined => {
   const previous = snapshots.at(-2)!;
   const latestAt = Date.parse(latest.fetchedAt);
   const previousAt = Date.parse(previous.fetchedAt);
-  const windowHours = Math.max(0.25, (latestAt - previousAt) / 3_600_000);
-  const pointsDelta = Math.max(0, latest.points - previous.points);
-  const commentsDelta = Math.max(0, latest.comments - previous.comments);
-  const pointsPerHour = pointsDelta / windowHours;
-  const commentsPerHour = commentsDelta / windowHours;
-  let direction: CommunityTrend["direction"] = pointsPerHour + commentsPerHour * 2 >= 18
-    ? "rising"
-    : "steady";
-
-  if (snapshots.length >= 3) {
-    const before = snapshots.at(-3)!;
-    const beforeHours = Math.max(
-      0.25,
-      (Date.parse(previous.fetchedAt) - Date.parse(before.fetchedAt)) / 3_600_000,
-    );
-    const previousRate = Math.max(0, previous.points - before.points) / beforeHours
-      + Math.max(0, previous.comments - before.comments) * 2 / beforeHours;
-    const latestRate = pointsPerHour + commentsPerHour * 2;
-    if (previousRate > 0 && latestRate < previousRate * 0.65) direction = "cooling";
-    else if (latestRate > Math.max(12, previousRate * 1.2)) direction = "rising";
-    else direction = "steady";
+  const windowHours = (latestAt - previousAt) / 3_600_000;
+  // A restart, failed read, or long offline interval is not a burst of activity.
+  if (windowHours < .25 || windowHours > 6) return undefined;
+  const delta = (current?: number, before?: number) => current === undefined || before === undefined || current < before ? undefined : current - before;
+  const pointsDelta = delta(latest.points, previous.points);
+  const commentsDelta = delta(latest.comments, previous.comments);
+  if (pointsDelta === undefined && commentsDelta === undefined) return undefined;
+  const pointsPerHour = pointsDelta === undefined ? undefined : pointsDelta / windowHours;
+  const commentsPerHour = commentsDelta === undefined ? undefined : commentsDelta / windowHours;
+  const rate = (pointsPerHour ?? 0) + (commentsPerHour ?? 0) * 2;
+  let direction: CommunityTrend["direction"] = "steady";
+  const before = snapshots.at(-3);
+  if (before) {
+    const beforeHours = (previousAt - Date.parse(before.fetchedAt)) / 3_600_000;
+    const pp = delta(previous.points, before.points), pc = delta(previous.comments, before.comments);
+    if (beforeHours >= .25 && beforeHours <= 6 && (pp !== undefined) === (pointsDelta !== undefined) && (pc !== undefined) === (commentsDelta !== undefined)) {
+      const previousRate = ((pp ?? 0) + (pc ?? 0) * 2) / beforeHours;
+      if (previousRate > 0 && rate < previousRate * .65) direction = "cooling";
+      else if (rate > Math.max(12, previousRate * 1.2)) direction = "rising";
+    }
   }
-
-  return {
-    windowHours: Math.round(windowHours * 10) / 10,
-    pointsDelta,
-    commentsDelta,
-    pointsPerHour: Math.round(pointsPerHour * 10) / 10,
-    commentsPerHour: Math.round(commentsPerHour * 10) / 10,
-    direction,
-    snapshots,
-  };
+  return { windowHours: Math.round(windowHours * 10) / 10, pointsDelta, commentsDelta,
+    pointsPerHour, commentsPerHour, direction, snapshots };
 };
 
 const mergeCommunityCluster = (records: CandidateRecord[]) => {
@@ -244,7 +240,7 @@ const mergeCommunityCluster = (records: CandidateRecord[]) => {
   const engagementRecords = [...sorted]
     .reverse()
     .filter((record) => record.candidate.engagement);
-  const latestEngagement = engagementRecords[0]?.candidate.engagement;
+  const latestEngagement = latest.candidate.engagement;
   const excerpt = [...sorted]
     .sort((left, right) => right.candidate.excerpt.length - left.candidate.excerpt.length)[0]!
     .candidate.excerpt;
@@ -302,11 +298,14 @@ export const findCommunitySupportingCandidates = (
 ) => {
   const storyUrl = normalizedUrl(communityCandidate.canonicalUrl || communityCandidate.url);
   const discussionUrl = normalizedUrl(communityCandidate.engagement?.discussionUrl);
-  const matched = runs.flatMap((run) => run.candidates.flatMap((candidate) => {
+  const matched = runs.flatMap((run) => [...run.candidates, ...(run.evidenceCandidates ?? []).filter(item => !run.candidates.some(visible => visible.id === item.id))].flatMap((candidate) => {
     if (isCommunityCandidate(candidate)) return [];
     const candidateUrl = normalizedUrl(candidate.canonicalUrl || candidate.url);
     const exactUrl = Boolean(storyUrl && candidateUrl && storyUrl === candidateUrl && candidateUrl !== discussionUrl);
-    const similarTitle = storyTitleSimilarity(communityCandidate.title, candidate.title) >= 0.88;
+    const similarTitle = !areDistinctOfficialUpdates(communityCandidate.url, candidate.url)
+      && mayShareEditorialEvent(communityCandidate.title, candidate.title)
+      && Math.abs(Date.parse(communityCandidate.publishedAt) - Date.parse(candidate.publishedAt)) <= 96 * 3_600_000
+      && storyTitleSimilarity(communityCandidate.title, candidate.title) >= 0.88;
     if (!exactUrl && !similarTitle) return [];
     return [{ runId: run.id, candidate }];
   }));
@@ -341,16 +340,12 @@ const trendScoreFor = (
   trend: CommunityTrend | undefined,
   supportingSourceCount: number,
 ) => {
-  const engagement = candidate.engagement;
-  const publicHeat = Math.min(22, Math.log2(1 + (engagement?.points ?? 0)) * 1.7)
-    + Math.min(22, Math.log2(1 + (engagement?.comments ?? 0)) * 2.2);
   const recency = Math.max(0, 18 - ageHours / 4);
   const preference = personalizationEnabled ? (candidate.personalizationScore ?? 0) : 0;
-  const velocity = trend
-    ? Math.min(26, Math.log1p(trend.pointsPerHour) * 3 + Math.log1p(trend.commentsPerHour) * 5)
-    : 0;
+  // Legacy recommendationScore includes uncalibrated public heat. Start with
+  // editorial value and add the separately computed cohort bonus below.
   const support = Math.min(8, supportingSourceCount * 2);
-  return Math.round((candidate.recommendationScore + publicHeat + recency + preference + velocity + support) * 10) / 10;
+  return Math.round(((candidate.score / 15) * 100 + recency + preference + support) * 10) / 10;
 };
 
 const shortHours = (hours: number) => Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
@@ -361,19 +356,19 @@ const reasonFor = (
   trend: CommunityTrend | undefined,
   supportingSourceCount: number,
 ) => {
-  if (trend && (trend.pointsDelta >= 20 || trend.commentsDelta >= 10)) {
+  if (trend && ((trend.pointsDelta ?? 0) >= 20 || (trend.commentsDelta ?? 0) >= 10)) {
     const direction = trend.direction === "rising"
       ? "仍在升温"
       : trend.direction === "cooling"
         ? "增长正在放缓"
         : "热度保持稳定";
-    return `近 ${shortHours(trend.windowHours)} 小时新增 ${trend.pointsDelta} 积分、${trend.commentsDelta} 条讨论，${direction}`;
+    return `近 ${shortHours(trend.windowHours)} 小时新增 ${[trend.pointsDelta === undefined ? undefined : `${trend.pointsDelta} 积分`, trend.commentsDelta === undefined ? undefined : `${trend.commentsDelta} 条讨论`].filter(Boolean).join("、")}，${direction}`;
   }
   if (supportingSourceCount > 0) return `已匹配 ${supportingSourceCount} 个新闻或官方来源，可继续核验`;
   const comments = candidate.engagement?.comments ?? 0;
   const points = candidate.engagement?.points ?? 0;
   if (comments >= 100) return `已有 ${comments} 条公开讨论，社区观点已与事件摘要分开整理`;
-  if (points >= 200) return `已有 ${points} 点公开互动，热度较高但仍需核验事实`;
+  if (points >= 200) return `已有 ${points} 点公开互动，仅表示累计互动，事实仍需核验`;
   if (ageHours <= 12) return "刚出现的新讨论，适合尽快判断是否跟进";
   if ((candidate.personalizationScore ?? 0) > 0 && candidate.personalizationReasons?.[0]) {
     return candidate.personalizationReasons[0];
@@ -411,7 +406,7 @@ export const composeCommunityFeed = (
   }
 
   const personalizationEnabled = options.personalizationEnabled ?? true;
-  const items = [...clusters.values()]
+  const allItems = [...clusters.values()]
     .map((records) => {
       const merged = mergeCommunityCluster(records);
       const publishedMs = Date.parse(merged.candidate.publishedAt);
@@ -436,7 +431,11 @@ export const composeCommunityFeed = (
         trend: merged.trend,
         supportingSources,
       } satisfies CommunityFeedEntry;
-    })
+    });
+  const items = allItems.map(entry => {
+    const metrics = compareCommunityMetrics(entry, allItems);
+    return { ...entry, metrics, trendScore: entry.trendScore + (metrics.percentile ?? 0) * .22 };
+  }).filter(entry => !options.displayCandidate || options.displayCandidate(entry.candidate))
     .sort((left, right) => right.trendScore - left.trendScore
       || Date.parse(right.candidate.publishedAt) - Date.parse(left.candidate.publishedAt))
     .slice(0, Math.max(1, Math.floor(options.limit ?? 36)));

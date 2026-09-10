@@ -10,7 +10,8 @@ import {
   type EvidenceReviewSelection,
 } from "./intake-review.js";
 import { extractPage } from "./extractor.js";
-import { generateCandidateDraft } from "./generator.js";
+import { createDraftFromPackage } from "./draft-desk.js";
+import { assetFromSourceImage, freezeContentPackageAssets } from "./package-desk.js";
 import { analyzeScreenshotEvidence } from "./intake.js";
 import { buildIntakeContentPackage } from "./intake-content-package.js";
 import { skillsForArticleTask } from "./skill-registry.js";
@@ -178,7 +179,13 @@ const claimReviewGeneration = async (reviewId: string, selection: EvidenceReview
   await updateState((state) => {
     const record = state.intakeReviews.find((entry) => entry.id === reviewId);
     if (!record) throw new Error("证据复核记录不存在");
-    if (record.status !== "pending") throw new Error("这份证据已经确认或取消");
+    if (record.status === "confirmed" && record.runId && record.draftId) {
+      const run = state.runs.find((entry) => entry.id === record.runId);
+      if (!run) throw new Error("导入任务的运行记录不存在");
+      result = { record: structuredClone(record), provider: providerFor(state), skills: [], run: structuredClone(run) };
+      return;
+    }
+    if (record.status !== "pending") throw new Error("这份证据已经取消");
     const provider = providerFor(state);
     const generationSkills = skillsForArticleTask(state.aiSettings.skills, "generation");
     const normalized = normalizeEvidenceSelection(record.bundle, { ...selection, confirmedAt: selection.confirmedAt || now() });
@@ -187,7 +194,7 @@ const claimReviewGeneration = async (reviewId: string, selection: EvidenceReview
     const runId = `intake_${randomUUID().slice(0, 10)}`;
     const draftId = `draft_${record.id}`;
     const run: WorkflowRun = {
-      id: runId, createdAt: timestamp, updatedAt: timestamp, status: "generating", stage: "使用已确认的证据成稿",
+      id: runId, createdAt: timestamp, updatedAt: timestamp, status: "queued", stage: "已排队，等待使用确认的证据成稿",
       windowHours: 24, sourceIds: [], scheduled: false, rawCount: 1, candidates: [],
       origin: record.bundle.source.kind === "url" ? "link-intake" : "screenshot-intake",
       intake: { sourceLabel: record.bundle.source.label, sourceUrl: record.bundle.source.canonicalUrl, sourceAssetPath: record.bundle.source.assetPath },
@@ -207,12 +214,17 @@ const claimReviewGeneration = async (reviewId: string, selection: EvidenceReview
   return result;
 };
 
-const executeReviewGeneration = async (claim: Awaited<ReturnType<typeof claimReviewGeneration>>) => {
+export const executeReviewGeneration = async (reviewId: string, progress?: (value: number, stage: string) => void) => {
+  const state = await readState();
+  const record = state.intakeReviews.find((entry) => entry.id === reviewId);
+  const run = state.runs.find((entry) => entry.id === record?.runId);
+  if (!record || record.status !== "confirmed" || !run) throw new Error("已确认的导入证据或任务不存在");
+  const claim = { record, run };
+  try {
   const normalized = normalizeEvidenceSelection(claim.record.bundle, claim.record.selection ?? {});
   const database = await getLocalDatabase();
   const builtContentPackage = buildIntakeContentPackage(claim.record);
-  const contentPackage = database.getContentPackage<ContentPackage>(builtContentPackage.id)
-    ?? database.saveContentPackage(builtContentPackage);
+
   const images: SourceImage[] = normalized.images.map((image) => ({
     id: image.id,
     url: image.publicPath || image.url || claim.record.bundle.source.publicPath || "",
@@ -227,27 +239,20 @@ const executeReviewGeneration = async (claim: Awaited<ReturnType<typeof claimRev
     evidencePath: claim.record.bundle.source.assetPath,
     allowedPlatforms: [],
   }));
+  builtContentPackage.assets = images.map((image, index) => assetFromSourceImage(image, builtContentPackage.id, index));
+  if (builtContentPackage.assets.some((asset) => asset.sourceImage.localPath && !asset.localReady)) throw new Error("已选择的导入图片在本机不可读，请重新导入后确认");
+  builtContentPackage.imageIds = images.map((image) => image.id);
+  const contentPackage = database.getContentPackage<ContentPackage>(builtContentPackage.id)
+    ?? database.saveContentPackage(await freezeContentPackageAssets(builtContentPackage));
   const candidate = candidateFor(claim.record, normalized.text, images);
-  try {
     await updateState((state) => {
       const run = state.runs.find((entry) => entry.id === claim.run.id);
-      if (run) run.candidates = [candidate];
+      if (run) { run.candidates = [candidate]; run.status = "generating"; run.stage = "使用冻结证据成稿"; }
     });
-    const draft = await generateCandidateDraft(
-      claim.run.id,
-      candidate,
-      claim.provider,
-      claim.skills,
-      claim.record.draftId,
-      { extractedText: normalized.text, canonicalUrl: candidate.canonicalUrl, images, skipExtraction: true },
-    );
-    draft.provenance.contentPackageId = contentPackage.id;
-    draft.intake = {
-      type: claim.record.bundle.source.kind === "url" ? "link" : "screenshot",
-      extractedText: normalized.text,
-      ignoredElements: claim.record.bundle.noiseBlocks.map((entry) => `${entry.reason}：${entry.text}`),
-      sourceAssetPath: claim.record.bundle.source.assetPath,
-    };
+    const { draft } = await createDraftFromPackage(contentPackage.id, progress, { draftId: claim.record.draftId, intake: {
+      type: claim.record.bundle.source.kind === "url" ? "link" : "screenshot", extractedText: normalized.text,
+      ignoredElements: claim.record.bundle.noiseBlocks.map((entry) => `${entry.reason}：${entry.text}`), sourceAssetPath: claim.record.bundle.source.assetPath,
+    } });
     const finishedAt = now();
     await updateState((state) => {
       const run = state.runs.find((entry) => entry.id === claim.run.id);
@@ -256,8 +261,9 @@ const executeReviewGeneration = async (claim: Awaited<ReturnType<typeof claimRev
       run.candidates = [candidate]; run.status = "complete"; run.stage = "快速草稿已生成"; run.completedAt = finishedAt; run.updatedAt = finishedAt;
       if (run.generation) { run.generation.status = "complete"; run.generation.completedAt = finishedAt; }
       run.logs.push({ at: finishedAt, stage: "快速草稿已生成", message: `已生成可编辑草稿：${draft.title}`, level: "success" });
-      state.drafts.unshift(draft);
+
     });
+    return { draftId: draft.id, packageId: contentPackage.id };
   } catch (error) {
     await updateState((state) => {
       const run = state.runs.find((entry) => entry.id === claim.run.id);
@@ -266,13 +272,15 @@ const executeReviewGeneration = async (claim: Awaited<ReturnType<typeof claimRev
       run.status = "failed"; run.stage = "快速成稿失败"; run.error = error instanceof Error ? error.message : String(error); run.completedAt = finishedAt; run.updatedAt = finishedAt;
       if (run.generation) { run.generation.status = "failed"; run.generation.completedAt = finishedAt; }
     });
+    throw error;
   }
 };
 
 export const confirmIntakeReview = async (reviewId: string, selection: EvidenceReviewSelection) => {
   const claim = await claimReviewGeneration(reviewId, selection);
-  void executeReviewGeneration(claim);
-  return { review: claim.record, run: claim.run, draftId: claim.record.draftId! };
+  const database = await getLocalDatabase();
+  const queued = database.enqueueJob({ type: "draft-from-intake-review", idempotencyKey: `draft-from-intake-review:${claim.record.id}`, payload: { reviewId: claim.record.id }, maxAttempts: 2 });
+  return { review: claim.record, run: claim.run, draftId: claim.record.draftId!, job: queued.job };
 };
 
 export const listIntakeReviews = async () => (await readState()).intakeReviews;

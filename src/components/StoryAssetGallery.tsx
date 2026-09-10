@@ -9,6 +9,7 @@ export function StoryAssetGallery({ images, localCount, publishReadyCount, repor
   images: SourceImage[]; localCount: number; publishReadyCount: number; busy: boolean; onCollect: () => void;
   reports?: ImageCollectionReport[];
 }) {
+  const [zoomed, setZoomed] = useState(false);
   const [selectedId, setSelectedId] = useState<string>();
   const [failedUrl, setFailedUrl] = useState<string>();
   const selected = images.find((image) => image.id === selectedId) ?? images[0];
@@ -22,14 +23,16 @@ export function StoryAssetGallery({ images, localCount, publishReadyCount, repor
     {reports?.some((report) => report.status !== "checked") ? <div className="asset-collection-notes" role="status">{reports.filter((report) => report.status !== "checked").map((report) => <p key={report.url}><strong>{report.status === "unavailable" ? "这篇原文暂时无法读取" : "这篇原文仍有素材缺口"}</strong><span>{report.detail}</span><a href={report.url} target="_blank" rel="noreferrer">打开来源核对 <ExternalLink size={12} /></a></p>)}</div> : null}
     {selected ? <>
       <div className="asset-preview-layout">
-        <div className="asset-preview-stage">
+        <div className={`asset-preview-stage${zoomed ? " zoomed" : ""}`}>
           {previewUrl && failedUrl !== previewUrl ? <img key={previewUrl} src={previewUrl} alt={selected.caption || imageKind(selected)} onError={() => setFailedUrl(previewUrl)} />
             : <div className="asset-preview-failed"><ImageIcon size={30} /><strong>图片暂时无法预览</strong><span>仍保留原文链接，可以打开来源核对。</span></div>}
         </div>
         <div className="asset-preview-info"><span className="asset-kind">{imageKind(selected)}</span><h4>{selected.caption || "来源配图"}</h4>
           <dl><div><dt>来自</dt><dd>{selected.attribution || "来源待核对"}</dd></div><div><dt>保存状态</dt><dd>{selected.localPath && selected.publicPath ? "已保存在本地" : "仅有原链接 · 等待下载"}</dd></div>
           {selected.width && selected.height ? <div><dt>尺寸</dt><dd>{selected.width} × {selected.height}</dd></div> : null}
-          <div><dt>使用权</dt><dd>{selected.rights === "owned" ? "自有素材" : selected.rights === "licensed" ? "已记录授权，交付时复核" : selected.rights === "expired" ? "授权已过期" : "发布前待确认"}</dd></div></dl>
+          <div><dt>案例关系</dt><dd>{selected.evidenceNote || (selected.entityTags?.length ? `相关实体：${selected.entityTags.join("、")}；具体实验条件待核对` : "未单独记录具体案例，需对照来源与图注")}</dd></div>
+          <div><dt>使用权</dt><dd>{selected.rights === "owned" ? "自有素材" : selected.rights === "licensed" ? "已记录授权，交付时复核" : selected.rights === "expired" ? "授权已过期" : "发布前待确认"}</dd></div><div><dt>允许平台</dt><dd>{selected.allowedPlatforms?.join("、") || "尚未记录"}</dd></div></dl>
+          <button className="secondary-button" aria-pressed={zoomed} onClick={() => setZoomed(!zoomed)}>{zoomed ? "适应窗口" : "放大图片"}</button>
           <a className="text-button" href={selected.originalImageUrl || previewUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} />查看完整图片</a>
           <a className="text-button" href={selected.sourceUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} />打开原文出处</a>
           {selected.publicPath ? <a className="text-button" href={selected.publicPath} download><Download size={14} />下载本地图片</a> : null}
