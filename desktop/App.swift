@@ -43,11 +43,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
   let panel=NSSavePanel();panel.nameFieldStringValue=suggestedFilename
   panel.beginSheetModal(for:window){result in completionHandler(result == .OK ? panel.url : nil)}
  }
+ func webView(_ webView:WKWebView,runJavaScriptAlertPanelWithMessage message:String,initiatedByFrame frame:WKFrameInfo,completionHandler:@escaping()->Void){let alert=NSAlert();alert.messageText=message;alert.beginSheetModal(for:window){_ in completionHandler()}}
+ func webView(_ webView:WKWebView,runJavaScriptConfirmPanelWithMessage message:String,initiatedByFrame frame:WKFrameInfo,completionHandler:@escaping(Bool)->Void){let alert=NSAlert();alert.messageText=message;alert.addButton(withTitle:"确定");alert.addButton(withTitle:"取消");alert.beginSheetModal(for:window){result in completionHandler(result == .alertFirstButtonReturn)}}
  func fail(_ message:String){let alert=NSAlert();alert.messageText="AI 新闻台启动失败";alert.informativeText=message;alert.runModal();NSApp.terminate(nil)}
  func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{return true}
  func webView(_ webView:WKWebView,decidePolicyFor action:WKNavigationAction,decisionHandler:@escaping(WKNavigationActionPolicy)->Void){
   guard let url=action.request.url else {decisionHandler(.cancel);return}
-  if url.scheme=="about" || (url.scheme=="http" && url.host=="127.0.0.1" && url.port==4317){decisionHandler(.allow)}
+  let local = url.scheme=="http" && url.host=="127.0.0.1" && url.port==4317
+  let localBlob = url.absoluteString.hasPrefix("blob:http://127.0.0.1:4317/")
+  if action.shouldPerformDownload && (local || localBlob){decisionHandler(.download)}
+  else if url.scheme=="about" || local || localBlob {decisionHandler(.allow)}
   else {if ["https","http"].contains(url.scheme ?? ""){NSWorkspace.shared.open(url)};decisionHandler(.cancel)}
  }
  func webView(_ webView:WKWebView,createWebViewWith configuration:WKWebViewConfiguration,for action:WKNavigationAction,windowFeatures:WKWindowFeatures)->WKWebView?{if let url=action.request.url, ["https","http"].contains(url.scheme ?? ""){NSWorkspace.shared.open(url)};return nil}
