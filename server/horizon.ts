@@ -1,3 +1,4 @@
+import { aggregationSnapshot } from "./aggregation-desk.js";
 import { candidatePool } from "./candidate-pool.js";
 import { captureRecommendationSnapshot } from "./discovery-trace.js";
 import { randomUUID } from "node:crypto";
@@ -53,6 +54,7 @@ export const collectionReadinessLog = (
   briefingCount: number,
   purpose?: WorkflowRun["collectionPurpose"],
 ): { message: string; level: "success" | "warning" } => {
+  if (purpose === "aggregation") return { message: "聚合摘要已保存；请在聚合资讯查看各平台读取状态", level: "success" };
   if (candidateCount <= 0) {
     return { message: "采集完成，但没有候选；请查看来源诊断", level: "warning" };
   }
@@ -297,6 +299,7 @@ export const enrichCandidateBriefings = (
 
 interface CollectionRunOptions extends CollectionRequest {
   officialMonitor?: boolean;
+  aggregation?: boolean;
   scheduled?: boolean;
   scheduledDate?: string;
   windowHours?: number;
@@ -341,7 +344,7 @@ export const createCollectionRun = async (
       : requestedWindowHours;
     const keywords = options.keywords?.trim() || undefined;
     const next: WorkflowRun = {
-      ...(options.officialMonitor ? { collectionPurpose: "official-monitor" as const } : {}),
+      ...(options.aggregation ? { collectionPurpose: "aggregation" as const } : options.officialMonitor ? { collectionPurpose: "official-monitor" as const } : {}),
       id: `run_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomUUID().slice(0, 6)}`,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -365,7 +368,7 @@ export const createCollectionRun = async (
         stage: "等待启动",
         message: options.retryOfRunId
           ? `正在重试运行 ${options.retryOfRunId}`
-          : options.officialMonitor ? "官方与热点来源增量检查：仅收录候选，阅读时再补正文与原图" : options.scheduled
+          : options.aggregation ? "读取聚合平台摘要，不调用模型改写" : options.officialMonitor ? "官方与热点来源增量检查：仅收录候选，阅读时再补正文与原图" : options.scheduled
             ? "定时心跳已触发"
             : `手动采集已进入队列${options.dateFrom && options.dateTo ? ` · ${options.dateFrom} 至 ${options.dateTo}` : ""}${keywords ? ` · 关键词：${keywords}` : ""}`,
         level: "info",
@@ -404,6 +407,8 @@ export const retryCollectionRun = async (runId: string) => {
     dateTo: previous.dateTo,
     keywords: previous.keywords,
     retryOfRunId: previous.id,
+    aggregation: previous.collectionPurpose === "aggregation",
+    officialMonitor: previous.collectionPurpose === "official-monitor",
   });
 };
 
@@ -530,6 +535,7 @@ export const executeCollection = async (runId: string) => {
       horizonRunId,
       collectedAt: now(),
       rawCount: rawItems.length,
+      aggregationItems: aggregationSnapshot(rawItems),
       status: "scoring",
       stage: "去重与评分",
     });
@@ -579,9 +585,9 @@ export const executeCollection = async (runId: string) => {
       `日期与关键词筛选后保留 ${funnel.matchedCount} 条，得到 ${candidates.length} 条${topicLabels(normalizeTopicIds(run.topicIds)).join("／")}候选`,
       candidates.length ? "success" : "warning",
     );
-    const extractedSourceText = run.collectionPurpose === "official-monitor" ? new Map<string, string>() : await probeImages(runId, controller.signal);
+    const extractedSourceText = (run.collectionPurpose === "official-monitor" || run.collectionPurpose === "aggregation") ? new Map<string, string>() : await probeImages(runId, controller.signal);
     if (controller.signal.aborted) throw new Error("采集已取消");
-    if (candidates.length && run.collectionPurpose !== "official-monitor") {
+    if (candidates.length && !run.collectionPurpose) {
       await patchRun(runId, { stage: "生成中文速读" });
       try {
         const briefingResult = await enrichCandidateBriefings(runId, { extractedSourceText, signal: controller.signal });
@@ -628,7 +634,7 @@ export const executeCollection = async (runId: string) => {
     const readinessLog = collectionReadinessLog(candidates.length, briefingCount, run.collectionPurpose);
     await appendLog(
       runId,
-      run.collectionPurpose === "official-monitor" ? "官方与热点检查" : candidates.length ? "生成中文速读" : "提取来源原图",
+      run.collectionPurpose === "aggregation" ? "聚合资讯读取" : run.collectionPurpose === "official-monitor" ? "官方与热点检查" : candidates.length ? "生成中文速读" : "提取来源原图",
       readinessLog.message,
       readinessLog.level,
     );

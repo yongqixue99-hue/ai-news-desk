@@ -24,6 +24,7 @@ const SHELL_PREFERENCE_KEY = "ai-news-desk:shell:v1";
 
 const navigation: Array<{ id: AppPage; label: string; icon: LucideIcon }> = [
   { id: "today", label: "今日", icon: CalendarDays },
+  { id: "aggregations", label: "聚合资讯", icon: Radio },
   { id: "workbench", label: "新闻工作台", icon: Newspaper },
   { id: "community", label: "社区广场", icon: MessagesSquare },
   { id: "drafts", label: "草稿", icon: FilePenLine },
@@ -32,6 +33,7 @@ const navigation: Array<{ id: AppPage; label: string; icon: LucideIcon }> = [
 ];
 
 const mobileMoreNavigation: Array<{ id: AppPage; label: string; icon: LucideIcon }> = [
+  { id: "aggregations", label: "聚合资讯", icon: Radio },
   { id: "sources", label: "新闻源", icon: Radio },
   { id: "editorial-system", label: "内容策略", icon: Compass },
   { id: "schedule", label: "自动化计划", icon: Zap },

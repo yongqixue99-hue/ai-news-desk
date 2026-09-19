@@ -1,3 +1,5 @@
+import { buildAggregationView, retainAggregationEntry } from "./aggregation-desk.js";
+import { aggregationSourceIds } from "./aggregation-catalog.js";
 import { writingPreferencePlan } from "./writing-preference-retrieval.js";
 import { recordEditObservation } from "./edit-observation.js";
 import { reviewDraftQuality, bindReviewedParagraph } from "./draft-quality-review.js";
@@ -494,6 +496,25 @@ app.post(
     response.json(ref);
   }),
 );
+
+app.get("/api/aggregations", asyncRoute(async (_request, response) => {
+  response.json(buildAggregationView(await readState()));
+}));
+app.post("/api/aggregations/refresh", asyncRoute(async (_request, response) => {
+  const state = await readState();
+  const sourceIds = state.sources.filter(s => aggregationSourceIds.has(s.id) && s.enabled && s.selected).map(s => s.id);
+  if (!sourceIds.length) { response.status(409).json({error: "请在新闻源中启用并选入至少一个聚合平台。"}); return; }
+  const result = await createCollectionRun({sourceIds, topicIds: ["ai"], windowHours: 7 * 24, aggregation: true});
+  if (!result.created && !sourceIds.every(id => result.run.sourceIds.includes(id))) {
+    response.status(409).json({error: "另一个采集任务正在运行，请等它完成后再更新聚合资讯。"}); return;
+  }
+  response.json(result);
+}));
+app.post("/api/aggregations/:id/select", asyncRoute(async (request, response) => {
+  const id = routeParam(request.params.id);
+  if (!buildAggregationView(await readState()).entries.some(e => e.id === id)) { response.status(404).json({error: "条目已不在当前快照，请刷新列表。"}); return; }
+  response.json(await updateState(state => retainAggregationEntry(state, id)));
+}));
 
 app.get(
   "/api/today",

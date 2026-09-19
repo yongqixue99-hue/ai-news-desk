@@ -598,7 +598,9 @@ export interface CollectionFunnel {
 }
 
 export interface WorkflowRun {
-  collectionPurpose?: "official-monitor";
+  /** Bounded, verbatim aggregation summaries retained before editorial scoring. */
+  aggregationItems?: RawHorizonItem[];
+  collectionPurpose?: "official-monitor" | "aggregation";
   id: string;
   horizonRunId?: string;
   createdAt: string;

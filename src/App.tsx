@@ -49,6 +49,7 @@ const DraftWorkspace = lazy(() =>
 );
 const Workbench = lazy(() => import("./components/Workbench").then((module) => ({ default: module.Workbench })));
 const CommunityWorkspace = lazy(() => import("./components/CommunityWorkspace").then((module) => ({ default: module.CommunityWorkspace })));
+const AggregationsPage = lazy(() => import("./components/AggregationsPage").then(module => ({default: module.AggregationsPage})));
 const SourcesPage = lazy(() => import("./components/SourcesPage").then((module) => ({ default: module.SourcesPage })));
 const EditorialSystemPage = lazy(() => import("./components/EditorialSystemPage").then((module) => ({ default: module.EditorialSystemPage })));
 const RunsPage = lazy(() => import("./components/RunsPage").then((module) => ({ default: module.RunsPage })));
@@ -1329,6 +1330,7 @@ function App() {
           onRequestedStoryHandled={() => setHomeStoryId(undefined)}
         />
       ) : null}
+      {page === "aggregations" ? <AggregationsPage onNavigate={navigate} onNotice={(kind, message) => setNotice({kind, message})} /> : null}
       {page === "workbench" ? (
         <Workbench
           settings={state.settings}

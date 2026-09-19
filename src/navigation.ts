@@ -2,6 +2,7 @@ import type { AppPage } from "./types";
 
 const APP_PAGES = new Set<AppPage>([
   "today",
+  "aggregations",
   "workbench",
   "community",
   "drafts",
