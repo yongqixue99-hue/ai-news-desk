@@ -1,5 +1,14 @@
 import type { Candidate, CollectionSummary, RawHorizonItem, SourceConfig, SourceRouteResult, SourceRunResult, WorkflowRun } from "./types.js";
 
+/** Empty results with failed inputs are not evidence of an absent event. */
+export const collectionCoverageWarning = (run: Pick<WorkflowRun, "sourceResults">): string | undefined => {
+  const affected = (run.sourceResults ?? []).filter((source) => source.status === "error"
+    || source.routes?.some((route) => route.status === "error"));
+  if (!affected.length) return undefined;
+  const names = affected.slice(0, 3).map((source) => source.sourceName).join("、");
+  return `${names}${affected.length > 3 ? `等 ${affected.length} 个来源` : ""}的部分读取路线失败。本次检索覆盖不完整，不能据此判断没有相关新闻；请查看来源诊断后重试。`;
+};
+
 export const latestSourceCollection = (runs: WorkflowRun[]): CollectionSummary | undefined => {
   const completed = runs.flatMap((run) => {
     if ((run.origin && run.origin !== "collection") || !run.sourceResults?.length) return [];

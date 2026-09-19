@@ -14,3 +14,14 @@ export const dueOfficialSources = (sources: SourceConfig[], settings: Pick<Setti
   }).sort((left, right) => Number(right.id === "openai-official" || right.id === "anthropic-official") - Number(left.id === "openai-official" || left.id === "anthropic-official")
     || Date.parse(left.lastCheckedAt || "1970-01-01") - Date.parse(right.lastCheckedAt || "1970-01-01"));
 };
+
+/** Shares the explicit automatic-reading switch, never enables arbitrary sources. */
+export const dueDiscoverySources = (sources: SourceConfig[], settings: Pick<Settings, "officialMonitorEnabled" | "officialMonitorIntervalMinutes" | "collectionTopics">, now = Date.now()) => {
+  if (!settings.officialMonitorEnabled) return [];
+  return sources.filter(source => {
+    if (!source.enabled || !source.selected || source.role !== "discovery" || !["rss", "google_news"].includes(source.kind) || !sourceSupportsTopics(source, settings.collectionTopics)) return false;
+    const checked = Date.parse(source.lastCheckedAt || "");
+    const backoff = Math.min(8, 2 ** Math.min(3, source.consecutiveFailures || 0));
+    return !Number.isFinite(checked) || now - checked >= officialPollInterval(settings.officialMonitorIntervalMinutes) * backoff * 60_000;
+  });
+};

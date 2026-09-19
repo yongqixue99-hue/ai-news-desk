@@ -133,7 +133,7 @@ test("Horizon receives comprehensive news search as RSS instead of its empty ada
   assert.ok(source);
   const config = buildHorizonConfig([source], 20, ["ai"]);
   assert.equal(config.sources.google_news.enabled, false);
-  assert.equal(config.sources.rss.length, 1);
+  assert.equal(config.sources.rss.length, 2);
   assert.deepEqual(horizonSourceKindsFor([source]), ["rss"]);
 });
 

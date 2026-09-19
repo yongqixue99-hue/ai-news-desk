@@ -43,6 +43,7 @@ import {
   sourceSupportsTopics,
   sourceTopicIds,
 } from "../../server/source-routing.js";
+import { collectionCoverageWarning } from "../../server/source-health.js";
 import type {
   AiProviderConfig,
   EvidenceReviewSelection,
@@ -327,6 +328,7 @@ export function Workbench({
   const candidatesWereCleared = Boolean(run?.candidatesClearedAt);
   const runOnlyContainsCommunity = Boolean(run?.candidates.length && candidates.length === 0);
   const runHasNoResults = Boolean(run && !candidatesWereCleared && !runOnlyContainsCommunity && !runIsActive && !["failed", "cancelled"].includes(run.status) && candidates.length === 0);
+  const coverageWarning = run && !runIsActive ? collectionCoverageWarning(run) : undefined;
   const selectChannel = (channel: "all" | CollectionTopicId) => {
     onSettings({ collectionTopics: channel === "all" ? [...allCollectionTopicIds] : [channel] });
   };
@@ -678,6 +680,7 @@ export function Workbench({
                 {candidateHome.expired.length ? <span><Archive size={13} />已自动移出 {candidateHome.expired.length} 条超过 48 小时的候选</span> : null}
               </div>
             ) : null}
+            {coverageWarning ? <div className="run-empty-warning" role="status"><TriangleAlert size={17} /><span><strong>本次检索覆盖不完整</strong><small>{coverageWarning}</small></span></div> : null}
             <div className="candidate-table-wrap">
               <table className="candidate-table">
                 <thead>
@@ -697,12 +700,12 @@ export function Workbench({
                     <tr className={runHasNoResults ? "empty-row warning" : "empty-row"}>
                       <td colSpan={8}>
                         {runHasNoResults ? <TriangleAlert size={26} /> : candidatesWereCleared ? <Trash2 size={26} /> : quickIntakeActive ? <LoaderCircle className="spin" size={26} /> : <Newspaper size={26} />}
-                        <strong>{runHasNoResults ? "本次采集完成，但没有找到候选新闻" : candidatesWereCleared ? "当前候选列表已清空" : quickIntakeActive ? run?.stage : "点一次“开始采集”，候选会自动出现在这里"}</strong>
+                        <strong>{runHasNoResults ? coverageWarning ? "部分来源读取失败，暂未找到候选新闻" : "本次采集完成，但没有找到候选新闻" : candidatesWereCleared ? "当前候选列表已清空" : quickIntakeActive ? run?.stage : "点一次“开始采集”，候选会自动出现在这里"}</strong>
                         <span>
                           {runHasNoResults
-                            ? run?.rawCount
+                            ? coverageWarning || (run?.rawCount
                               ? `读取了 ${run.rawCount} 条原始记录，但都没有通过日期、关键词、频道或价值过滤。`
-                              : "没有读到原始记录；请检查官网来源状态、日期范围和网络。"
+                              : "没有读到原始记录；请检查官网来源状态、日期范围和网络。")
                             : candidatesWereCleared
                               ? "来源记录和已有草稿仍然保留；重新采集即可恢复一批新候选。"
                               : quickIntakeActive
@@ -867,7 +870,7 @@ export function Workbench({
           {runHasNoResults ? (
             <div className="run-empty-warning" role="status">
               <TriangleAlert size={17} />
-              <span><strong>运行完成，但结果为空</strong><small>请检查来源日志，或放宽日期、关键词与频道后重试。</small></span>
+              <span><strong>{coverageWarning ? "检索覆盖不完整" : "运行完成，但结果为空"}</strong><small>{coverageWarning || "请检查来源日志，或放宽日期、关键词与频道后重试。"}</small></span>
             </div>
           ) : null}
           {run?.error ? <div className="run-error">{run.error}</div> : null}

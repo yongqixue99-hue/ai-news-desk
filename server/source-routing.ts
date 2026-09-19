@@ -8,6 +8,11 @@ import type {
 
 export const allCollectionTopicIds = collectionTopics.map((topic) => topic.id);
 
+// Early installations persisted this default in state. It required an article
+// about any new entrant to also mention a large incumbent. Recognize only this
+// exact shipped value; custom site/topic restrictions remain user-owned.
+const legacyComprehensiveQuery = "(artificial intelligence OR AI) (OpenAI OR Anthropic OR Google DeepMind OR Microsoft OR Meta OR Nvidia)";
+
 export const googleNewsFeed = (query: string) =>
   `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
 
@@ -16,6 +21,10 @@ export const keywordTerms = (input?: string) =>
     .split(/[,，\n]+/)
     .map((value) => value.trim())
     .filter(Boolean)
+    .flatMap((value) => {
+      const quoted = [...value.matchAll(/[「『“]([^」』”]+)[」』”]/gu)].map((match) => match[1].trim()).filter(Boolean);
+      return quoted.length ? quoted : [value];
+    })
     .slice(0, 8);
 
 const nextDate = (date: string) => {
@@ -100,10 +109,26 @@ export const routedFeedsForSource = (
 ): RoutedFeed[] => {
   if (!sourceSupportsTopics(source, topicIds)) return [];
   if (source.kind === "google_news") {
-    const baseQuery = source.query?.trim() || queryForTopics(topicIds);
+    const configuredQuery = source.query?.trim();
+    const legacyDefault = source.id === "google-news-ai"
+      && configuredQuery?.replace(/\s+/g, " ").toLowerCase() === legacyComprehensiveQuery.toLowerCase();
+    const baseQuery = (!legacyDefault && configuredQuery)
+      || (keywordTerms(filters.keywords).length ? "" : queryForTopics(topicIds));
+    // Independent discovery: no vendor allowlist, and user keywords need not
+    // contain a known model family. Dates are enforced by the common funnel.
+    const bingQuery = buildDiscoveryQuery(baseQuery, { keywords: filters.keywords });
+    const bingUrl = new URL("https://www.bing.com/news/search");
+    bingUrl.searchParams.set("q", bingQuery);
+    bingUrl.searchParams.set("format", "rss");
+    bingUrl.searchParams.set("sortby", "date");
     return [{
       name: source.name,
       url: googleNewsFeed(buildDiscoveryQuery(baseQuery, filters)),
+      category: source.category,
+      profile: "tech-news",
+    }, {
+      name: source.name,
+      url: bingUrl.toString(),
       category: source.category,
       profile: "tech-news",
     }];

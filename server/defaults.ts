@@ -1323,7 +1323,21 @@ const configuredDefaultSources: SourceConfig[] = [
 ];
 
 // Append adapters without changing the identity/order of existing sources.
-configuredDefaultSources.push(...officialKnowledgeSources);
+configuredDefaultSources.push(...officialKnowledgeSources, {
+  id: "aihot-news", name: "AIHOT · AI 热点聚合", kind: "rss",
+  homepageUrl: "https://aihot.news/", url: "https://aihot.news/feed.xml",
+  topicIds: ["ai", "technology"], category: "ai-news", role: "discovery",
+  enabled: true, selected: true, discoveryOnly: true,
+  routes: [{ topicId: "ai", label: "精选摘要", url: "https://aihot.news/feed.xml" },
+    { topicId: "ai", label: "近期公开动态", url: "https://aihot.news/feed/all.xml" },
+    { topicId: "technology", label: "精选摘要", url: "https://aihot.news/feed.xml" }],
+  note: "匿名 RSS · 个人本地使用 · 至少间隔 30 分钟 · 聚合线索不等于事实核验，保留 AIHOT 与原文归属，不转载全文。",
+}, {
+  id: "aihot-cn", name: "aihot.cn（待确认）", kind: "rss",
+  homepageUrl: "https://aihot.cn/", url: "https://aihot.cn/", topicIds: ["ai"],
+  category: "ai-news", role: "discovery", discoveryOnly: true, enabled: false, selected: false,
+  note: "2026-09-20 无法连接，尚未确认可用订阅地址或与 AIHOT.news 的关系；仅保留入口，未接通，不参与采集。",
+});
 
 const localSkillPath = (skillDirectory: string) =>
   path.join(homedir(), ".codex", "skills", skillDirectory, "SKILL.md");
@@ -1341,6 +1355,7 @@ export const defaultSourcePresets: SourcePreset[] = [
     name: "AI 日常完整包",
     sourceIds: [
       ...officialKnowledgeSources.map((source) => source.id),
+      "aihot-news",
       "openai-official",
       "x-ai-official",
       "anthropic-official",
@@ -1389,6 +1404,7 @@ export const defaultSourcePresets: SourcePreset[] = [
     id: "preset_ai_expanded",
     name: "AI 扩展覆盖（较慢）",
     sourceIds: [
+      "aihot-news",
       "openai-official",
       "x-ai-official",
       "anthropic-official",

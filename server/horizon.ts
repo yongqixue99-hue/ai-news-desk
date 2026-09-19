@@ -18,7 +18,7 @@ import { extractPage } from "./extractor.js";
 import { mergeVisualImages } from "./visual-desk.js";
 import { selectTopAndGenerate } from "./generator.js";
 import { findActiveCollectionRun, isCollectionActive } from "./run-policy.js";
-import { applySourceRunResult, sourceResultsForRun } from "./source-health.js";
+import { applySourceRunResult, sourceResultsForRun, collectionCoverageWarning } from "./source-health.js";
 import {
   dynamicTopicQuery,
   eligibleSourcesForTopics,
@@ -57,7 +57,7 @@ export const collectionReadinessLog = (
     return { message: "采集完成，但没有候选；请查看来源诊断", level: "warning" };
   }
   if (purpose === "official-monitor") {
-    return { message: `已收录 ${candidateCount} 条官方候选；阅读时补充正文、中文解读和原图`, level: "success" };
+    return { message: `已收录 ${candidateCount} 条增量候选；阅读时补充正文、中文解读和原图`, level: "success" };
   }
   const completed = Math.max(0, Math.min(candidateCount, Math.floor(briefingCount)));
   if (completed === candidateCount) {
@@ -365,7 +365,7 @@ export const createCollectionRun = async (
         stage: "等待启动",
         message: options.retryOfRunId
           ? `正在重试运行 ${options.retryOfRunId}`
-          : options.officialMonitor ? "官方来源增量检查：仅收录候选，阅读时再补正文与原图" : options.scheduled
+          : options.officialMonitor ? "官方与热点来源增量检查：仅收录候选，阅读时再补正文与原图" : options.scheduled
             ? "定时心跳已触发"
             : `手动采集已进入队列${options.dateFrom && options.dateTo ? ` · ${options.dateFrom} 至 ${options.dateTo}` : ""}${keywords ? ` · 关键词：${keywords}` : ""}`,
         level: "info",
@@ -605,11 +605,11 @@ export const executeCollection = async (runId: string) => {
       clearRetriedCollectionFailures(current, runId);
       appendWorkflowNotification(current, {
         type: "collection-complete",
-        severity: candidates.length ? "success" : "warning",
-        title: "新闻采集完成",
-        message: candidates.length
+        severity: collectionCoverageWarning(targetRun) || !candidates.length ? "warning" : "success",
+        title: collectionCoverageWarning(targetRun) ? "新闻采集完成，覆盖仍有缺口" : "新闻采集完成",
+        message: (candidates.length
           ? `已整理 ${candidates.length} 条候选新闻，可以开始筛选。`
-          : "本次采集没有找到符合条件的候选，请调整来源或搜索条件。",
+          : "本次采集没有找到符合条件的候选。") + (collectionCoverageWarning(targetRun) || ""),
         dedupeKey: `collection-complete:${runId}`,
         target: { page: "workbench", runId },
       }, { createdAt: completedAt });
@@ -628,7 +628,7 @@ export const executeCollection = async (runId: string) => {
     const readinessLog = collectionReadinessLog(candidates.length, briefingCount, run.collectionPurpose);
     await appendLog(
       runId,
-      run.collectionPurpose === "official-monitor" ? "官方来源检查" : candidates.length ? "生成中文速读" : "提取来源原图",
+      run.collectionPurpose === "official-monitor" ? "官方与热点检查" : candidates.length ? "生成中文速读" : "提取来源原图",
       readinessLog.message,
       readinessLog.level,
     );

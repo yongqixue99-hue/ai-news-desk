@@ -3,7 +3,7 @@ import { isPortableArchiveImportActive } from "./portable-archive-importer.js";
 import { localScheduleClock, scheduleIsDue } from "./run-policy.js";
 import { readState } from "./storage.js";
 import { officialXMonitor } from "./x-monitor-desk.js";
-import { dueOfficialSources } from "./official-source-monitor.js";
+import { dueOfficialSources, dueDiscoverySources } from "./official-source-monitor.js";
 
 export const runSchedulerCheck = async () => {
   if (isPortableArchiveImportActive()) return;
@@ -12,7 +12,7 @@ export const runSchedulerCheck = async () => {
   });
   const state = await readState();
   if (!scheduleIsDue(state.settings)) {
-    const sources = dueOfficialSources(state.sources, state.settings);
+    const sources = [...dueOfficialSources(state.sources, state.settings), ...dueDiscoverySources(state.sources, state.settings)];
     // Never submit an empty source list: the collection API interprets it as all selected sources.
     if (sources.length && (!state.settings.lastOfficialPollAt || Date.now() - Date.parse(state.settings.lastOfficialPollAt) >= 5 * 60_000)) {
       await createCollectionRun({ sourceIds: sources.map(source => source.id), officialMonitor: true, windowHours: 48 });

@@ -10,6 +10,27 @@ import {
   sourceSupportsTopics,
 } from "./source-routing.js";
 
+test("explicit model search is not constrained by a predefined vendor vocabulary", () => {
+  const source = defaultSources.find((entry) => entry.id === "google-news-ai")!;
+  for (const keyword of ["Jev", "UnseenResearchModel"]) {
+    for (const route of routedFeedsForSource(source, ["ai"], { keywords: keyword, dateFrom: "2026-09-17", dateTo: "2026-09-18" })) {
+      const query = new URL(route.url).searchParams.get("q") ?? "";
+      assert.ok(query.includes(keyword));
+      assert.doesNotMatch(query, /OpenAI|Anthropic|artificial intelligence/);
+    }
+  }
+});
+
+test("automatic discovery drops only the shipped legacy vendor restriction, preserving user scopes", () => {
+  const source = defaultSources.find((entry) => entry.id === "google-news-ai")!;
+  const legacy = { ...source, query: "(artificial intelligence OR AI) (OpenAI OR Anthropic OR Google DeepMind OR Microsoft OR Meta OR Nvidia)" };
+  const ordinary = routedFeedsForSource(source, ["ai"]);
+  assert.deepEqual(routedFeedsForSource(legacy, ["ai"]), ordinary);
+  for (const route of routedFeedsForSource({ ...source, query: "site:example.com AI" }, ["ai"], { keywords: "Jev" })) {
+    assert.match(new URL(route.url).searchParams.get("q") ?? "", /site:example.com/);
+  }
+});
+
 test("Gemini and Qwen retain a first-party route when Google News is unreachable", () => {
   for (const topic of ["ai", "technology"] as const) {
     const gemini = defaultSources.find((source) => source.id === "gemini-official")!;
@@ -45,11 +66,11 @@ test("Google News comprehensive search is routed through the proven RSS collecto
   const source = defaultSources.find((entry) => entry.id === "google-news-ai");
   assert.ok(source);
   const feeds = routedFeedsForSource(source, ["science"], { keywords: "量子计算" });
-  assert.equal(feeds.length, 1);
+  assert.equal(feeds.length, 2);
+  assert.equal(new URL(feeds[1].url).hostname, "www.bing.com");
   assert.match(feeds[0].url, /^https:\/\/news\.google\.com\/rss\/search\?/);
   const query = new URL(feeds[0].url).searchParams.get("q") ?? "";
-  assert.match(query, /science/);
-  assert.match(query, /科学/);
+  assert.doesNotMatch(query, /science/);
   assert.match(query, /量子计算/);
   assert.doesNotMatch(query, /OpenAI OR Anthropic/);
 });
