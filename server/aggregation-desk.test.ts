@@ -82,3 +82,14 @@ test('explicit platform event membership groups different reports once without t
  const view=buildAggregationView(state,Date.parse(time));assert.equal(view.recommended.length,1);assert.equal(view.recommended[0].related?.length,1);
  assert.equal(view.platformEntries['aihot-news'].length,2);
 });
+test('AIHOT selected API order is not interleaved with a secondary RSS timeline',()=>{
+ const state=createDefaultState();const api='https://aihot.news/api/v1/items?mode=selected&window=7d&limit=100',rss='https://aihot.news/feed.xml';
+ const make=(url:string,feed:string,title:string)=>({...item('aihot-news',url),title,metadata:{source_id:'aihot-news',feed_url:feed,aggregation_channel:'selected',aggregation_order:1}});
+ const snapshot=run([make('https://example.com/primary',api,'Primary selection'),make('https://example.com/secondary',rss,'Different RSS order')]);
+ snapshot.sourceResults![0].routes=[api,rss].map(url=>({sourceId:'aihot-news',url,status:'success' as const,rawCount:1}));state.runs=[snapshot];
+ assert.deepEqual(buildAggregationView(state,Date.parse(time)).platformEntries['aihot-news'].map(e=>e.title),['Primary selection']);
+ snapshot.aggregationItems=snapshot.aggregationItems!.filter(i=>i.metadata?.feed_url!==api);
+ assert.equal(buildAggregationView(state,Date.parse(time)).platformEntries['aihot-news'].length,0,'a successful empty API selection must stay empty');
+ snapshot.sourceResults![0].routes![0].status='error';
+ assert.deepEqual(buildAggregationView(state,Date.parse(time)).platformEntries['aihot-news'].map(e=>e.title),['Different RSS order'],'RSS is a fallback when no successful API snapshot exists');
+});

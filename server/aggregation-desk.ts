@@ -2,6 +2,7 @@ import { isIP } from 'node:net';
 import { isDisallowedRemoteAddress } from './remote-url.js';
 import { createHash } from 'node:crypto';
 import { aggregationCatalog, aggregationSourceIds } from './aggregation-catalog.js';
+import { aihotSelectedUrl } from './aggregation-native.js';
 import { nativeOrder, rankAggregations } from './aggregation-ranking.js';
 import type { RawHorizonItem, WorkflowState, WorkflowRun, Candidate } from './types.js';
 
@@ -51,7 +52,9 @@ function platformSnapshots(runs: WorkflowRun[], id: string) {
     const run = runs.find(r=>r.aggregationItems!==undefined && r.sourceResults?.some(s=>s.sourceId===id && s.status!=='error'));
     return run ? [{run,items:run.aggregationItems!.filter(i=>sourceId(i)===id)}] : [];
   }
-  return [...routes].flatMap(url => {
+  // The API and selected RSS are alternative representations, not two ranked lists to interleave.
+  const hasSelectedApi = id === 'aihot-news' && runs.some(r => r.aggregationItems !== undefined && r.sourceResults?.find(s=>s.sourceId===id)?.routes?.some(route=>route.url===aihotSelectedUrl && route.status==='success'));
+  return [...routes].filter(url => !hasSelectedApi || url !== 'https://aihot.news/feed.xml').flatMap(url => {
     const run = runs.find(r=>r.aggregationItems!==undefined && r.sourceResults?.find(s=>s.sourceId===id)?.routes?.some(route=>route.url===url && route.status==='success'));
     return run ? [{run,items:run.aggregationItems!.filter(i=>sourceId(i)===id && i.metadata?.feed_url===url)}] : [];
   });
