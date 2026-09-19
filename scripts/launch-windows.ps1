@@ -9,8 +9,9 @@ try {
   $command = Get-Command node.exe -ErrorAction SilentlyContinue
   if ($command) {
     $candidate = $command.Source
-    & $candidate -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a===22 && b>=16 ? 0 : 1)'
-    if ($LASTEXITCODE -eq 0) { $nodePath = $candidate }
+    $versionText = & $candidate -p process.versions.node
+    $version = [Version]$versionText
+    if ($version.Major -eq 22 -and $version.Minor -ge 16) { $nodePath = $candidate }
   }
   if (!$nodePath) {
     $cached = Join-Path $runtimeRoot 'node/node.exe'

@@ -30,7 +30,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
-      - run: npm test
+      - run: node --test --test-concurrency=2 --import tsx server/**/*.test.ts src/**/*.test.ts src/**/*.test.tsx chrome-extension/**/*.test.ts
       - run: npm run eval:editorial
       - run: npm run build
       - name: Launch and reuse the desktop backend
