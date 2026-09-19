@@ -418,14 +418,16 @@ export const rankCandidatesWithDiagnostics = (
 
   const ranked = clusters.map((cluster) => {
     const relatedSources = [...new Set(cluster.map((candidate) => candidate.sourceName))];
-    const crossSource = clamp((relatedSources.length - 1) * 12, 0, 24);
+    // Discovery platforms and community wrappers do not establish independent reporting.
+    const publishers = new Set(cluster.filter(c => c.sourceRole === 'official' || c.sourceRole === 'verification' || c.sourceRole === 'research').flatMap(c => {
+      try { return [new URL(c.canonicalUrl || c.url).hostname.replace(/^www\./, '')]; } catch { return []; }
+    }));
+    const crossSource = clamp((publishers.size - 1) * 12, 0, 24);
     const enriched = cluster.map((candidate) => {
       const engagement = engagementFor(candidate);
-      const confirmed = relatedSources.length > 1 && candidate.scoreBreakdown.confirmation === 0;
-      const scoreBreakdown = confirmed
-        ? { ...candidate.scoreBreakdown, confirmation: 1 }
-        : candidate.scoreBreakdown;
-      const score = confirmed ? Math.min(15, candidate.score + 1) : candidate.score;
+      const confirmation = publishers.size > 1 ? 1 : 0;
+      const scoreBreakdown = {...candidate.scoreBreakdown, confirmation};
+      const score = clamp(candidate.score - candidate.scoreBreakdown.confirmation + confirmation, 0, 15);
       // Propagation is evidence, not an editorial estimate. Only observable
       // public interaction and independent pickup count here. Absence is
       // "unknown", never a fabricated low-heat score.

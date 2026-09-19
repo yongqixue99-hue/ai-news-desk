@@ -272,3 +272,18 @@ test("global news ranking does not reuse uncalibrated community point totals",()
  const [observed]=sortCandidates([candidate]);const [unknown]=sortCandidates([{...candidate,engagement:undefined}]);
  assert.equal(observed.recommendationScore,unknown.recommendationScore);
 });
+
+test('aggregator copies cannot increase factual confirmation or independent pickup', () => {
+  const copies = ['AIHOT', 'AlphaSignal', 'Ben’s Bites'].map((name, i) => rawItemToCandidate(item({
+    id: `copy-${i}`, url: `https://aggregator${i}.example/story`,
+    metadata: { feed_name: name, source_role: 'discovery' },
+  }), 24));
+  const [ranked] = sortCandidates(copies);
+  assert.equal(ranked.scoreBreakdown.confirmation, 0);
+  assert.equal(ranked.heatBreakdown.crossSource, 0);
+  const samePublisher = ['News A', 'News B'].map((name, i) => rawItemToCandidate(item({
+    id: `publisher-${i}`, url: `https://publisher.example/story?utm_source=${i}`,
+    metadata: { feed_name: name, source_role: 'verification' },
+  }), 24));
+  assert.equal(sortCandidates(samePublisher)[0].heatBreakdown.crossSource, 0);
+});

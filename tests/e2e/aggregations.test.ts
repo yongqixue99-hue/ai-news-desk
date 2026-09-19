@@ -81,6 +81,10 @@ test("aggregation browsing is read-only, retains filtered summaries and works on
  state.runs=[{id:'aggregate-fixture',createdAt:now,updatedAt:now,collectedAt:now,status:'ready',stage:'done',windowHours:168,sourceIds:['smol-ainews'],scheduled:false,rawCount:1,candidates:[],logs:[],
  aggregationItems:[{id:'digest',source_type:'rss',title:'A new decision model',url:'https://news.smol.ai/issues/fixture',content:'A short publisher summary, preserved before scoring.',published_at:'2026-01-01T00:00:00Z',fetched_at:now,metadata:{source_id:'smol-ainews'}}],
  sourceResults:[{sourceId:'smol-ainews',sourceName:'AINews',status:'healthy',healthImpact:'success',rawCount:1,candidateCount:0,detail:''}]}];
+
+ const news=(source:string,title:string,url:string,rank:number)=>({id:title,source_type:'rss' as const,title,url,content:`${source} original summary`,published_at:now,fetched_at:now,metadata:{source_id:source,aggregation_order:rank,...(source==='aihot-news'?{aggregation_channel:'hot',aggregation_rank:rank}:{aggregation_channel:'feed'})}});
+ state.runs[0]!.aggregationItems!.push(news('aihot-news','报名：重磅模型发布活动','https://example.com/promo',1),news('aihot-news','Jev 发布新决策模型','https://example.com/release',2),news('alphasignal','AlphaSignal original model release','https://example.com/release',1));
+ state.runs[0]!.sourceResults!.push(...['aihot-news','alphasignal'].map(sourceId=>({sourceId,sourceName:sourceId,status:'healthy' as const,healthImpact:'success' as const,rawCount:2,candidateCount:0,detail:''})));
  await writeFile(path.join(root,'state.json'),JSON.stringify(state));
  const port=await freePort(),origin=`http://127.0.0.1:${port}`;let output='';
  const server=spawn(process.execPath,['--import','tsx','server/start.ts'],{cwd:process.cwd(),env:{...process.env,NODE_ENV:'production',AI_NEWS_DESK_PORT:String(port),AI_NEWS_DESK_WORKFLOW_ROOT:root},stdio:['ignore','pipe','pipe'],detached:process.platform!=='win32'});
@@ -88,16 +92,24 @@ test("aggregation browsing is read-only, retains filtered summaries and works on
  let browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
  try{
  await waitForHealth(origin,()=>output);browser=await chromium.launch({executablePath:await findChromeExecutable(),headless:true});const page=await browser.newPage({viewport:{width:1440,height:1000}});
+ const shots=path.resolve('.artifacts/aggregation-ranking/browser');await mkdir(shots,{recursive:true});
+ const capture=async(name:string)=>{for(const width of [1440,390]){await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:path.join(shots,`${name}-${width}.png`),fullPage:true});}await page.setViewportSize({width:1440,height:1000});};
  const posts:string[]=[];const errors:string[]=[];page.on('request',r=>{if(r.method()==='POST')posts.push(r.url());});page.on('pageerror',e=>errors.push(e.message));
- await page.goto(`${origin}/#aggregations`);await page.getByRole('heading',{name:'聚合资讯',exact:true}).waitFor();await page.getByRole('heading',{name:'A new decision model'}).waitFor();
+ await page.goto(`${origin}/#aggregations`);await page.getByRole('heading',{name:'聚合资讯',exact:true}).waitFor();await page.getByRole('heading',{name:'Jev 发布新决策模型'}).waitFor();
+ assert.equal(await page.getByRole('heading',{name:'报名：重磅模型发布活动'}).count(),0);await capture('roundup');
+ await page.getByRole('button',{name:'AIHOT 已停用'}).click();await page.getByRole('heading',{name:'报名：重磅模型发布活动'}).waitFor();
+ assert.equal(await page.locator('.aggregation-row h2').first().innerText(),'报名：重磅模型发布活动');await capture('platform');
+ await page.getByRole('button',{name:'AlphaSignal 已停用'}).click();await page.getByRole('heading',{name:'AlphaSignal original model release'}).waitFor();
+ assert.equal(await page.getByRole('heading',{name:'Jev 发布新决策模型'}).count(),0);
+ await page.getByRole('button',{name:'全部平台'}).click();await page.getByRole('button',{name:'日报合集',exact:true}).click();await page.getByRole('heading',{name:'A new decision model'}).waitFor();
  await page.getByLabel('筛选聚合资讯').fill('not present');await page.getByRole('heading',{name:'没有匹配内容'}).waitFor();await page.getByLabel('筛选聚合资讯').fill('');
  await page.getByRole('button',{name:'AIBase 待接入'}).click();await page.getByRole('heading',{name:'此平台尚待接入'}).waitFor();await page.getByRole('button',{name:'全部平台'}).click();
  const artifacts=path.resolve('.artifacts/aggregations/browser');await mkdir(artifacts,{recursive:true});
  for(const width of [1440,390]){await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:path.join(artifacts,`aggregations-${width}.png`),fullPage:true});}
  assert.deepEqual(posts,[], 'opening and filtering must not create work or call AI');
  await page.getByRole('button',{name:'留作选题',exact:true}).click();await page.getByRole('button',{name:'已留待选题'}).waitFor();
- const view=await(await page.request.get(`${origin}/api/aggregations`)).json();assert.equal(view.entries[0].selected,true);
- await page.reload();await page.getByRole('button',{name:'已留待选题'}).waitFor();
+ const view=await(await page.request.get(`${origin}/api/aggregations`)).json();assert.equal(view.entries.find((e:{title:string})=>e.title==='A new decision model').selected,true);
+ await page.reload();await page.getByRole('button',{name:'日报合集',exact:true}).click();await page.getByRole('button',{name:'已留待选题'}).waitFor();
  await page.getByRole('button',{name:'更新聚合资讯'}).click();await page.getByRole('alert').filter({hasText:'至少一个聚合平台'}).waitFor();
  assert.deepEqual(errors,[]);assert.equal(posts.length,2);
  }finally{await browser?.close();await stopProcessTree(server);await rm(root,{recursive:true,force:true});}

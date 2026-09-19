@@ -1,3 +1,4 @@
+import { aggregationApiUrls, aihotHotUrl, parseAihotRanking, parseAihotStoryRelations } from "./aggregation-native.js";
 import { aggregationSourceIds } from "./aggregation-catalog.js";
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
@@ -215,7 +216,7 @@ export const parsePortableFeed = (
       },
     } satisfies RawHorizonItem));
   }
-  return entries.flatMap((node) => {
+  return entries.flatMap((node, feedIndex) => {
     const entry = $(node);
     const title = plainText(directChild($, entry, ["title"]));
     const rawUrl = entryLink($, entry);
@@ -275,6 +276,7 @@ export const parsePortableFeed = (
         source_id: input.sourceId,
         source_role: input.sourceRole,
         source_format: "feed",
+        ...(aggregationSourceIds.has(input.sourceId) ? {aggregation_order: feedIndex + 1, aggregation_channel: isAihot && new URL(input.feedUrl).pathname === "/feed.xml" ? "selected" : "feed"} : {}),
         date_basis: isAihot || isBingIndex || new URL(input.feedUrl).hostname === "news.google.com" ? "news-index" : declaredPublication ? "feed-published" : "feed-updated",
         ...(isAihot ? { discovery_url: discoveryUrl, aggregator_name: "AIHOT", original_url: url !== discoveryUrl ? url : undefined } : {}),
         ...(isBingIndex ? { discovery_url: rawUrl, publisher_name: plainText(directChild($, entry, ["source"])) } : {}),
@@ -338,11 +340,15 @@ const collectFeed = async (
 ) => {
   const feeds = routedFeedsForSource(source, topicIds, filters);
   if (!feeds.length) throw new Error("当前频道没有可读取的来源路线");
+  if (source.id === "aihot-news") {
+    for (const url of [...aggregationApiUrls].reverse()) if (!feeds.some(feed => feed.url === url)) feeds.unshift({name: source.name, url, category: source.category, profile: "tech-news"});
+  }
+  const reader = routeReader ?? createSourceRouteReader({ fetcher: (url, init) => fetcher(url, init ?? {}) });
   const attempts = await Promise.allSettled(feeds.map(async (feed) => {
     const index = officialIndexRoute(feed.format, feed.url);
-    return (routeReader ?? createSourceRouteReader({ fetcher: (url, init) => fetcher(url, init ?? {}) })).read({
+    return reader.read({
       sourceId: source.id, url: index?.requestUrl ?? feed.url, format: feed.format ?? "feed",
-      parserVersion: `dated-events-v3-aggregate-summary:${source.name}:${sourceRoleFor(source)}:${feed.category}`,
+      parserVersion: `dated-events-v4-native-rank:${source.name}:${sourceRoleFor(source)}:${feed.category}`,
       maxBytes: index?.maxBytes ?? maximumFeedBytes,
       init: {
       signal: requestSignal(signal, 18_000),
@@ -352,7 +358,7 @@ const collectFeed = async (
         "user-agent": "AI-News-Desk/0.2 (portable collector)",
       },
       },
-      parse: (content) => index ? index.parse(content, source, fetchedAt) : parsePortableFeed(content, {
+      parse: (content) => aggregationApiUrls.includes(feed.url) ? parseAihotRanking(content, feed.url, fetchedAt) : index ? index.parse(content, source, fetchedAt) : parsePortableFeed(content, {
       feedUrl: feed.url,
       feedName: feed.name,
       sourceId: source.id,
@@ -374,6 +380,29 @@ const collectFeed = async (
         errorCode: attempt.reason.code, retryAt: attempt.reason.retryAt, httpStatus: attempt.reason.statusCode,
       } : {}) }),
   }));
+  if (source.id === "aihot-news") {
+    const hotItems = items.filter(item => item.metadata?.feed_url === aihotHotUrl);
+    for (let offset = 0; offset < hotItems.length; offset += 3) {
+      await Promise.all(hotItems.slice(offset, offset + 3).map(async hot => {
+        let publicId: string;
+        try {
+          const link = new URL(String(hot.metadata?.aggregation_event_url || ''));
+          if (!['aihot.news','aihot.virxact.com'].includes(link.hostname) || !/^\/story\/[a-zA-Z0-9-]+$/.test(link.pathname)) return;
+          publicId = link.pathname.split('/').at(-1)!;
+        } catch { return; }
+        const url = `https://aihot.news/api/v1/stories/${publicId}`;
+        try {
+          const result = await reader.read({sourceId: source.id, url, parserVersion: 'aihot-event-members-v1', maxBytes: 512 * 1024,
+            init:{signal:requestSignal(signal,18_000),headers:{accept:'application/json','user-agent':'AI-News-Desk/0.2 (portable collector)'}},
+            parse:content=>parseAihotStoryRelations(content,hot)});
+          hot.metadata = {...hot.metadata, aggregation_related_urls: result.items[0]?.metadata?.aggregation_related_urls};
+          routes.push({sourceId:source.id,url,status:'success',rawCount:0,cacheStatus:result.cacheStatus,lastSuccessfulAt:result.lastSuccessfulAt});
+        } catch(error) {
+          routes.push({sourceId:source.id,url,status:'error',rawCount:0,detail:'事件成员读取失败，仅按已知原文链接合并',errorCode:error instanceof SourceRouteReadError?error.code:'network'});
+        }
+      }));
+    }
+  }
   return { items: resolveOfficialFeedLinks(items, source), routes };
 };
 
