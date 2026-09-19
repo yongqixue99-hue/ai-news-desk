@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import * as cheerio from "cheerio";
 import type { AnyNode } from "domhandler";
 import { parseKnowledgeIndex } from "./official-knowledge.js";
@@ -7,7 +8,7 @@ import { createSourceRouteReader, SourceRouteReadError, type SourceRouteReader }
 import { workflowRoot } from "./workspace-paths.js";
 import path from "node:path";
 import { verifyOfficialPublicationDates } from "./official-publication-date.js";
-import { fetchRemote, readResponseBuffer } from "./remote-url.js";
+import { fetchRemote, readResponseBuffer, isDisallowedRemoteAddress } from "./remote-url.js";
 import { routedFeedsForSource, sourceRoleFor } from "./source-routing.js";
 import type {
   CollectionRequest,
@@ -217,9 +218,42 @@ export const parsePortableFeed = (
     const entry = $(node);
     const title = plainText(directChild($, entry, ["title"]));
     const rawUrl = entryLink($, entry);
-    const url = absoluteHttpUrl(rawUrl, input.feedUrl);
+    let url = absoluteHttpUrl(rawUrl, input.feedUrl);
+    const isBingIndex = new URL(input.feedUrl).hostname === "www.bing.com";
+    if (isBingIndex && url) {
+      const wrapper = new URL(url);
+      if (wrapper.hostname === "www.bing.com" && wrapper.pathname === "/news/apiclick.aspx") {
+        // Preserve the publisher URL rather than counting the search engine as
+        // an independent source. Full DNS/redirect validation still runs on read.
+        try {
+          const target = new URL(wrapper.searchParams.get("url") ?? "");
+          const host = target.hostname.replace(/^\[|\]$/g, "");
+          if (!["http:", "https:"].includes(target.protocol) || target.username || target.password
+            || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")
+            || (isIP(host) && isDisallowedRemoteAddress(host))) return [];
+          url = target.toString();
+        } catch { return []; }
+      }
+    }
     if (!title || !url) return [];
-    const content = plainText(directChild($, entry, ["encoded", "content", "summary", "description"]));
+    const isAihot = new URL(input.feedUrl).hostname === "aihot.news";
+    const discoveryUrl = url;
+    let rawContent = directChild($, entry, ["encoded", "content", "summary", "description"]);
+    if (isAihot) {
+      const summary = cheerio.load(rawContent);
+      const original = summary("a").filter((_, node) => summary(node).text().trim() === "阅读原文").first();
+      try {
+        const target = new URL(original.attr("href") ?? "");
+        const host = target.hostname.replace(/^\[|\]$/g, "");
+        if (["http:", "https:"].includes(target.protocol) && !target.username && !target.password
+          && host !== "localhost" && !host.endsWith(".localhost") && !host.endsWith(".local")
+          && !(isIP(host) && isDisallowedRemoteAddress(host))) url = target.toString();
+      } catch { /* Keep the discovery page when no safe original is provided. */ }
+      original.closest("p").remove();
+      summary("p").filter((_, node) => /^via AIHOT/u.test(summary(node).text().trim())).remove();
+      rawContent = summary.html();
+    }
+    const content = plainText(rawContent);
     const author = plainText(directChild($, entry, ["creator", "author"]));
     const declaredPublication = directChild($, entry, ["pubdate", "published", "date"]);
     const modifiedAt = validDate(directChild($, entry, ["updated"]));
@@ -240,7 +274,9 @@ export const parsePortableFeed = (
         source_id: input.sourceId,
         source_role: input.sourceRole,
         source_format: "feed",
-        date_basis: new URL(input.feedUrl).hostname === "news.google.com" ? "news-index" : declaredPublication ? "feed-published" : "feed-updated",
+        date_basis: isAihot || isBingIndex || new URL(input.feedUrl).hostname === "news.google.com" ? "news-index" : declaredPublication ? "feed-published" : "feed-updated",
+        ...(isAihot ? { discovery_url: discoveryUrl, aggregator_name: "AIHOT", original_url: url !== discoveryUrl ? url : undefined } : {}),
+        ...(isBingIndex ? { discovery_url: rawUrl, publisher_name: plainText(directChild($, entry, ["source"])) } : {}),
         ...(modifiedAt ? { modified_at: modifiedAt } : {}),
         category: input.category,
         collector: "portable-typescript",

@@ -19,3 +19,25 @@ jobs:
       - run: npm run eval:editorial
       - run: npm run build
       - run: npm run test:e2e
+
+  windows-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - run: node --test --test-concurrency=2 --import tsx server/**/*.test.ts src/**/*.test.ts src/**/*.test.tsx chrome-extension/**/*.test.ts
+      - run: npm run eval:editorial
+      - run: npm run build
+      - name: Launch and reuse the desktop backend
+        shell: powershell
+        run: |
+          ./scripts/launch-windows.ps1 -NoOpen
+          $first = Invoke-RestMethod http://127.0.0.1:4317/api/desktop/status
+          ./scripts/launch-windows.ps1 -NoOpen
+          $second = Invoke-RestMethod http://127.0.0.1:4317/api/desktop/status
+          if ($first.app -ne 'ai-news-desk' -or $first.pid -ne $second.pid) { throw 'Desktop did not reuse its backend.' }

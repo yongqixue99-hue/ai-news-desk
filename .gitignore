@@ -10,3 +10,6 @@ test-results/
 
 # Local imported source material
 .tmp-intake/
+
+# Per-machine desktop runtime
+.runtime/

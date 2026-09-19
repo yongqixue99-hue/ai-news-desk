@@ -1184,6 +1184,11 @@ app.post(
   }),
 );
 
+// Lightweight identity probe for the local desktop launcher; never exposes credentials.
+app.get("/api/desktop/status", (_request, response) => {
+  response.json({ app: "ai-news-desk", projectPath: process.cwd(), workflowRoot, pid: process.pid });
+});
+
 app.get(
   "/api/health",
   asyncRoute(async (_request, response) => {
