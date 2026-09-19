@@ -1323,7 +1323,11 @@ const configuredDefaultSources: SourceConfig[] = [
 ];
 
 // Append adapters without changing the identity/order of existing sources.
-configuredDefaultSources.push(...officialKnowledgeSources, {
+configuredDefaultSources.push(...officialKnowledgeSources, ...[
+  { id: "alphasignal", name: "AlphaSignal", homepageUrl: "https://alphasignal.ai/", url: "https://alphasignal.ai/feed.xml" },
+  { id: "smol-ainews", name: "AINews / smol.ai", homepageUrl: "https://news.smol.ai/", url: "https://news.smol.ai/rss.xml" },
+].map(source => ({ ...source, kind: "rss" as const, topicIds: ["ai" as const], category: "ai-news", role: "discovery" as const,
+  enabled: true, selected: true, discoveryOnly: true, note: "聚合资讯 · 仅读取公开摘要，保留平台归属；合集不视为单一新闻，成稿需核验原文。" })), {
   id: "aihot-news", name: "AIHOT · AI 热点聚合", kind: "rss",
   homepageUrl: "https://aihot.news/", url: "https://aihot.news/feed.xml",
   topicIds: ["ai", "technology"], category: "ai-news", role: "discovery",
@@ -1356,6 +1360,8 @@ export const defaultSourcePresets: SourcePreset[] = [
     sourceIds: [
       ...officialKnowledgeSources.map((source) => source.id),
       "aihot-news",
+      "alphasignal",
+      "smol-ainews",
       "openai-official",
       "x-ai-official",
       "anthropic-official",
@@ -1405,6 +1411,8 @@ export const defaultSourcePresets: SourcePreset[] = [
     name: "AI 扩展覆盖（较慢）",
     sourceIds: [
       "aihot-news",
+      "alphasignal",
+      "smol-ainews",
       "openai-official",
       "x-ai-official",
       "anthropic-official",

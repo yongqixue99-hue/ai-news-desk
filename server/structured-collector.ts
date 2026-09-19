@@ -1,3 +1,4 @@
+import { aggregationSourceIds } from "./aggregation-catalog.js";
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 import * as cheerio from "cheerio";
@@ -238,7 +239,7 @@ export const parsePortableFeed = (
     if (!title || !url) return [];
     const isAihot = new URL(input.feedUrl).hostname === "aihot.news";
     const discoveryUrl = url;
-    let rawContent = directChild($, entry, ["encoded", "content", "summary", "description"]);
+    let rawContent = directChild($, entry, aggregationSourceIds.has(input.sourceId) ? ["description", "summary"] : ["encoded", "content", "summary", "description"]);
     if (isAihot) {
       const summary = cheerio.load(rawContent);
       const original = summary("a").filter((_, node) => summary(node).text().trim() === "阅读原文").first();
@@ -341,7 +342,7 @@ const collectFeed = async (
     const index = officialIndexRoute(feed.format, feed.url);
     return (routeReader ?? createSourceRouteReader({ fetcher: (url, init) => fetcher(url, init ?? {}) })).read({
       sourceId: source.id, url: index?.requestUrl ?? feed.url, format: feed.format ?? "feed",
-      parserVersion: `dated-events-v2:${source.name}:${sourceRoleFor(source)}:${feed.category}`,
+      parserVersion: `dated-events-v3-aggregate-summary:${source.name}:${sourceRoleFor(source)}:${feed.category}`,
       maxBytes: index?.maxBytes ?? maximumFeedBytes,
       init: {
       signal: requestSignal(signal, 18_000),

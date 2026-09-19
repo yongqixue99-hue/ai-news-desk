@@ -100,7 +100,7 @@ export type {
 
 import type { PublisherStatus } from "../server/types.js";
 
-export type AppPage = "today" | "workbench" | "community" | "drafts" | "sources" | "editorial-system" | "schedule" | "runs" | "ai-settings";
+export type AppPage = "aggregations" | "today" | "workbench" | "community" | "drafts" | "sources" | "editorial-system" | "schedule" | "runs" | "ai-settings";
 
 export interface HealthState {
   ok: boolean;
