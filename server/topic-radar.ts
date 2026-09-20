@@ -1,6 +1,6 @@
 import type { AggregationEntry } from './aggregation-desk.js';
 import { rankAggregations, sameAggregationEvent } from './aggregation-ranking.js';
-import { assessEditorialOpportunity, editorialExclusionFor } from './newsworthiness.js';
+import { assessEditorialOpportunity, editorialExclusionFor, type EditorialOpportunity } from './newsworthiness.js';
 import type { StoryView } from './product-types.js';
 
 export interface TopicRadarRow {
@@ -30,7 +30,7 @@ const sourcesFor = (entry: AggregationEntry) => [
 const uniqueSources = (sources: TopicRadarRow['sources']) => [...new Map(sources
   .filter(source => source.name !== '原文链接' || !sources.some(other => other.name !== '原文链接' && other.url === source.url))
   .map(source => [`${source.name}:${source.url}`,source])).values()];
-const productUseCase = (story: StoryView) => {
+const productUseCase = (story: StoryView): EditorialOpportunity | undefined => {
   const listing = story.signals.find(signal => {
     try { return ['producthunt.com','www.producthunt.com'].includes(new URL(signal.url).hostname) && signal.sourceRole === 'discovery'; }
     catch { return false; }
