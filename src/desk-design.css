@@ -21,6 +21,8 @@ button:disabled { cursor: not-allowed; }
 .brand-copy { display: flex; flex-direction: column; gap: 3px; text-align: left; }
 .brand-copy small { color: var(--muted); font-size: 9px; font-weight: 500; letter-spacing: .18em; }
 .brand-mark { border-width: 1px; background: var(--accent); color: #fffdf8; }
+.brand-mark.app-brand-mark { width: 36px; height: 36px; flex-basis: 36px; border: 0; background: transparent; color: var(--accent); }
+.app-brand-mark img { display: block; width: 100%; height: 100%; }
 .sidebar-profile strong { font-size: 12px; }
 .sidebar-profile small { font-size: 10px; }
 .sidebar-collapsed .nav-section-label { display: none; }
