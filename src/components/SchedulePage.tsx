@@ -70,6 +70,7 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
   const [wechatForm, setWechatForm] = useState<WeChatChannelSettings & { appSecret: string }>({
     accountName: settings.wechat.accountName,
     appId: settings.wechat.appId,
+    originalId: settings.wechat.originalId ?? "",
     defaultAuthor: settings.wechat.defaultAuthor,
     appSecret: "",
     appSecretConfigured: settings.wechat.appSecretConfigured,
@@ -86,20 +87,23 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
     setWechatForm((current) => ({
       accountName: settings.wechat.accountName,
       appId: settings.wechat.appId,
+      originalId: settings.wechat.originalId ?? "",
       defaultAuthor: settings.wechat.defaultAuthor,
       appSecret: current.appSecret,
       appSecretConfigured: settings.wechat.appSecretConfigured,
       appSecretHint: settings.wechat.appSecretHint,
     }));
-  }, [settings.wechat.accountName, settings.wechat.appId, settings.wechat.defaultAuthor, settings.wechat.appSecretConfigured, settings.wechat.appSecretHint]);
+  }, [settings.wechat.accountName, settings.wechat.appId, settings.wechat.originalId, settings.wechat.defaultAuthor, settings.wechat.appSecretConfigured, settings.wechat.appSecretHint]);
   const wechatDirty = wechatForm.accountName !== settings.wechat.accountName
     || wechatForm.appId !== settings.wechat.appId
+    || wechatForm.originalId !== (settings.wechat.originalId ?? "")
     || wechatForm.defaultAuthor !== settings.wechat.defaultAuthor
     || Boolean(wechatForm.appSecret);
   const saveWeChat = async () => {
     const saved = await onSaveWeChatSettings({
       accountName: wechatForm.accountName,
       appId: wechatForm.appId,
+      originalId: wechatForm.originalId,
       defaultAuthor: wechatForm.defaultAuthor,
       ...(wechatForm.appSecret ? { appSecret: wechatForm.appSecret } : {}),
     });
@@ -236,6 +240,7 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
             <label><span>公众号名称 <small>仅用于本地识别</small></span><input value={wechatForm.accountName} maxLength={80} placeholder="例如：我的科技观察" onChange={(event) => setWechatForm((current) => ({ ...current, accountName: event.target.value }))} /></label>
             <label><span>默认作者 <small>最多 16 字</small></span><input value={wechatForm.defaultAuthor} maxLength={16} placeholder="每篇同步前仍可修改" onChange={(event) => setWechatForm((current) => ({ ...current, defaultAuthor: event.target.value }))} /></label>
             <label><span>AppID</span><input value={wechatForm.appId} autoCapitalize="off" spellCheck={false} placeholder="wx…" onChange={(event) => setWechatForm((current) => ({ ...current, appId: event.target.value.trim() }))} /></label>
+            <label><span>公众号原始 ID <small>用于识别账号，不代替 AppSecret</small></span><input value={wechatForm.originalId ?? ""} maxLength={43} autoCapitalize="off" spellCheck={false} placeholder="gh_…" onChange={(event) => setWechatForm((current) => ({ ...current, originalId: event.target.value.trim() }))} /></label>
             <label><span>AppSecret <small>{wechatForm.appSecretConfigured ? `已保存 ${wechatForm.appSecretHint ?? ""}` : "尚未保存"}</small></span><input type="password" autoComplete="new-password" value={wechatForm.appSecret} placeholder={wechatForm.appSecretConfigured ? "留空则保持原密钥" : "只在这里填写，不要发到聊天中"} onChange={(event) => setWechatForm((current) => ({ ...current, appSecret: event.target.value.trim() }))} /></label>
           </div>
           <div className="wechat-setup-guide">

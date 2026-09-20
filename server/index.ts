@@ -1349,6 +1349,7 @@ app.patch(
     const body = (request.body ?? {}) as {
       accountName?: string;
       appId?: string;
+      originalId?: string;
       defaultAuthor?: string;
       appSecret?: string;
       clearAppSecret?: boolean;
@@ -1363,6 +1364,13 @@ app.patch(
     const defaultAuthor = typeof body.defaultAuthor === "string"
       ? body.defaultAuthor.trim().slice(0, 16)
       : current.settings.wechat.defaultAuthor;
+    const originalId = typeof body.originalId === "string"
+      ? body.originalId.trim()
+      : current.settings.wechat.originalId ?? "";
+    if (originalId && !/^gh_[a-zA-Z0-9]{6,40}$/.test(originalId)) {
+      response.status(400).json({ error: "公众号原始 ID 格式不正确，通常以 gh_ 开头；不要填写 AppID 或密钥" });
+      return;
+    }
     if (appId && !/^wx[0-9a-zA-Z]{8,}$/.test(appId)) {
       response.status(400).json({ error: "微信公众号 AppID 格式不正确，通常以 wx 开头" });
       return;
@@ -1381,6 +1389,7 @@ app.patch(
       state.settings.wechat = {
         accountName,
         appId,
+        originalId,
         defaultAuthor,
         appSecretConfigured: secretHint
           ? true
