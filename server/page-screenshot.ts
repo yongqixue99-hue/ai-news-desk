@@ -169,7 +169,7 @@ interface RenderedArticleFigure {
 
 /** Crop the figure, including its legend/caption. Pure page seam for browser
  * regression tests; navigation and public-network validation stay with callers. */
-export const captureArticleFigures = async (page: Page, options: { limit: number; chartsOnly?: boolean }): Promise<RenderedArticleFigure[]> => {
+export const captureArticleFigures = async (page: Page, options: { limit: number; chartsOnly?: boolean; onCaptureFailure?: (message: string) => void }): Promise<RenderedArticleFigure[]> => {
   const targets = await page.evaluate(({ chartsOnly }) => {
     const root = document.querySelector("article") || document.querySelector("main, [role='main']") || document.body;
     const seen = new Set<Element>();
@@ -205,12 +205,16 @@ export const captureArticleFigures = async (page: Page, options: { limit: number
     if (figures.length >= Math.max(0, Math.min(12, options.limit))) break;
     const region = page.locator(`[data-desk-figure="${target.key}"]`);
     try {
-      await region.scrollIntoViewIfNeeded({ timeout: 3_000 });
-      await page.waitForTimeout(120);
-      const bytes = await region.screenshot({ type: "png", animations: "disabled", timeout: 5_000 });
+      // Element screenshots already wait for stability and scroll into view,
+      // after disabling animations. A separate short pre-scroll can time out
+      // on delayed Windows frames before the actual capture even starts.
+      const bytes = await region.screenshot({ type: "png", animations: "disabled", timeout: 10_000 });
       if (bytes.length < 500) continue;
       figures.push({ ...target, bytes, width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
-    } catch { /* One lazy/removed figure must not discard the rest of the article. */ }
+    } catch (error) {
+      // Keep other figures, but allow callers/tests to explain a partial capture.
+      options.onCaptureFailure?.(`${target.key}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   return figures;
 };
