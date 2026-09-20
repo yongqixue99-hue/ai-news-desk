@@ -230,3 +230,22 @@ export const deleteXBearerToken = async () => {
   if (process.platform === "win32") await deleteWindowsSecret("x:bearer");
   else await deleteMacSecret(xBearerAccountName, xBearerServiceName);
 };
+
+// The bridge token shares the same OS-protected storage contract as API credentials.
+export const setSocialBridgeToken = async (token: string) => {
+  ensureSupportedSecretStore();
+  try {
+    if (process.platform === "win32") await setWindowsSecret("delivery:wechatsync", token);
+    else await setMacSecret("wechatsync", "ai-news-desk.delivery", token);
+  } catch {
+    // execFile errors include command arguments; never propagate the token.
+    throw new Error("文章同步助手 Token 未能保存，请检查本机安全存储权限");
+  }
+};
+export const getSocialBridgeToken = async () => {
+  ensureSupportedSecretStore();
+  const missing = "本机未配置文章同步助手 Token，请在多平台设置中保存";
+  try {
+    return await (process.platform === "win32" ? getWindowsSecret("delivery:wechatsync", missing) : getMacSecret("wechatsync", "ai-news-desk.delivery", missing));
+  } catch { throw new Error(missing); }
+};

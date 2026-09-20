@@ -142,3 +142,9 @@ test("two legacy editing attempts for the exact same source keep only the newest
   assert.equal(byId.get(older.id)?.status, "shelved");
   assert.equal(byId.get(older.id)?.provenance.supersededByDraftId, newer.id);
 });
+
+test("social delivery receipts keep an older draft visible for result reconciliation", () => {
+  const delivered = draft("older", { socialDeliveries: [{ id: "receipt", platform: "zhihu", account: "作者", accountId: "uid-1", title: "旧稿", revisionHash: "hash", status: "unknown", detail: "待核对", createdAt: "2026-09-01T01:00:00Z", updatedAt: "2026-09-01T01:00:00Z", finalPublishAttempted: false }] });
+  const newer = draft("newer", { updatedAt: "2026-09-02T01:00:00.000Z" });
+  assert.equal(normalizeDraftCatalog([delivered, newer])[0]?.status, "editing");
+});

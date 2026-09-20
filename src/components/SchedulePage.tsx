@@ -1,3 +1,4 @@
+import { SocialDeliverySettings } from "./SocialDeliverySettings";
 import { useEffect, useRef, useState } from "react";
 import { Archive, Check, CheckCircle2, ChevronDown, CircleUserRound, Clock3, Copy, Cpu, Download, HardDrive, History, KeyRound, LoaderCircle, MessageSquareText, PanelsTopLeft, RadioTower, Save, ShieldCheck, Trash2, Upload } from "lucide-react";
 import type { PortableArchiveImportResult, PortableArchivePreview, StorageUsage } from "../api";
@@ -252,9 +253,10 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
               </div>
             </div>
             <ol>
-              <li>登录微信公众平台，在“设置与开发 → 基本配置”取得 AppID 和 AppSecret。</li>
+              <li>用公众号管理员微信登录 <a href="https://developers.weixin.qq.com/platform/" target="_blank" rel="noreferrer">微信开发者平台</a>，进入“我的业务（与服务）→ 公众号 / 服务号”，选择这个公众号。</li>
+              <li>在“基础信息 → 开发密钥”中获取 AppSecret；若账号仍显示旧入口，可从微信公众平台“设置与开发 → 开发接口管理”进入。密钥通常只在生成时展示，未保存时需按页面提示重置；重置会影响仍使用旧密钥的其他工具。</li>
               <li>把运行本工具的当前出口 IP 加到公众号 IP 白名单。</li>
-              <li>保存并测试后，到任意文章的“审批发布包”同步草稿。</li>
+              <li>保存并测试后，到文章的“多平台分发台”同步草稿。</li>
             </ol>
             <p><KeyRound size={13} />AppSecret 只保存在操作系统的本机安全存储中；数据备份不包含它。</p>
           </div>
@@ -265,6 +267,8 @@ export function SchedulePage({ settings, runs, health, onSettings, onRefreshHeal
           {wechatForm.appSecretConfigured ? <button type="button" className="text-danger-button" disabled={Boolean(wechatBusy)} onClick={() => void clearWeChatSecret()}>{wechatBusy === "clear" ? <LoaderCircle className="spin" size={15} /> : <Trash2 size={14} />}移除密钥</button> : null}
         </div>
       </section>
+      <SocialDeliverySettings />
+
 
       <section className="health-strip">
         <div><Cpu size={19} /><span><strong>Codex</strong><small>{health?.codex.detail ?? "检查中"}</small></span><CheckCircle2 className={health?.codex.ok ? "ok" : "not-ok"} size={18} /></div>
