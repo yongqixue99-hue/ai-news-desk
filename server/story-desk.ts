@@ -1,4 +1,6 @@
 import { assessPracticeOpportunity } from "./practice-opportunity.js";
+import { buildTopicRadar } from "./topic-radar.js";
+import { buildAggregationView } from "./aggregation-desk.js";
 import { matchesHomeKeyword } from "./home-layout.js";
 import { createHash } from "node:crypto";
 import { assessEditorialOpportunity, editorialExclusionFor, hasAnnouncementLead, mayShareEditorialEvent, normalizeEditorialText, opportunityPriority } from "./newsworthiness.js";
@@ -986,6 +988,7 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
   ].filter((reason) => reason.count > 0);
   return {
     generatedAt: now,
+    radar: buildTopicRadar([...new Map([...active, ...releaseHighlights].map(story => [story.id, story])).values()], buildAggregationView(state, Date.parse(now)).entries, now, stories),
     collection: latestSourceCollection(state.runs),
     pending: stories.filter((story) => story.selected && !story.drafted && !story.published && !story.ignored),
     releaseHighlights,

@@ -7,6 +7,7 @@ import "./desk-design.css";
 import "./reader-design.css";
 import "./strategy-design.css";
 import "./swiss-design.css";
+import "./components/source-radar.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

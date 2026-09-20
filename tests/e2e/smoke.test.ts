@@ -277,6 +277,8 @@ test("production routes, strategy controls, completion, draft resumption and mob
         await page.setViewportSize({ width: 1440, height: 1000 });
       }
       if (route === "today") {
+        assert.equal(await page.getByLabel("搜索想写的新闻").isVisible(), false);
+        await page.locator(".today-search-disclosure > summary").click();
         await page.getByLabel("搜索想写的新闻").waitFor();
         await page.getByRole("button", { name: "搜索最近 7 天", exact: true }).waitFor();
         assert.equal(await page.evaluate(() => performance.getEntriesByType("resource").some((entry) => /article-editor|DraftWorkspace|fonts\.googleapis/u.test(entry.name))), false);

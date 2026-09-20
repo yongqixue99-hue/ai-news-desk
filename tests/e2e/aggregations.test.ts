@@ -95,6 +95,28 @@ test("aggregation browsing is read-only, retains filtered summaries and works on
  const shots=path.resolve('.artifacts/aggregation-ranking/browser');await mkdir(shots,{recursive:true});
  const capture=async(name:string)=>{for(const width of [1440,390]){await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:path.join(shots,`${name}-${width}.png`),fullPage:true});}await page.setViewportSize({width:1440,height:1000});};
  const posts:string[]=[];const errors:string[]=[];page.on('request',r=>{if(r.method()==='POST')posts.push(r.url());});page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${origin}/#today`);
+ await page.getByRole('heading',{name:'Jev 发布新决策模型',exact:true}).waitFor();
+ assert.equal(await page.locator('.radar-row').count(),1,'the home shortlist merges aggregate copies');
+ assert.equal(await page.getByText('待核对线索',{exact:true}).count(),1);
+ assert.equal(await page.locator('.today-search-disclosure').getAttribute('open'),null);
+ assert.equal(await page.locator('.radar-evidence').getAttribute('open'),null);
+ await capture('topic-radar');
+ await page.getByLabel('筛选当前新闻列表').fill('no match');
+ await page.getByText('当前筛选没有结果',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'清除筛选',exact:true}).click();
+ await page.locator('.radar-evidence summary').click();
+ await page.locator('.radar-evidence').getByRole('link',{name:'AIHOT',exact:true}).waitFor();
+ await page.goto(`${origin}/#sources`);
+ await page.getByRole('heading',{name:'新闻源',exact:true}).waitFor();
+ assert.equal(await page.locator('.source-settings-disclosure').getAttribute('open'),null);
+ await capture('compact-sources');
+ await page.locator('.source-coverage > summary').click();
+ await page.getByLabel('发现用途').selectOption('products');
+ assert.equal(await page.locator('.source-manager-row').count(),1);
+ await page.getByText('Product Hunt · 新产品',{exact:true}).waitFor();
+ await capture('coverage-products');
+
  await page.goto(`${origin}/#aggregations`);await page.getByRole('heading',{name:'聚合资讯',exact:true}).waitFor();await page.getByRole('heading',{name:'Jev 发布新决策模型'}).waitFor();
  assert.equal(await page.getByRole('heading',{name:'报名：重磅模型发布活动'}).count(),0);await capture('roundup');
  await page.getByRole('button',{name:'AIHOT 已停用'}).click();await page.getByRole('heading',{name:'报名：重磅模型发布活动'}).waitFor();

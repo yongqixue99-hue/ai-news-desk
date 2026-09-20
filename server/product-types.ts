@@ -235,6 +235,8 @@ export interface TodayFunnel {
 }
 
 export interface TodayView {
+  /** One bounded shortlist; discovery readiness remains explicit. */
+  radar?: import("./topic-radar.js").TopicRadarRow[];
   /** User-selected, not-yet-drafted stories survive the recommendation window. */
   pending?: StoryView[];
   /** Official tutorials are retained separately from time-sensitive news. */
