@@ -293,6 +293,8 @@ export interface WeChatChannelSettings {
   /** Friendly label shown in the local UI; never sent as authentication data. */
   accountName: string;
   appId: string;
+  /** Optional gh_ identifier for account recognition; not an API credential. */
+  originalId?: string;
   defaultAuthor: string;
   /** The secret lives in the operating system's protected local store and is never serialized here. */
   appSecretConfigured: boolean;

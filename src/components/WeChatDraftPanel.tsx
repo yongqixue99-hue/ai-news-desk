@@ -125,7 +125,7 @@ export function WeChatDraftPanel({ draft, settings, metadata: controlledMetadata
       <section className="utility-section wechat-draft-summary">
         <div className="wechat-draft-channel-row">
           <div className={configured ? "wechat-channel-mark ready" : "wechat-channel-mark"}><MessageSquareText size={18} /></div>
-          <div><strong>{settings.accountName || "微信公众号尚未命名"}</strong><small>{configured ? `AppID ${settings.appId.slice(0, 6)}… · 密钥已在本机保存` : "先连接公众号，才能同步到草稿箱"}</small></div>
+          <div><strong>{settings.accountName || settings.originalId || "微信公众号尚未命名"}</strong><small>{configured ? `AppID ${settings.appId.slice(0, 6)}… · 密钥已在本机保存` : "先连接公众号，才能同步到草稿箱"}</small></div>
           <button type="button" onClick={onOpenSettings}><Settings2 size={13} />{configured ? "管理" : "去连接"}</button>
         </div>
         <p className="wechat-manual-boundary"><ShieldCheck size={14} />系统没有发布或群发操作；同步完成后仍需你登录微信公众平台预览并点击发布。</p>
