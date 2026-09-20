@@ -711,3 +711,8 @@ Jev 漏报复现于 9 月 17—18 日关键词搜索：原运行读取 637 条�
 ## 25. 2026-09-20 公众号身份配置与多平台投递调研
 
 公众号设置新增可选原始 ID（gh_），与 AppID、AppSecret 分开；具体账号只存本地，密钥只进 Keychain/DPAPI。用户本机已填写身份信息，连接仍取决于 AppSecret、出口 IP 白名单及账号权限，Windows 需单独配置密钥。当前仍只同步草稿，没有增加最终发布调用。微信官方权限、Wechatsync/ArtiPub/social-auto-upload 核查、头条等平台优先级和回执成功标准见 [调研与接入建议](2026-09-20-multiplatform-delivery-research.md)。
+
+
+## 26. 2026-09-20 多平台草稿投递第一阶段
+
+微信、小黑盒保留；新增知乎／百家号 Wechatsync 本机桥接、按账号 ID 和稿件版本固定的投递、图片迁移及持久回执。今日头条仅后台入口，自动投递禁用。Windows 需单独安装同步助手、填写扩展 ID 与 Token；微信公众号 AppSecret 单独保存到 DPAPI。均未实测用户账号远端写入，不得把模拟测试当成正式发布成功。连接步骤、断线核对、AppSecret 新入口及限制见 [实施说明](2026-09-20-multiplatform-delivery.md)。

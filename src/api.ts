@@ -765,3 +765,11 @@ export const api = {
       { method: "POST", body: JSON.stringify({ platform }) },
     ),
 };
+
+export const socialDeliveryApi = {
+  status: () => request<import("../server/social-delivery-types").SocialDeliveryStatus>("/api/delivery/social/status"),
+  settings: (input: { enabled: boolean; extensionId: string; token?: string }) => request("/api/delivery/social/settings", { method: "PATCH", body: JSON.stringify(input) }),
+  receipts: (id: string) => request<{ receipts: import("../server/social-delivery-types").SocialDeliveryReceipt[]; revisions: Record<string, string> }>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`),
+  deliver: (id: string, input: { platform: string; account: string; accountId: string; updatedAt: string }) => request<import("../server/social-delivery-types").SocialDeliveryReceipt>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`, { method: "POST", body: JSON.stringify(input) }),
+  resolve: (id: string, receiptId: string, resolution: "reviewed" | "not-received") => request(`/api/drafts/${encodeURIComponent(id)}/social-deliveries/${encodeURIComponent(receiptId)}/resolve`, { method: "POST", body: JSON.stringify({ resolution }) }),
+};

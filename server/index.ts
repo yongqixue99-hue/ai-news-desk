@@ -1,3 +1,4 @@
+import { registerSocialDeliveryRoutes, startSocialBridge } from "./social-delivery-routes.js";
 import { buildAggregationView, retainAggregationEntry } from "./aggregation-desk.js";
 import { aggregationSourceIds } from "./aggregation-catalog.js";
 import { writingPreferencePlan } from "./writing-preference-retrieval.js";
@@ -399,6 +400,8 @@ const publisherPreflightFor = async (
   readiness.binding = quality.binding;
   return appendEditorialReadiness(preflight, readiness);
 };
+
+registerSocialDeliveryRoutes(app);
 
 app.get(
   "/api/bootstrap",
@@ -1314,6 +1317,7 @@ app.patch(
         ...allowed,
         // Publication history is write-protected and only changes through the
         // explicit "published successfully" confirmation endpoint.
+        socialBridge: state.settings.socialBridge,
         recentTopics: state.settings.recentTopics,
         recentCommunities: state.settings.recentCommunities,
       };
@@ -3382,6 +3386,7 @@ await startOwnedServer({
   recoverInterruptedRuns: initializeOwnedWorkspace,
   startScheduler,
 });
+void startSocialBridge().catch(() => undefined);
 const durableJobDesk = createJobDesk({
   database: await getLocalDatabase(),
   leaseMs: 30 * 60_000,

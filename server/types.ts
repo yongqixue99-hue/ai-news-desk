@@ -310,6 +310,7 @@ export interface WeChatConnectionResult {
 }
 
 export interface Settings {
+  socialBridge?: import("./social-delivery-types.js").SocialBridgeSettings;
   homeLayout?: import("./home-layout.js").HomeLayout;
   windowHours: number;
   collectionTopics: CollectionTopicId[];
@@ -1011,6 +1012,7 @@ export interface DraftEditorialBaseline {
 }
 
 export interface ArticleDraft {
+  socialDeliveries?: import("./social-delivery-types.js").SocialDeliveryReceipt[];
   sourceChangeReviews?: Array<{url: string; observedHash: string; packageHash?: string; documentHash: string; reason: string; reviewedAt: string}>;
   editorialBaseline?: DraftEditorialBaseline;
   revisionId?: string;
