@@ -161,7 +161,7 @@ export function AppShell({
             title={collapsed ? "展开侧栏（⌘/Ctrl+B）" : "返回今日编辑台"}
             onClick={() => collapsed ? setCollapsed(false) : navigate("today")}
           >
-            <span className="brand-mark" aria-hidden="true">{collapsed ? <PanelLeftOpen size={18} /> : <Newspaper size={20} />}</span>
+            <span className="brand-mark app-brand-mark" aria-hidden="true">{collapsed ? <PanelLeftOpen size={18} /> : <img src="/brand/news-desk.svg" alt="" width="36" height="36" />}</span>
             <span className="brand-copy">AI 新闻台<small>NEWS DESK</small></span>
           </button>
           {!collapsed ? (

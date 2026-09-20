@@ -64,6 +64,7 @@ try {
     $shortcut.Arguments = '-NoProfile -ExecutionPolicy RemoteSigned -File "' + $PSCommandPath + '"'
     $shortcut.WorkingDirectory = $projectPath
     $shortcut.WindowStyle = 7
+    $shortcut.IconLocation = (Join-Path $projectPath 'desktop/assets/app-icon.ico') + ',0'
     $shortcut.Save()
   }
 } catch {
