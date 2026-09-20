@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TodayPage } from "./TodayPage.js";
 
-test("Today exposes a prominent seven-day factual news search", () => {
+test("Today keeps seven-day factual news search available in an optional disclosure", () => {
   const markup = renderToStaticMarkup(createElement(TodayPage, {
     onNavigate: () => undefined,
     onNotice: () => undefined,

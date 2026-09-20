@@ -1341,6 +1341,12 @@ configuredDefaultSources.push(...officialKnowledgeSources, ...[
   homepageUrl: "https://aihot.cn/", url: "https://aihot.cn/", topicIds: ["ai"],
   category: "ai-news", role: "discovery", discoveryOnly: true, enabled: false, selected: false,
   note: "2026-09-20 无法连接，尚未确认可用订阅地址或与 AIHOT.news 的关系；仅保留入口，未接通，不参与采集。",
+}, {
+  id: "producthunt-products", name: "Product Hunt · 新产品", kind: "rss",
+  homepageUrl: "https://www.producthunt.com/", url: "https://www.producthunt.com/feed",
+  topicIds: ["ai", "technology"], category: "ai-news", role: "discovery",
+  enabled: true, selected: true, discoveryOnly: true,
+  note: "公开 Atom 订阅 · 产品发现线索；按主题过滤，不提供投票或热榜排名。功能与效果需回到产品官网核对或实际试用。",
 });
 
 const localSkillPath = (skillDirectory: string) =>
@@ -1358,6 +1364,7 @@ export const defaultSourcePresets: SourcePreset[] = [
     id: "preset_ai_daily",
     name: "AI 日常完整包",
     sourceIds: [
+      "producthunt-products",
       ...officialKnowledgeSources.map((source) => source.id),
       "aihot-news",
       "alphasignal",
@@ -1393,6 +1400,7 @@ export const defaultSourcePresets: SourcePreset[] = [
     id: "preset_discovery",
     name: "综合检索与社区热点",
     sourceIds: [
+      "producthunt-products",
       "google-news-ai",
       "hackernews",
       "v2ex-community",

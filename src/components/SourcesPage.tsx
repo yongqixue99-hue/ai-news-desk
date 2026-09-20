@@ -22,6 +22,8 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { SourceCoverage } from "./SourceCoverage";
+import { discoveryLayerFor, discoveryLayers, type DiscoveryLayer } from "../../server/source-coverage.js";
 import { collectionTopics } from "../../server/topics.js";
 import { sourceRoleFor, sourceTopicIds } from "../../server/source-routing.js";
 import { useDialogA11y } from "../hooks/useDialogA11y";
@@ -115,6 +117,7 @@ export function SourcesPage({
   const [query, setQuery] = useState("");
   const [topicFilter, setTopicFilter] = useState<"all" | CollectionTopicId>("all");
   const [purposeFilter, setPurposeFilter] = useState<PurposeFilter>("all");
+  const [layerFilter, setLayerFilter] = useState<"all" | DiscoveryLayer>("all");
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -171,6 +174,7 @@ export function SourcesPage({
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredSources = useMemo(() => sources.filter((source) => {
+    if (layerFilter !== "all" && discoveryLayerFor(source) !== layerFilter) return false;
     if (normalizedQuery && !sourceMatchesQuery(source, normalizedQuery)) return false;
     if (topicFilter !== "all" && !sourceTopicIds(source).includes(topicFilter)) return false;
     if (purposeFilter !== "all" && sourceRoleFor(source) !== purposeFilter) return false;
@@ -178,7 +182,7 @@ export function SourcesPage({
     if (healthFilter === "attention" && health !== "warning" && health !== "error" && health !== "unknown") return false;
     if (healthFilter !== "all" && healthFilter !== "attention" && health !== healthFilter) return false;
     return true;
-  }), [healthFilter, normalizedQuery, purposeFilter, sources, topicFilter]);
+  }), [healthFilter, layerFilter, normalizedQuery, purposeFilter, sources, topicFilter]);
   const healthSummary = useMemo(() => sources.reduce((summary, source) => {
     const health = source.health ?? "unknown";
     summary[health] += 1;
@@ -319,6 +323,8 @@ export function SourcesPage({
         <button type="button" className="primary-button" aria-haspopup="dialog" aria-controls="source-editor-dialog" aria-expanded={adding} onClick={() => setAdding(true)}><Plus size={17} />添加新闻源</button>
       </header>
 
+      <SourceCoverage sources={sources} onChoose={layer => { setLayerFilter(layer); setQuery(""); setTopicFilter("all"); setPurposeFilter("all"); setHealthFilter("all"); window.requestAnimationFrame(() => document.getElementById("source-layer-filter")?.focus()); }} />
+      <details className="source-settings-disclosure"><summary>采集配置与来源组合 <span>X 接入、来源预设与使用说明</span></summary>
       <div className="settings-intro">
         <Radio size={20} />
         <div><strong>官网入口与采集接口分开</strong><span>单源测试只检查 RSS、索引接口或官网可达性，不会启动成稿；采集时仍会回到原文核验。</span></div>
@@ -409,6 +415,8 @@ export function SourcesPage({
         </div>
       </section>
 
+      </details>
+
       <section className="source-health-overview" aria-label="新闻源健康概览">
         <div><span>来源健康</span><strong>{healthSummary.healthy} 个正常</strong><small>{healthSummary.warning + healthSummary.error + healthSummary.unknown} 个需要关注 · 其中 {healthSummary.unknown} 个尚未检查</small></div>
         <button type="button" className={healthFilter === "attention" ? "active" : undefined} onClick={() => setHealthFilter(healthFilter === "attention" ? "all" : "attention")}>
@@ -419,6 +427,7 @@ export function SourcesPage({
       <div className="source-manager-tools">
         <label className="source-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、地址或备注" />{query ? <button type="button" onClick={() => setQuery("")} aria-label="清空搜索"><X size={14} /></button> : null}</label>
         <div className="source-filters">
+          <label><span>发现用途</span><select id="source-layer-filter" value={layerFilter} onChange={event=>setLayerFilter(event.target.value as "all" | DiscoveryLayer)}><option value="all">全部</option>{discoveryLayers.map(layer=><option key={layer.id} value={layer.id}>{layer.label}</option>)}</select></label>
           <label><span>频道</span><select value={topicFilter} onChange={(event) => setTopicFilter(event.target.value as "all" | CollectionTopicId)}><option value="all">全部</option>{collectionTopics.map((topic) => <option key={topic.id} value={topic.id}>{topic.label}</option>)}</select></label>
           <label><span>分类</span><select value={purposeFilter} onChange={(event) => setPurposeFilter(event.target.value as PurposeFilter)}><option value="all">全部</option>{Object.entries(sourceRoleLabels).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>
           <label><span>健康</span><select value={healthFilter} onChange={(event) => setHealthFilter(event.target.value as HealthFilter)}><option value="all">全部</option><option value="attention">需关注</option><option value="healthy">正常</option><option value="warning">需检查</option><option value="error">失败</option><option value="unknown">未检查</option></select></label>
