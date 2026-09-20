@@ -205,9 +205,10 @@ export const captureArticleFigures = async (page: Page, options: { limit: number
     if (figures.length >= Math.max(0, Math.min(12, options.limit))) break;
     const region = page.locator(`[data-desk-figure="${target.key}"]`);
     try {
-      await region.scrollIntoViewIfNeeded({ timeout: 3_000 });
-      await page.waitForTimeout(120);
-      const bytes = await region.screenshot({ type: "png", animations: "disabled", timeout: 5_000 });
+      // Element screenshots already wait for stability and scroll into view,
+      // after disabling animations. A separate short pre-scroll can time out
+      // on delayed Windows frames before the actual capture even starts.
+      const bytes = await region.screenshot({ type: "png", animations: "disabled", timeout: 10_000 });
       if (bytes.length < 500) continue;
       figures.push({ ...target, bytes, width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
     } catch (error) {
