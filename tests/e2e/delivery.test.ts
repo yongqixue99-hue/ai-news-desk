@@ -99,6 +99,10 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
     const shots = path.resolve('.artifacts/multiplatform/browser'); await mkdir(shots, { recursive: true });
     await page.goto(`${origin}/#schedule`);
+    await page.getByRole('tab', { name: '采集计划', exact: true }).waitFor();
+    assert.equal(await page.getByRole('heading', { name: '连接多平台同步助手' }).isVisible(), false);
+    await page.getByRole('tab', { name: '平台连接', exact: true }).click();
+    await page.getByRole('button', { name: '知乎与百家号 多平台同步助手', exact: true }).click();
     await page.getByRole('heading', { name: '连接多平台同步助手' }).waitFor();
     await page.locator('#social-delivery-settings').scrollIntoViewIfNeeded();
     for (const width of [1440, 390]) {
