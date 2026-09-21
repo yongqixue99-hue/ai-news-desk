@@ -1,0 +1,186 @@
+{
+  "settings": {
+    "officialMonitorEnabled": true,
+    "officialMonitorIntervalMinutes": 60,
+    "windowHours": 48,
+    "collectionTopics": [
+      "ai"
+    ],
+    "spendingPolicy": "zero-cost",
+    "personalizationEnabled": true,
+    "recommendationMode": "focused",
+    "editorialProfileEnabled": true,
+    "writingMemoryEnabled": true,
+    "inlineCompletionEnabled": true,
+    "notificationsMuted": true,
+    "scheduleEnabled": true,
+    "scheduleTime": "22:30",
+    "draftMode": "separate",
+    "imagePolicy": "source",
+    "imageLimit": 8,
+    "autoGenerate": false,
+    "autoGenerateCount": 3,
+    "community": "盒友杂谈",
+    "defaultTopics": [],
+    "recentTopics": [],
+    "recentCommunities": [],
+    "publisherMode": "chrome-extension",
+    "xiaoheiheEditorUrl": "https://xiaoheihe.cn/community/user/post_list",
+    "chromeDebugPort": 9222,
+    "wechat": {
+      "accountName": "",
+      "appId": "",
+      "defaultAuthor": "",
+      "appSecretConfigured": false
+    }
+  },
+  "aiSettings": {
+    "activeProviderId": "codex-cli",
+    "completionProviderId": "deepseek",
+    "analysisProviderId": "codex-cli",
+    "optimizationProviderId": "codex-cli",
+    "writingReviewMode": "auto",
+    "providers": [
+      {
+        "id": "codex-cli",
+        "name": "Codex（ChatGPT 登录）",
+        "vendor": "OpenAI",
+        "description": "使用这台电脑上的 ChatGPT 登录态，无需另填 API Key。",
+        "kind": "codex-cli",
+        "model": "gpt-5.6-sol",
+        "supportsVision": true,
+        "apiKeyConfigured": false
+      },
+      {
+        "id": "qwen",
+        "name": "通义千问",
+        "vendor": "阿里云百炼",
+        "description": "适合中文成稿；可预先配置视觉模型，为截图成稿入口做准备。",
+        "kind": "openai-compatible",
+        "model": "qwen-plus",
+        "inlineCompletionModel": "qwen-plus",
+        "visionModel": "qwen3-vl-plus",
+        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "supportsVision": true,
+        "apiKeyConfigured": false
+      },
+      {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "vendor": "DeepSeek",
+        "description": "中文补全性价比高；非思考模式适合低延迟续写。",
+        "kind": "openai-compatible",
+        "model": "deepseek-v4-flash",
+        "inlineCompletionModel": "deepseek-v4-flash",
+        "baseUrl": "https://api.deepseek.com",
+        "supportsVision": false,
+        "apiKeyConfigured": true
+      },
+      {
+        "id": "gemini",
+        "name": "Gemini Flash-Lite",
+        "vendor": "Google",
+        "description": "提供免费层与低价轻量模型，适合日常短补全。",
+        "kind": "openai-compatible",
+        "model": "gemini-3.1-flash-lite",
+        "inlineCompletionModel": "gemini-3.1-flash-lite",
+        "visionModel": "gemini-3.1-flash-lite",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "supportsVision": true,
+        "apiKeyConfigured": false
+      },
+      {
+        "id": "groq",
+        "name": "Groq 高速补全",
+        "vendor": "Groq",
+        "description": "优先追求首字延迟与生成速度，适合实时灰字建议。",
+        "kind": "openai-compatible",
+        "model": "openai/gpt-oss-20b",
+        "inlineCompletionModel": "openai/gpt-oss-20b",
+        "baseUrl": "https://api.groq.com/openai/v1",
+        "supportsVision": false,
+        "apiKeyConfigured": false
+      },
+      {
+        "id": "openai-api",
+        "name": "OpenAI API",
+        "vendor": "OpenAI",
+        "description": "使用独立 OpenAI API Key，与 ChatGPT 订阅分开计费。",
+        "kind": "openai-compatible",
+        "model": "gpt-5-mini",
+        "inlineCompletionModel": "gpt-5.4-nano",
+        "baseUrl": "https://api.openai.com/v1",
+        "supportsVision": true,
+        "apiKeyConfigured": false
+      },
+      {
+        "id": "custom-compatible",
+        "name": "自定义兼容接口",
+        "vendor": "OpenAI-compatible",
+        "description": "接入其他兼容 Chat Completions 的模型服务。",
+        "kind": "openai-compatible",
+        "model": "",
+        "baseUrl": "",
+        "supportsVision": false,
+        "apiKeyConfigured": false
+      }
+    ],
+    "latestProviderHealth": {},
+    "skills": [
+      {
+        "id": "news-desk",
+        "name": "news-desk",
+        "description": "核验新闻时间窗、一手来源、证据与图片。",
+        "sourcePath": "/Users/xueyongqi/.codex/skills/news-desk/SKILL.md",
+        "enabled": true,
+        "builtIn": true,
+        "compatibility": "codex-native",
+        "scopes": [
+          "generation",
+          "analysis"
+        ],
+        "importedAt": "2026-08-11T00:00:00.000Z"
+      },
+      {
+        "id": "agent-reach",
+        "name": "agent-reach",
+        "description": "跨站搜索并回到原始来源核验。",
+        "sourcePath": "/Users/xueyongqi/.codex/skills/agent-reach/SKILL.md",
+        "enabled": true,
+        "builtIn": true,
+        "compatibility": "codex-native",
+        "scopes": [
+          "generation",
+          "analysis"
+        ],
+        "importedAt": "2026-08-11T00:00:00.000Z"
+      },
+      {
+        "id": "lieflat-less-ai-tone",
+        "name": "lieflat-less-ai-tone",
+        "description": "默认白名单式去 AI 味审计：只改明确命中的句式，保留结构、事实与未命中文字。",
+        "sourcePath": "/Users/xueyongqi/.codex/skills/lieflat-less-ai-tone/SKILL.md",
+        "enabled": true,
+        "builtIn": true,
+        "compatibility": "prompt-compatible",
+        "scopes": [
+          "optimization"
+        ],
+        "importedAt": "2026-08-11T00:00:00.000Z"
+      },
+      {
+        "id": "ra-renhua",
+        "name": "ra-人话",
+        "description": "需要更强个人表达时才启用；自动模式仅在评论稿中叠加。",
+        "sourcePath": "/Users/xueyongqi/.codex/skills/ra-人话/SKILL.md",
+        "enabled": true,
+        "builtIn": true,
+        "compatibility": "prompt-compatible",
+        "scopes": [
+          "optimization"
+        ],
+        "importedAt": "2026-08-11T00:00:00.000Z"
+      }
+    ]
+  }
+}
