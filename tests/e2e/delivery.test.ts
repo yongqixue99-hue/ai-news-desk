@@ -128,6 +128,7 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await page.screenshot({ path: path.join(shots, `delivery-${width}.png`) });
     }
+    assert.equal(await page.getByRole('complementary', { name: '草稿库', exact: true }).isVisible(), false, 'resizing to mobile must keep the active delivery panel unobstructed');
     await panel.getByRole('link', { name: '连接设置', exact: true }).click();
     await page.getByRole('heading', { name: '连接多平台同步助手', exact: true }).waitFor();
     assert.equal(await page.getByRole('tab', { name: '平台连接', exact: true }).getAttribute('aria-selected'), 'true');

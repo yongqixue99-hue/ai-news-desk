@@ -395,7 +395,13 @@ export function DraftWorkspace({
   }, [onLoadPublishedImageMaterialStatuses]);
 
   useEffect(() => {
-    if (utilityTab && window.matchMedia("(max-width: 1279px)").matches) setDraftLibraryOpen(false);
+    const media = window.matchMedia("(max-width: 1279px)");
+    const keepActiveToolVisible = () => {
+      if (utilityTab && media.matches) setDraftLibraryOpen(false);
+    };
+    keepActiveToolVisible();
+    media.addEventListener("change", keepActiveToolVisible);
+    return () => media.removeEventListener("change", keepActiveToolVisible);
   }, [utilityTab]);
 
   useEffect(() => {
