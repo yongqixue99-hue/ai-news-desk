@@ -405,7 +405,7 @@ test("production routes, strategy controls, completion, draft resumption and mob
 
     // Format and gallery order must participate in autosave while preserving the article.
     const articleBeforeGallery = await prose.innerHTML();
-    await page.getByRole("navigation", { name: "草稿辅助工具" }).getByRole("button", { name: "发布", exact: true }).click();
+    await page.getByRole("navigation", { name: "草稿辅助工具" }).getByRole("button", { name: "交付", exact: true }).click();
     await page.locator(".platform-options").getByRole("button", { name: /小黑盒/u }).click();
     await page.getByRole("group", { name: "小黑盒发送形式" }).getByRole("button", { name: /图文/u }).click();
     await page.getByRole("button", { name: "加入图集：测试图片 a", exact: true }).click();

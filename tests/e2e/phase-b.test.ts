@@ -132,7 +132,7 @@ test("stage B editor saves, confirms, expires proposals and recovers without liv
     await page.goto(`${origin}/#drafts`, { waitUntil: "domcontentloaded" });
     const editor = page.getByRole("textbox", { name: "连续文章编辑器" });
     await editor.waitFor();
-    assert.equal(await page.getByRole("button", { name: "仅编辑", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await page.getByRole("button", { name: "编辑", exact: true }).getAttribute("aria-pressed"), "true");
     assert.equal(await page.getByRole("region", { name: "文章内容预览" }).count(), 0);
     const title = page.getByLabel("文章标题", { exact: true });
     await title.fill("人工修改后的确认标题");
@@ -151,9 +151,19 @@ test("stage B editor saves, confirms, expires proposals and recovers without liv
       assert.ok((await title.boundingBox())!.y >= 0, "title is not clipped above the screen");
       await page.screenshot({ path: path.join(artifacts, `editor-${width}.png`), fullPage: true });
     }
-    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const libraryButton = page.getByRole("button", { name: /^草稿库/u });
+    if (await libraryButton.getAttribute("aria-expanded") !== "true") await libraryButton.click();
+    const library = page.getByRole("complementary", { name: "草稿库", exact: true });
     const tools = page.getByRole("navigation", { name: "草稿辅助工具" });
-    await tools.getByRole("button", { name: "Agent", exact: true }).click();
+    const libraryBounds = (await library.boundingBox())!;
+    assert.ok(libraryBounds.y + libraryBounds.height <= (await tools.boundingBox())!.y + 1, "library must not cover the mobile tools");
+    await tools.getByRole("button", { name: "AI 助手", exact: true }).click();
+    await page.getByRole("tabpanel", { name: "AI 助手面板", exact: true }).waitFor();
+    assert.equal(await library.isVisible(), false);
+    await page.getByRole("button", { name: "关闭右侧面板", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await tools.getByRole("button", { name: "AI 助手", exact: true }).click();
     await page.getByRole("tab", { name: "优化文稿", exact: true }).click();
     await page.getByRole("button", { name: "检查并优化文稿", exact: true }).click();
     await page.getByRole("button", { name: "应用此项", exact: true }).waitFor();

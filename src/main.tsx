@@ -9,6 +9,7 @@ import "./strategy-design.css";
 import "./swiss-design.css";
 import "./components/source-radar.css";
 import "./settings-design.css";
+import "./draft-design.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

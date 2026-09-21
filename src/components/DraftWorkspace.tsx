@@ -139,7 +139,7 @@ interface DraftWorkspaceProps {
     draft: ArticleAgentDraftInput,
   ) => Promise<ArticleAgentThread>;
   onLaunchPublisher: () => Promise<void>;
-  onOpenPublisherSettings: () => void;
+  onOpenPublisherSettings: (platform?: "wechat" | "social" | "xiaoheihe") => void;
   onPublisherPreflight: (draftId: string) => Promise<PublisherPreflightResult>;
   onFill: (draftId: string) => Promise<PublisherResult | undefined>;
   onSyncWeChatDraft: (
@@ -154,11 +154,11 @@ type UtilityTab = "agent" | "sources" | "images" | "history" | "publish";
 type PublishPlatform = "xiaoheihe" | "wechat";
 
 const utilityTabs: Array<{ id: UtilityTab; label: string; icon: typeof Info }> = [
-  { id: "agent", label: "Agent", icon: BrainCircuit },
+  { id: "agent", label: "AI 助手", icon: BrainCircuit },
   { id: "sources", label: "资料", icon: Info },
   { id: "images", label: "图片", icon: Images },
   { id: "history", label: "版本", icon: History },
-  { id: "publish", label: "发布", icon: Send },
+  { id: "publish", label: "交付", icon: Send },
 ];
 
 const isCompactViewport = () => window.matchMedia("(max-width: 720px)").matches;
@@ -270,12 +270,13 @@ export function DraftWorkspace({
   const [editing, setEditing] = useState<ArticleDraft | undefined>(() => editableDraft(selected));
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
   const [compactLayout, setCompactLayout] = useState(isCompactViewport);
-  const [draftLibraryOpen, setDraftLibraryOpen] = useState(false);
+  const [draftLibraryOpen, setDraftLibraryOpen] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
   const [utilityTab, setUtilityTab] = useState<UtilityTab | null>(null);
   const [publishPlatform, setPublishPlatform] = useState<PublishPlatform>("wechat");
   const [wechatMetadata, setWechatMetadata] = useState<WeChatDraftMetadata>(() =>
     wechatMetadataFor(selected, wechatSettings));
   const [draftSearch, setDraftSearch] = useState("");
+  const [draftFilter, setDraftFilter] = useState("all");
   const [topicInput, setTopicInput] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [imageCaption, setImageCaption] = useState("");
@@ -394,6 +395,10 @@ export function DraftWorkspace({
   }, [onLoadPublishedImageMaterialStatuses]);
 
   useEffect(() => {
+    if (utilityTab && window.matchMedia("(max-width: 1279px)").matches) setDraftLibraryOpen(false);
+  }, [utilityTab]);
+
+  useEffect(() => {
     const media = window.matchMedia("(max-width: 720px)");
     const update = () => setCompactLayout(media.matches);
     media.addEventListener("change", update);
@@ -415,11 +420,14 @@ export function DraftWorkspace({
 
   const filteredDrafts = useMemo(() => {
     const query = draftSearch.trim().toLowerCase();
-    if (!query) return visibleDrafts;
-    return visibleDrafts.filter((draft) =>
-      `${draft.title} ${draft.sources[0]?.label ?? ""}`.toLowerCase().includes(query),
-    );
-  }, [draftSearch, visibleDrafts]);
+    return visibleDrafts.filter((draft) => {
+      const matchesStatus = draftFilter === "all"
+        || (draftFilter === "working" && ["editing", "reviewing", "needs-images"].includes(draft.status))
+        || (draftFilter === "ready" && draft.status === "ready")
+        || (draftFilter === "delivered" && ["filled", "published"].includes(draft.status));
+      return matchesStatus && `${draft.title} ${draft.sources.map((source) => source.label).join(" ")}`.toLowerCase().includes(query);
+    }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [draftSearch, draftFilter, visibleDrafts]);
 
   const save = useCallback(async (mode: DraftSaveMode = "manual") => {
     if (activeSaveRef.current) {
@@ -653,7 +661,7 @@ export function DraftWorkspace({
 
   const selectDraft = async (draftId: string) => {
     if (draftId === editing.id) {
-      setDraftLibraryOpen(false);
+      if (window.matchMedia("(max-width: 1279px)").matches) setDraftLibraryOpen(false);
       return;
     }
     if (switchingDraftId) return;
@@ -670,7 +678,7 @@ export function DraftWorkspace({
         },
         select: (nextDraftId) => {
           onSelectDraft(nextDraftId);
-          setDraftLibraryOpen(false);
+          if (window.matchMedia("(max-width: 1279px)").matches) setDraftLibraryOpen(false);
         },
       });
     } catch {
@@ -1186,14 +1194,14 @@ export function DraftWorkspace({
           ? `已自动保存 ${formatSaved(lastSavedAt || editing.updatedAt)}`
           : `已保存 ${formatSaved(lastSavedAt || editing.updatedAt)}`;
   const utilityHeading = utilityTab === "agent"
-    ? { title: "文章 Agent", subtitle: "原文与草稿一起理解" }
+    ? { title: "AI 助手", subtitle: "理解原文 · 逐项改稿" }
     : utilityTab === "sources"
       ? { title: "资料与溯源", subtitle: "随写随用" }
       : utilityTab === "images"
       ? { title: "文章配图", subtitle: "随写随用" }
       : utilityTab === "history"
         ? { title: "版本历史", subtitle: "自动保存与随时恢复" }
-        : { title: "发布设置", subtitle: "确认后填入平台编辑器" };
+        : { title: "交付草稿", subtitle: "同步后，由你在平台手动发布" };
   const publisherReady = Boolean(publisherStatus?.ok);
   const distributionTargets = buildDistributionTargets({
     draft: editing,
@@ -1219,7 +1227,7 @@ export function DraftWorkspace({
   const nextAction = evidenceView.factDecisionCount
     ? {
         tab: "sources" as const,
-        label: `确实有 ${evidenceView.factDecisionCount} 项需要你确认`,
+        label: `${evidenceView.factDecisionCount} 项事实待确认`,
         detail: "这里只保留会影响正文准确性的事实问题。",
         action: "查看待确认项",
       }
@@ -1243,7 +1251,7 @@ export function DraftWorkspace({
           }
       : {
           tab: "sources" as const,
-          label: "草稿已生成，先看正文即可",
+          label: "事实与来源已整理",
           detail: "事实和来源已经自动整理；图片权限与平台设置只在你准备发布时提示。",
           action: "查看自动核验",
         };
@@ -1259,17 +1267,29 @@ export function DraftWorkspace({
     });
   };
 
+  const chooseViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    if (mode === "split") { setDraftLibraryOpen(false); setUtilityTab(null); }
+  };
+  const confirmedContent = editing.editorialBaseline?.confirmed;
+  const confirmationCurrent = confirmedContent && draftDocumentKey(editing) === draftDocumentKey({ ...confirmedContent.snapshot, provenance: editing.provenance });
+
   const editorPane = (
     <section data-testid="draft-editor" className="draft-pane editor-pane" aria-label="正文编辑区">
       <div className="draft-pane-heading">
-        <strong><Pencil size={15} />正文</strong>
-        <span>约 {articleCharCount} 字</span>
+        <div className="draft-view-switch" aria-label="编辑与预览视图">
+          <button className={viewMode === "edit" ? "active" : ""} aria-pressed={viewMode === "edit"} onClick={() => chooseViewMode("edit")}><Pencil size={14} />编辑</button>
+          <button className={viewMode === "split" ? "active" : ""} aria-pressed={viewMode === "split"} onClick={() => chooseViewMode("split")}><Columns2 size={14} />对照</button>
+          <button aria-pressed={false} onClick={() => chooseViewMode("preview")}>预览</button>
+        </div>
+        <span>{articleCharCount.toLocaleString()} 字 · {insertedMediaIds.size} 张图</span>
       </div>
       <RichArticleEditor
         key={`${editing.id}-editor`}
         ref={richEditor}
         draftId={editing.id}
         title={editing.title}
+        onTitleChange={(title) => updateEditing({ title })}
         content={editing.bodyHtml || ""}
         preview={false}
         theme={editing.layoutTheme ?? "news-clean"}
@@ -1289,8 +1309,17 @@ export function DraftWorkspace({
   const previewPane = (
     <section className="draft-pane preview-pane" aria-label="文章内容预览">
       <div className="draft-pane-heading">
-        <strong>文章 · 内容预览</strong>
-        <span>手机端正文宽度</span>
+        {viewMode === "preview" ? <div className="draft-view-switch" aria-label="编辑与预览视图">
+          <button aria-pressed={false} onClick={() => chooseViewMode("edit")}><Pencil size={14} />编辑</button>
+          <button aria-pressed={false} onClick={() => chooseViewMode("split")}><Columns2 size={14} />对照</button>
+          <button className="active" aria-pressed={true} onClick={() => chooseViewMode("preview")}>预览</button>
+        </div> : <strong>内容预览</strong>}
+        <label className="draft-theme-control" title="预览排版主题">
+          <Palette size={14} />
+          <select aria-label="排版主题" value={editing.layoutTheme ?? "news-clean"} onChange={(event) => updateEditing({ layoutTheme: event.target.value as DraftLayoutTheme })}>
+            {layoutThemeOptions.map((theme) => <option key={theme.id} value={theme.id}>{theme.label}</option>)}
+          </select>
+        </label>
       </div>
       <RichArticleEditor
         key={`${editing.id}-preview`}
@@ -1306,12 +1335,16 @@ export function DraftWorkspace({
   );
 
   return (
-    <div className="page draft-page draft-page-v2">
+    <div className={`page draft-page draft-page-v2 draft-page-refined mode-${viewMode}`}>
       <header className="draft-topbar-v2">
         <button
           className={draftLibraryOpen ? "draft-library-trigger active" : "draft-library-trigger"}
           aria-expanded={draftLibraryOpen}
-          onClick={() => setDraftLibraryOpen((open) => !open)}
+          aria-controls="draft-library"
+          onClick={() => {
+            setDraftLibraryOpen((open) => !open);
+            if (!draftLibraryOpen && window.matchMedia("(max-width: 1279px)").matches) setUtilityTab(null);
+          }}
         >
           <FolderOpen size={17} />
           <span>草稿库</span>
@@ -1319,15 +1352,10 @@ export function DraftWorkspace({
         </button>
 
         <div className="draft-document-heading">
-          <input
-            className="draft-title-input"
-            value={editing.title}
-            onChange={(event) => updateEditing({ title: event.target.value })}
-            aria-label="文章标题"
-          />
+          <div className="draft-document-label"><span>文章草稿</span><strong title={editing.title}>{editing.title || "未命名草稿"}</strong>{confirmedContent ? <em className={confirmationCurrent ? "draft-confirmation-state confirmed" : "draft-confirmation-state"}>{confirmationCurrent ? "已确认" : "待再确认"}</em> : null}</div>
           <div className={saveError ? "draft-save-state error" : "draft-save-state"}>
-            <Cloud size={13} />
-            <span role="status">{saveStateText} · {editing.revisionId ? `修订 ${editing.revisionId.slice(-6)}` : "尚无修订"}{editing.editorialBaseline?.confirmed ? ` · ${draftDocumentKey(editing) === draftDocumentKey({ ...editing.editorialBaseline.confirmed.snapshot, provenance: editing.provenance }) ? "已确认" : "待再次确认，上次"} ${formatSaved(editing.editorialBaseline.confirmed.confirmedAt)}` : " · 未确认定稿"}{dirty ? "（当前有新修改）" : ""}</span>
+            {saving ? <LoaderCircle className="spin" size={13} /> : <Cloud size={13} />}
+            <span role="status">{saveStateText}</span>
             {editing.draftStrategy ? <em className="draft-strategy-badge">{strategyLabels[editing.draftStrategy]}</em> : null}
             <i aria-hidden="true" />
             <label className="draft-lifecycle-control">
@@ -1345,36 +1373,23 @@ export function DraftWorkspace({
         </div>
 
         <div className="draft-header-controls">
-          <label className="draft-theme-control" title="预览排版主题">
-            <Palette size={15} />
-            <select
-              aria-label="排版主题"
-              value={editing.layoutTheme ?? "news-clean"}
-              onChange={(event) => updateEditing({ layoutTheme: event.target.value as DraftLayoutTheme })}
-            >
-              {layoutThemeOptions.map((theme) => <option key={theme.id} value={theme.id}>{theme.label}</option>)}
-            </select>
-          </label>
-          <div className="draft-view-switch" aria-label="编辑与预览视图">
-            <button className={viewMode === "edit" ? "active" : ""} aria-pressed={viewMode === "edit"} onClick={() => setViewMode("edit")}>仅编辑</button>
-            <button className={viewMode === "split" ? "active" : ""} aria-pressed={viewMode === "split"} onClick={() => setViewMode("split")}><Columns2 size={14} />对照</button>
-            <button className={viewMode === "preview" ? "active" : ""} aria-pressed={viewMode === "preview"} onClick={() => setViewMode("preview")}>仅预览</button>
-          </div>
           <button className="secondary-button" onClick={() => void confirmEditorialDraft()} disabled={saving || confirmingDraft}>{confirmingDraft ? "正在确认…" : "确认定稿"}</button>
           {optimizationUndo ? <button className="secondary-button" onClick={undoOptimization}>撤销上次 AI 修改</button> : null}
           <button className="draft-quick-save" aria-label="保存草稿" title="保存草稿并创建版本（⌘/Ctrl+S）" onClick={() => void save("manual").catch(() => undefined)} disabled={saving}>
             {saving ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}
           </button>
+          <button className="primary-button draft-delivery-trigger" aria-expanded={utilityTab === "publish"} onClick={() => setUtilityTab((tab) => tab === "publish" ? null : "publish")}><Send size={14} />交付草稿</button>
         </div>
       </header>
 
-      <section className={`draft-next-action next-${nextAction.tab}`} aria-label="当前草稿的下一步">
+      <section className={`draft-next-action next-${nextAction.tab} ${evidenceView.factDecisionCount || draftQuality.warnings.length ? "has-attention" : "is-settled"}`} aria-label="当前草稿的下一步">
         <div className="draft-next-action-copy">
-          <span>下一步</span>
-          <strong>{nextAction.label}</strong>
-          <small>{nextAction.detail}</small>
+          {evidenceView.factDecisionCount || draftQuality.warnings.length ? <ShieldAlert size={15} /> : evidenceView.sourceDecisionCount ? <Info size={15} /> : <CheckCircle2 size={15} />}
+          <strong title={nextAction.detail}>{nextAction.label}</strong>
         </div>
-        <div className="draft-readiness-summary" aria-label={`发布准备 ${passedReadinessCount}/${readiness.length}`}>
+        <details className="draft-quality-disclosure">
+          <summary>检查明细</summary>
+          <div className="draft-readiness-summary" aria-label={`发布准备 ${passedReadinessCount}/${readiness.length}`}>
           {draftQuality.dimensions.map((dimension) => (
             <span
               key={dimension.id}
@@ -1384,7 +1399,8 @@ export function DraftWorkspace({
               {dimension.label} {dimension.summary}
             </span>
           ))}
-        </div>
+          </div>
+        </details>
         <button
           type="button"
           className="secondary-button"
@@ -1417,34 +1433,39 @@ export function DraftWorkspace({
 
       <div className={`draft-stage ${draftLibraryOpen ? "library-open" : ""} ${utilityTab ? "utility-open" : ""}`}>
         {draftLibraryOpen ? (
-          <aside className="draft-library-drawer" aria-label="草稿库">
+          <aside id="draft-library" className="draft-library-drawer" aria-label="草稿库">
             <div className="drawer-title-row">
               <div><strong>草稿库</strong><span>{currentDrafts.length} 篇当前草稿</span></div>
               <button aria-label="关闭草稿库" onClick={() => setDraftLibraryOpen(false)}><X size={16} /></button>
             </div>
             <label className="draft-search-field">
               <Search size={15} />
-              <input value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} placeholder="搜索标题或来源" />
+              <input value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} aria-label="搜索草稿" placeholder="搜索标题或来源" />
             </label>
+            <div className="draft-library-filter">
+              <select aria-label="筛选草稿" value={draftFilter} onChange={(event) => setDraftFilter(event.target.value)}>
+                <option value="all">全部状态</option><option value="working">待处理</option><option value="ready">待交付</option><option value="delivered">已交付／发布</option>
+              </select>
+              <span>{filteredDrafts.length} 篇 · 最近修改</span>
+            </div>
             <div className="draft-list">
               {filteredDrafts.map((draft) => (
                 <button
                   key={draft.id}
                   className={draft.id === editing.id ? "draft-list-item active" : "draft-list-item"}
                   disabled={Boolean(switchingDraftId)}
+                  aria-current={draft.id === editing.id ? "true" : undefined}
                   onClick={() => void selectDraft(draft.id)}
                 >
-                  <span className="draft-source">{draft.sources[0]?.label ?? "AI 新闻"}</span>
-                  <strong>{draft.title}</strong>
-                  <span className={`draft-status ${draft.status}`}>
-                    {draftStatusLabel[draft.status]}
-                  </span>
+                  <span className="draft-list-meta"><span className="draft-source">{draft.sources[0]?.label ?? "AI 新闻"}</span><time dateTime={draft.updatedAt}>{formatSaved(draft.updatedAt)}</time></span>
+                  <strong>{draft.title || "未命名草稿"}</strong>
+                  <span className="draft-list-footer"><span className={`draft-status ${draft.status}`}>{draftStatusLabel[draft.status]}</span>{draft.draftStrategy ? <span>{strategyLabels[draft.draftStrategy]}</span> : null}</span>
                 </button>
               ))}
               {!filteredDrafts.length ? <p className="drawer-empty">没有匹配的草稿</p> : null}
             </div>
             {shelvedDraftCount ? (
-              <button className="draft-history-toggle" onClick={() => setShowShelvedDrafts((value) => !value)}>
+              <button className="draft-history-toggle" aria-pressed={showShelvedDrafts} onClick={() => { setShowShelvedDrafts((value) => !value); setDraftFilter("all"); }}>
                 <Archive size={14} />{showShelvedDrafts ? "隐藏历史旧稿" : `查看历史旧稿 ${shelvedDraftCount}`}
               </button>
             ) : null}
@@ -1496,15 +1517,15 @@ export function DraftWorkspace({
             <div className="utility-drawer-scroll">
               {utilityTab === "agent" ? (
                 <div className="article-agent-panel">
-                  <section className="external-writer-bridge">
-                    <div><span className="external-writer-badge">不调用 API</span><strong>用 Gemini 网页版协作写稿</strong></div>
+                  <details className="external-writer-bridge">
+                    <summary>用 Gemini 网页版协作 <ExternalLink size={13} /></summary>
                     <p>把当前草稿、来源链接、事实边界和待核对项复制成一份约束提示词；在你已有的 Google 账号里运行，再把结果贴回编辑器。</p>
                     <div>
                       <button type="button" className="secondary-button" onClick={() => void copyExternalWritingPrompt()}><Copy size={14} />{externalPromptCopied ? "提示词已复制" : "复制证据写作提示词"}</button>
                       <a href="https://gemini.google.com/app" target="_blank" rel="noreferrer"><ExternalLink size={14} />打开 Gemini</a>
                     </div>
                     <small>网页结果不会自动覆盖草稿。粘贴回来后仍需保存，并在“资料”中核对标为待确认的事实。</small>
-                  </section>
+                  </details>
                   <div className="agent-mode-switch" role="tablist" aria-label="文章 Agent 类型">
                     <button role="tab" aria-selected={agentMode === "analysis"} className={agentMode === "analysis" ? "active" : ""} onClick={() => setAgentMode("analysis")}><BrainCircuit size={14} />理解文章</button>
                     <button role="tab" aria-selected={agentMode === "optimization"} className={agentMode === "optimization" ? "active" : ""} onClick={() => setAgentMode("optimization")}><WandSparkles size={14} />优化文稿</button>
@@ -1738,6 +1759,7 @@ export function DraftWorkspace({
                     <span className="history-current-mark"><Cloud size={15} />当前内容</span>
                     <strong>{editing.title || "未命名草稿"}</strong>
                     <small>{dirty ? "有更改等待自动保存" : `最近保存于 ${formatSaved(lastSavedAt || editing.updatedAt)}`}</small>
+                    <small>{editing.revisionId ? `修订 ${editing.revisionId.slice(-6)}` : "尚无修订"} · {editing.editorialBaseline?.confirmed ? `${draftDocumentKey(editing) === draftDocumentKey({ ...editing.editorialBaseline.confirmed.snapshot, provenance: editing.provenance }) ? "已确认" : "待再次确认，上次"} ${formatSaved(editing.editorialBaseline.confirmed.confirmedAt)}` : "未确认定稿"}</small>
                     <button onClick={() => void save("manual").catch(() => undefined)} disabled={saving}>
                       <Save size={14} />立即创建版本
                     </button>
@@ -1810,7 +1832,7 @@ export function DraftWorkspace({
                     <div className="distribution-flow" aria-label="多平台分发边界">
                       <span>当前正文</span><i>→</i><span>平台适配</span><i>→</i><span>草稿／编辑器</span><i>→</i><strong>你手动发布</strong>
                     </div>
-                    <MultiDeliveryPanel key={editing.id} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} wechatConfigured={Boolean(wechatSettings.appId && wechatSettings.appSecretConfigured)} publisherReady={publisherReady} save={() => save("manual")} prepareWechat={() => syncWeChat(wechatMetadata)} prepareXiaoheihe={() => prepareXiaoheihe(false)} onBusy={setDeliveryBusy} />
+                    <MultiDeliveryPanel key={editing.id} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} wechatConfigured={Boolean(wechatSettings.appId && wechatSettings.appSecretConfigured)} publisherReady={publisherReady} save={() => save("manual")} prepareWechat={() => syncWeChat(wechatMetadata)} prepareXiaoheihe={() => prepareXiaoheihe(false)} onBusy={setDeliveryBusy} onOpenSettings={() => onOpenPublisherSettings("social")} />
                     <div className="platform-options">
                       {distributionTargets.map((target) => (
                         <button
@@ -2011,7 +2033,7 @@ export function DraftWorkspace({
                       onSync={syncWeChat}
                       onCopyFormatted={copyFormatted}
                       onConfirmPublished={() => confirmPublication("wechat")}
-                      onOpenSettings={onOpenPublisherSettings}
+                      onOpenSettings={() => onOpenPublisherSettings("wechat")}
                     />
                   )}
                 </>
@@ -2028,7 +2050,7 @@ export function DraftWorkspace({
                 {!publisherReady || loginRequired ? (
                   <button
                     className="outline-accent-button full"
-                    onClick={extensionPublisher && !loginRequired ? onOpenPublisherSettings : onLaunchPublisher}
+                    onClick={extensionPublisher && !loginRequired ? () => onOpenPublisherSettings("xiaoheihe") : onLaunchPublisher}
                   >
                     {loginRequired
                       ? "打开小黑盒登录页"

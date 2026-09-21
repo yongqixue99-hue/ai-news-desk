@@ -11,6 +11,7 @@ interface Props {
   save: () => Promise<ArticleDraft | undefined>;
   prepareWechat: () => Promise<unknown>; prepareXiaoheihe: () => Promise<unknown>;
   onBusy: (busy: boolean) => void;
+  onOpenSettings: () => void;
 }
 export function MultiDeliveryPanel(props: Props) {
   const [selected, setSelected] = useState<Target[]>(["wechat"]);
@@ -85,7 +86,7 @@ export function MultiDeliveryPanel(props: Props) {
     })}</div>
     <button type="button" className="primary-button full" disabled={props.disabled || busy || !selected.length} onClick={() => void run()}>{busy ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}{busy ? "正在投递所选平台…" : `一键投递所选 ${selected.length} 个平台`}</button>
     <p className="social-hint">先保存当前稿件，各平台独立处理。同步到草稿箱后，由你检查并发布。知乎、百家号的新版本会新建草稿，同版本复用回执。</p>
-    <div className="social-links"><a href="#schedule">连接设置</a>{socialPlatforms.map(platform => <a key={platform.id} href={platform.url} target="_blank" rel="noreferrer">{platform.name}后台 <ExternalLink size={11} /></a>)}</div>
+    <div className="social-links"><a href="#schedule" onClick={(event) => { event.preventDefault(); props.onOpenSettings(); }}>连接设置</a>{socialPlatforms.map(platform => <a key={platform.id} href={platform.url} target="_blank" rel="noreferrer">{platform.name}后台 <ExternalLink size={11} /></a>)}</div>
     {Object.entries(progress).length ? <div className="social-progress" role="status">{Object.entries(progress).map(([id, detail]) => <p key={id}><b>{names[id as Target]}</b><span>{detail}</span></p>)}</div> : null}
     {error ? <p className="social-error" role="alert">{error}</p> : null}
     {receipts.length ? <details className="social-history" open><summary>投递记录（{receipts.length}）</summary>{receipts.map(receipt => <article key={receipt.id}>

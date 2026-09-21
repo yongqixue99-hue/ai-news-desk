@@ -6,6 +6,7 @@ import type { PortableArchiveImportResult, PortableArchivePreview, StorageUsage 
 import type { HealthState, Settings, WeChatChannelSettings, WeChatConnectionResult, WorkflowRun } from "../types";
 
 interface SchedulePageProps {
+  initialPlatform?: "wechat" | "social" | "xiaoheihe";
   settings: Settings;
   runs: WorkflowRun[];
   health?: HealthState;
@@ -60,9 +61,9 @@ const formatBytes = (bytes = 0) => {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 };
 
-export function SchedulePage({ settings, runs, health, onSettings, onRefreshHealth, onLaunchPublisher, onOpenRuns, onLoadStorageUsage, onExportData, onExportPortableArchive, onInspectPortableArchive, onImportPortableArchive, onRestoreData, onSaveWeChatSettings, onTestWeChatConnection }: SchedulePageProps) {
-  const [section, setSection] = useState<"plans" | "platforms" | "data">("plans");
-  const [platform, setPlatform] = useState<"wechat" | "social" | "xiaoheihe">("wechat");
+export function SchedulePage({ initialPlatform, settings, runs, health, onSettings, onRefreshHealth, onLaunchPublisher, onOpenRuns, onLoadStorageUsage, onExportData, onExportPortableArchive, onInspectPortableArchive, onImportPortableArchive, onRestoreData, onSaveWeChatSettings, onTestWeChatConnection }: SchedulePageProps) {
+  const [section, setSection] = useState<"plans" | "platforms" | "data">(initialPlatform ? "platforms" : "plans");
+  const [platform, setPlatform] = useState<"wechat" | "social" | "xiaoheihe">(initialPlatform ?? "wechat");
   const recentAutomaticRuns = runs.filter((run) => run.scheduled || run.collectionPurpose === "official-monitor").slice(0, 5);
   const enabledPlanCount = Number(settings.scheduleEnabled) + Number(Boolean(settings.officialMonitorEnabled));
   const latestScheduledRun = runs.find((run) => run.scheduled);

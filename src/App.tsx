@@ -60,6 +60,8 @@ function App() {
   const [state, setState] = useState<WorkflowState>();
   const [editorialSystem, setEditorialSystem] = useState<EditorialSystemView>();
   const { page, navigate } = useHashPageNavigation();
+  const [schedulePlatform, setSchedulePlatform] = useState<"wechat" | "social" | "xiaoheihe">();
+  useEffect(() => { if (page !== "schedule") setSchedulePlatform(undefined); }, [page]);
   const [homeStoryId, setHomeStoryId] = useState<string>();
   const [activeRunId, setActiveRunId] = useState<string>();
   const [activeDraftId, setActiveDraftId] = useState<string>();
@@ -1412,7 +1414,7 @@ function App() {
             onRunArticleAgent={runArticleAgent}
             onAskArticleAgent={askArticleAgent}
             onLaunchPublisher={launchPublisher}
-            onOpenPublisherSettings={() => navigate("schedule")}
+            onOpenPublisherSettings={(platform = "wechat") => { setSchedulePlatform(platform); navigate("schedule"); }}
             onPublisherPreflight={publisherPreflight}
             onFill={fillDraft}
             onSyncWeChatDraft={syncWeChatDraft}
@@ -1536,6 +1538,7 @@ function App() {
       ) : null}
       {page === "schedule" ? (
         <SchedulePage
+          initialPlatform={schedulePlatform}
           settings={state.settings}
           runs={state.runs}
           health={health}

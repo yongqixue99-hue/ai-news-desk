@@ -114,7 +114,7 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await page.goto(`${origin}/#drafts`);
     await page.getByRole('textbox', {name:'文章标题'}).waitFor();
     assert.equal(await page.getByRole('textbox', {name:'文章标题'}).inputValue(), '多平台测试文章');
-    await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', {name:'发布',exact:true}).click();
+    await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', {name:'交付',exact:true}).click();
     await page.getByText('选择这篇文章的投递平台', {exact:true}).waitFor();
     const panel = page.locator('.multi-delivery');
     await panel.getByRole('checkbox', {name:/知乎/}).check();
@@ -128,6 +128,9 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await page.screenshot({ path: path.join(shots, `delivery-${width}.png`) });
     }
+    await panel.getByRole('link', { name: '连接设置', exact: true }).click();
+    await page.getByRole('heading', { name: '连接多平台同步助手', exact: true }).waitFor();
+    assert.equal(await page.getByRole('tab', { name: '平台连接', exact: true }).getAttribute('aria-selected'), 'true');
     assert.deepEqual(errors, []);
   } finally { await browser?.close(); await stopProcessTree(server); await rm(root, { recursive: true, force: true }); }
 });
