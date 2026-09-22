@@ -8,6 +8,43 @@ import {
   evaluatePublisherPreflight,
 } from "./publisher-preflight.js";
 
+test("Xiaoheihe title checks use the editor's half-width count in both delivery formats", () => {
+  const originalTitle = "DeepSeek月之暗面将和OpenAi向联合国汇报Ai风险";
+  const cases = [
+    { title: originalTitle, count: 22, valid: true },
+    { title: `${originalTitle}了`, count: 23, valid: true },
+    { title: "中".repeat(30), count: 30, valid: true },
+    { title: "中".repeat(31), count: 31, valid: false },
+    { title: `${"中".repeat(29)}ABC`, count: 30, valid: true },
+    { title: `${"中".repeat(29)}ABCD`, count: 31, valid: false },
+    { title: "A", count: 0, valid: true },
+    { title: "AB", count: 1, valid: true },
+    { title: "A B", count: 1, valid: true },
+    { title: "éé", count: 1, valid: true },
+    { title: "😀", count: 2, valid: true },
+    { title: "  ", count: 0, valid: false },
+  ];
+  for (const contentFormat of ["article", "image-post"] as const) {
+    for (const sample of cases) {
+      const result = evaluatePublisherPreflight({
+        runtime: { mode: "chrome-extension", connected: true, protocolVersion: "0.1.24" },
+        draft: {
+          id: "title-count-regression", contentFormat, title: sample.title,
+          bodyHtml: "<p>这是一段用于验证中英文混排标题的独立测试正文，长度足够。</p>",
+          community: "盒友杂谈", topics: ["AI"],
+          images: [{ id: "test-image", available: true, caption: "测试配图" }],
+        },
+      });
+      const title = result.capabilities.find(capability => capability.id === "title");
+      assert.equal(result.canQueueFill, sample.valid, `${contentFormat}: ${sample.title}`);
+      assert.equal(title?.detail, !sample.title.trim() ? "标题为空" : sample.valid
+        ? `标题 ${sample.count} 字` : `标题 ${sample.count} 字，超过平台 30 字上限`);
+      assert.equal(title?.issueCode, sample.valid ? undefined : sample.title.trim()
+        ? "PREFLIGHT_TITLE_TOO_LONG" : "PREFLIGHT_TITLE_MISSING");
+    }
+  }
+});
+
 test("CDP gallery delivery has one actionable protocol capability", () => {
   const result = evaluatePublisherPreflight({
     runtime: { mode: "cdp", connected: true },

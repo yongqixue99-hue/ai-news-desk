@@ -3,6 +3,7 @@ import { ArrowUpRight, Check, ChevronDown, ImagePlus, LoaderCircle, Send, Settin
 import type { ArticleDraft, DraftImagePlacement, PublisherResult } from "../types";
 import { XHH_FIXED_TOPICS, xiaoheiheSelection } from "../../server/xiaoheihe-publishing";
 import { XiaoheiheFormatPanel } from "./XiaoheiheFormatPanel";
+import { xiaoheiheTitleLength, xiaoheiheTitleLimit } from "../../server/xiaoheihe-format";
 
 interface Props {
   draft: ArticleDraft;
@@ -24,6 +25,7 @@ interface Props {
 export function XiaoheiheDeliveryPanel({ draft, nextCompanion, busy, connected, stale, result, error, selectedImageIds, onChange, onSend, onSettings, onUpload, onConfirmPublished, publicationRemembered }: Props) {
   const selection = xiaoheiheSelection(draft, nextCompanion);
   const options = selection.options;
+  const titleLength = xiaoheiheTitleLength(draft.title);
   const cover = draft.images.find(image => image.id === options.coverPlacementId);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -33,7 +35,7 @@ export function XiaoheiheDeliveryPanel({ draft, nextCompanion, busy, connected, 
   const receiptUrl = result?.pageUrl && /^https:\/\/(www\.)?xiaoheihe\.cn\//u.test(result.pageUrl) ? result.pageUrl : "https://www.xiaoheihe.cn/creator/content";
   const planName = options.creationPlan === "none" ? "不参与" : options.creationPlan === "hot" ? "热点计划" : draft.contentFormat === "image-post" ? "图文计划" : "文章计划";
   return <section className="xhh-delivery" aria-label="小黑盒发布设置">
-    <div className="xhh-delivery-heading"><div><strong>送到小黑盒</strong><p>正文、配图和发布设置一次填好</p></div><button className="xhh-icon-button" aria-label="小黑盒连接设置" title="连接设置" onClick={onSettings}><Settings2 size={16} /></button></div>
+    <div className="xhh-delivery-heading"><div><strong>送到小黑盒</strong><p><span className={titleLength > xiaoheiheTitleLimit ? "xhh-title-over-limit" : undefined}>标题 {titleLength}/{xiaoheiheTitleLimit} 字</span> · 与小黑盒计数一致</p></div><button className="xhh-icon-button" aria-label="小黑盒连接设置" title="连接设置" onClick={onSettings}><Settings2 size={16} /></button></div>
     <button className="primary-button full xhh-send" disabled={disabled} onClick={onSend}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}{busy ? "正在准备并填入…" : "送到小黑盒"}</button>
     <p className="xhh-send-note">{connected ? "自动保存并检查，随后打开小黑盒供你发布" : "自动连接 Chrome 并填入，随后由你检查发布"}</p>
     {error ? <p className="delivery-error" role="alert">{error}</p> : null}

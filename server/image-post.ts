@@ -4,6 +4,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { workflowMediaRoot } from "./storage.js";
 import type { ArticleDraft, DraftImagePlacement } from "./types.js";
+import { xiaoheiheTitleLength, xiaoheiheTitleLimit } from "./xiaoheihe-format.js";
 
 export interface ScreenshotCropRegion {
   left: number;
@@ -29,7 +30,8 @@ export const normalizeImagePostCopy = (input: ImagePostCopyInput) => {
   const title = compactLine(input.title);
   const lines = input.lines.map(compactLine).filter(Boolean);
   if (!title) throw new Error("图文标题不能为空");
-  if (title.length > 30) throw new Error(`图文标题不能超过 30 字（当前 ${title.length} 字）`);
+  const titleLength = xiaoheiheTitleLength(title);
+  if (titleLength > xiaoheiheTitleLimit) throw new Error(`图文标题不能超过 ${xiaoheiheTitleLimit} 字（当前 ${titleLength} 字）`);
   if (!lines.length) throw new Error("图文正文不能为空");
   if (lines.length > 3) throw new Error("图文正文最多 3 行");
   if (lines.some((line) => /总结|综上|总的来说|最后总结/.test(line))) {

@@ -2,6 +2,7 @@
 .xhh-delivery-heading { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
 .xhh-delivery-heading strong { font-size: 17px; letter-spacing: -.3px; }
 .xhh-delivery-heading p { margin: 7px 0 0; color: #777c76; font-size: 12px; }
+.xhh-title-over-limit { color: #b72824; }
 .xhh-icon-button { border: 0; background: transparent; color: #878b85; padding: 5px; cursor: pointer; }
 .xhh-send { min-height: 43px; border-radius: 7px; font-size: 14px; }
 .xhh-send-note { margin: 10px 0 23px; text-align: center; color: #898d87; font-size: 11px; line-height: 1.6; }

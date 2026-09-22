@@ -1,5 +1,5 @@
 import type { XiaoheihePublishOptions } from "./types.js";
-import { imagePostCapacity, normalizePublisherTopics } from "./xiaoheihe-format.js";
+import { imagePostCapacity, normalizePublisherTopics, xiaoheiheTitleLength, xiaoheiheTitleLimit } from "./xiaoheihe-format.js";
 import { randomUUID } from "node:crypto";
 
 export type PublisherAdapterMode = "chrome-extension" | "cdp";
@@ -271,6 +271,9 @@ export const evaluatePublisherPreflight = (
   const protocolVersion = versionFromRuntime(input.runtime);
   const protocolRequired = input.runtime.mode === "chrome-extension";
   const bodyText = textFromHtml(input.draft.bodyHtml);
+  const title = input.draft.title.trim();
+  const titleLength = xiaoheiheTitleLength(title);
+  const titleTooLong = titleLength > xiaoheiheTitleLimit;
   const topics = normalizePublisherTopics(input.draft.topics);
   const capabilities: PublisherCapability[] = [
     {
@@ -346,19 +349,21 @@ export const evaluatePublisherPreflight = (
     {
       id: "title",
       label: "标题",
-      status: input.draft.title.trim() && input.draft.title.trim().length <= 30 ? "pass" : "blocked",
+      status: title && !titleTooLong ? "pass" : "blocked",
       required: true,
-      detail: !input.draft.title.trim()
+      detail: !title
         ? "标题为空"
-        : input.draft.title.trim().length > 30
-          ? `标题 ${input.draft.title.trim().length} 字，超过平台 30 字上限`
-          : `标题 ${input.draft.title.trim().length} 字`,
-      issueCode: !input.draft.title.trim()
+        : titleTooLong
+          ? `标题 ${titleLength} 字，超过平台 ${xiaoheiheTitleLimit} 字上限`
+          : `标题 ${titleLength} 字`,
+      issueCode: !title
         ? "PREFLIGHT_TITLE_MISSING"
-        : input.draft.title.trim().length > 30
+        : titleTooLong
           ? "PREFLIGHT_TITLE_TOO_LONG"
           : undefined,
-      action: "将标题调整到 1–30 字，并保留主要新闻点。",
+      action: !title ? "填写文章标题。" : titleTooLong
+        ? `按小黑盒计数调整到 ${xiaoheiheTitleLimit} 字以内，英文、数字和半角标点按半字计。`
+        : undefined,
     },
     {
       id: "body",
