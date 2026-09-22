@@ -3,7 +3,7 @@ import * as cheerio from "cheerio";
 import { bodyHtmlWithRequiredImageAttribution } from "./article-html.js";
 import { publicationRevisionHash } from "./publication-state.js";
 import { evaluateDraftReadiness } from "./draft-readiness.js";
-import { socialPlatforms, type SocialPlatform, type SocialAccount, type SocialDeliveryReceipt } from "./social-delivery-types.js";
+import { socialPlatforms, socialTitleProblem, type SocialPlatform, type SocialAccount, type SocialDeliveryReceipt } from "./social-delivery-types.js";
 import type { ArticleDraft, WorkflowState, DraftImagePlacement } from "./types.js";
 import type { SocialBridgeMethod } from "./social-bridge.js";
 import type { WeChatImageAsset } from "./wechat-draft.js";
@@ -27,9 +27,10 @@ export const socialAccounts = (input: unknown): SocialAccount[] => {
     const account = list.find(entry => entry.id === platform.id);
     const authenticated = account?.isAuthenticated === true;
     const username = text(account?.username).trim();
-    return { id: platform.id, available: platform.enabled && Boolean(account), authenticated, username, accountId: text(account?.userId),
-      detail: !platform.enabled ? "待接入：草稿适配尚未核验，可打开平台手动发布"
-        : !account ? "当前同步助手未提供此平台" : !authenticated ? "请先在同一个 Chrome 登录"
+    const authState = !platform.enabled ? "unavailable" : authenticated ? "signed-in" : account?.isAuthenticated === false ? "signed-out" : "unknown";
+    return { id: platform.id, available: platform.enabled && Boolean(account), authenticated, authState, username, accountId: text(account?.userId),
+      detail: !platform.enabled ? "可打开编辑页；自动存稿尚未接通"
+        : authState === "unknown" ? "登录状态待检测，已登录账号无需重登" : !authenticated ? "等待在 Chrome 登录，完成后自动继续"
           : !username || !text(account?.userId) ? "助手未返回完整账号标识，暂不能投递" : `已登录 · ${username}` };
   });
 };
@@ -60,7 +61,8 @@ export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
       if (draft.updatedAt !== expectedUpdatedAt) throw new Error("草稿已变化，请保存当前正文后重新投递");
       if (draft.contentFormat === "image-post") throw new Error("新增渠道目前支持文章，请切换为文章格式");
       const title = draft.title.trim();
-      if (!title || Array.from(title).length > (platform === "baijiahao" ? 30 : 100)) throw new Error(platform === "baijiahao" ? "百家号文章标题需为 1–30 字" : "知乎文章标题需为 1–100 字");
+      const titleProblem = socialTitleProblem(platform, title);
+      if (titleProblem) throw new Error(titleProblem);
       const initialAccount = await account(platform);
       if (!expectedAccount || !expectedAccountId || initialAccount.name !== expectedAccount || initialAccount.id !== expectedAccountId) throw new Error("登录账号已变化，请刷新后核对目标账号");
       const revisionHash = socialRevisionHash(draft, platform);

@@ -1,4 +1,4 @@
-.delivery-platform-tabs { display: grid; grid-template-columns: 1fr 1fr; margin: 0 18px; border-bottom: 1px solid var(--line); }
+.delivery-platform-tabs { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); margin: 0 18px; border-bottom: 1px solid var(--line); }
 .delivery-platform-tabs > button { display: grid; gap: 6px; min-width: 0; padding: 16px 6px 13px; border: 0; border-bottom: 2px solid transparent; background: transparent; text-align: left; color: #737770; cursor: pointer; }
 .delivery-platform-tabs strong { font-size: 14px; font-weight: 650; }
 .delivery-platform-tabs span { font-size: 11px; line-height: 1.5; color: #737770; }

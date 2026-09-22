@@ -776,6 +776,11 @@ export const api = {
 };
 
 export const socialDeliveryApi = {
+  openReceipt: (id: string, receiptId: string) => request(`/api/drafts/${encodeURIComponent(id)}/social-deliveries/${encodeURIComponent(receiptId)}/open`, { method: "POST", body: "{}" }),
+  open: (platforms: string[]) => request<{ detail: string }>("/api/delivery/social/open", { method: "POST", body: JSON.stringify({ platforms }) }),
+  batches: (id: string) => request<import("../server/social-delivery-types").SocialDeliveryBatch[]>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches`),
+  start: (id: string, input: { platforms: string[]; updatedAt: string; accounts: Record<string, { account: string; accountId: string }> }) => request<import("../server/social-delivery-types").SocialDeliveryBatch & { browserError?: string }>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches`, { method: "POST", body: JSON.stringify(input) }),
+  cancel: (id: string, batchId: string) => request<import("../server/social-delivery-types").SocialDeliveryBatch>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST", body: "{}" }),
   status: () => request<import("../server/social-delivery-types").SocialDeliveryStatus>("/api/delivery/social/status"),
   settings: (input: { enabled: boolean; extensionId: string; token?: string }) => request("/api/delivery/social/settings", { method: "PATCH", body: JSON.stringify(input) }),
   receipts: (id: string) => request<{ receipts: import("../server/social-delivery-types").SocialDeliveryReceipt[]; revisions: Record<string, string> }>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`),

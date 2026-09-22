@@ -9,6 +9,7 @@ const hasDeliveryHistory = (draft: ArticleDraft) => Boolean(
   draft.status === "filled"
   || draft.status === "published"
   || draft.socialDeliveries?.length
+  || draft.socialDeliveryBatches?.length
   || draft.publisherReceipt
   || draft.wechatDraft
   || draft.publicationConfirmations?.xiaoheihe

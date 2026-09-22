@@ -194,13 +194,40 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
       await page.screenshot({ path: path.join(shots, `delivery-${width}.png`) });
     }
     assert.equal(await page.getByRole('complementary', { name: '草稿库', exact: true }).isVisible(), false);
-    await page.getByText('其他平台 · 知乎、百家号', { exact: true }).click();
+    await primaryTabs.getByRole('tab', { name: /多平台/ }).click();
     const panel = page.locator('.multi-delivery');
+    await panel.getByRole('checkbox', {name:/百家号/}).uncheck();
     await panel.getByRole('checkbox', {name:/知乎/}).check();
-    assert.equal(await panel.getByRole('checkbox', {name:/今日头条/}).isDisabled(), true);
-    await page.getByRole('button', {name:'一键投递所选 1 个平台'}).click();
-    await panel.getByRole('status').getByText(/当前同步助手未提供此平台|请先连接文章同步助手|尚未连接文章同步助手/).waitFor();
+    await panel.getByRole('checkbox', {name:/今日头条/}).check();
+    await panel.getByText(/头条会打开文章编辑页，当前不会自动填入/).waitFor();
+    assert.equal(await panel.getByRole('button', {name:'存入 1 个平台草稿箱'}).isEnabled(), true);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 1000 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await page.screenshot({ path: path.join(shots, `multi-delivery-${width}.png`) });
+    }
+    // Isolate browser launching and remote transport. Server queue behavior has unit coverage.
+    let batch: unknown;
+    await page.route('**/api/drafts/delivery-ui/social-delivery-batches', async route => {
+      if (route.request().method() === 'POST') {
+        const input = route.request().postDataJSON(); assert.deepEqual(input.platforms, ['zhihu', 'toutiao']); assert.ok(input.updatedAt);
+        batch = { id: 'wait-test', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now()+600000).toISOString(), targets: [{ platform: 'zhihu', revisionHash: 'test', status: 'waiting-connection', detail: '等待同步助手连接；网站已登录则无需重登' }, { platform: 'toutiao', revisionHash: 'test', status: 'blocked', detail: '头条自动存稿尚未接通' }] };
+        await route.fulfill({json:batch});
+      } else await route.fulfill({json:batch ? [batch] : []});
+    });
+    await page.getByRole('button', {name:'存入 1 个平台草稿箱'}).click();
+    await panel.getByRole('status').getByText(/等待同步助手连接/).waitFor();
     assert.equal((await (await fetch(`${origin}/api/drafts/delivery-ui/social-deliveries`)).json()).receipts.length, 0);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', {name:'交付草稿', exact:true}).click();
+    await primaryTabs.getByRole('tab', {name:/多平台/}).click();
+    await panel.getByRole('status').getByText(/等待同步助手连接/).waitFor();
+    await page.route('**/social-delivery-batches/wait-test/cancel', async route => {
+      batch = { id:'wait-test', createdAt:new Date().toISOString(), expiresAt:new Date().toISOString(), targets:[{platform:'zhihu',revisionHash:'test',status:'cancelled',detail:'已取消等待，未发送存稿请求'}] };
+      await route.fulfill({json:batch});
+    });
+    await panel.getByRole('button', {name:'取消等待'}).click();
+    await panel.getByRole('status').getByText(/已取消等待/).waitFor();
     await panel.getByRole('link', { name: '连接设置', exact: true }).click();
     await page.getByRole('heading', { name: '连接多平台同步助手', exact: true }).waitFor();
     assert.equal(await page.getByRole('tab', { name: '平台连接', exact: true }).getAttribute('aria-selected'), 'true');

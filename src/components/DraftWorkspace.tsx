@@ -284,7 +284,7 @@ export function DraftWorkspace({
   const [publisherStatus, setPublisherStatus] = useState(initialPublisherStatus);
   const [deliveryView, setDeliveryView] = useState<Awaited<ReturnType<typeof api.primaryDeliveryStatus>>>();
   useEffect(() => setPublisherStatus(initialPublisherStatus), [initialPublisherStatus]);
-  const [publishPlatform, setPublishPlatform] = useState<PublishPlatform>("xiaoheihe");
+  const [publishPlatform, setPublishPlatform] = useState<PublishPlatform | "social">("xiaoheihe");
   const [wechatMetadata, setWechatMetadata] = useState<WeChatDraftMetadata>(() =>
     wechatMetadataFor(selected, wechatSettings));
   const [draftSearch, setDraftSearch] = useState("");
@@ -1896,7 +1896,7 @@ export function DraftWorkspace({
               {utilityTab === "publish" ? (
                 <>
                   <div className="delivery-platform-tabs" role="tablist" aria-label="常用发布平台">
-                    {([ ["xiaoheihe", "小黑盒"], ["wechat", "微信公众号"] ] as const).map(([id, name]) => <button key={id} role="tab" aria-selected={publishPlatform === id} disabled={deliveryBusy} tabIndex={publishPlatform === id ? 0 : -1} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? "xiaoheihe" : event.key === "End" ? "wechat" : id === "wechat" ? "xiaoheihe" : "wechat"; setPublishPlatform(next); event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-platform="${next}"]`)?.focus(); }} data-platform={id} onClick={() => setPublishPlatform(id)}><strong>{name}</strong><span>{deliveryStatusLabel(id)}</span></button>)}
+                    {([ ["xiaoheihe", "小黑盒"], ["wechat", "微信公众号"], ["social", "多平台"] ] as const).map(([id, name], index, tabs) => <button key={id} role="tab" aria-selected={publishPlatform === id} disabled={deliveryBusy} tabIndex={publishPlatform === id ? 0 : -1} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = tabs[event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowLeft" ? -1 : 1) + tabs.length) % tabs.length]![0]; setPublishPlatform(next); event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-platform="${next}"]`)?.focus(); }} data-platform={id} onClick={() => setPublishPlatform(id)}><strong>{name}</strong><span>{id === "social" ? "头条 · 百家号 · 知乎" : deliveryStatusLabel(id)}</span></button>)}
                   </div>
                   {publishPlatform === "xiaoheihe" ? (
                     <>
@@ -1964,7 +1964,7 @@ export function DraftWorkspace({
                     </section>
                   ) : null}
                     </>
-                  ) : (
+                  ) : publishPlatform === "wechat" ? (
                     <WeChatDraftPanel
                       draft={editing}
                       settings={wechatSettings}
@@ -1981,8 +1981,7 @@ export function DraftWorkspace({
                       onConfirmPublished={() => confirmPublication("wechat")}
                       onOpenSettings={() => onOpenPublisherSettings("wechat")}
                     />
-                  )}
-                  <details className="delivery-other-platforms"><summary>其他平台 · 知乎、百家号</summary><MultiDeliveryPanel key={editing.id} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} save={() => save("manual")} onBusy={setDeliveryBusy} onOpenSettings={() => onOpenPublisherSettings("social")} /></details>
+                  ) : <MultiDeliveryPanel key={editing.id} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} save={() => save("manual")} onBusy={setDeliveryBusy} onOpenSettings={() => onOpenPublisherSettings("social")} />}
                 </>
               ) : null}
             </div>

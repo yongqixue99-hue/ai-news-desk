@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { appendDraftRevision } from "./draft-revisions.js";
+import { socialTargetActive } from "./social-delivery-types.js";
 import type { ArticleDraft, WorkflowState } from "./types.js";
 
 export interface DraftLibrarySelection { id: string; updatedAt: string; }
@@ -33,10 +34,14 @@ export const trashDraftsInState = (state: WorkflowState, selection: DraftLibrary
   const targets = selection.map(item => {
     const draft = byId.get(item.id);
     if (!draft || draft.updatedAt !== item.updatedAt) throw new Error("草稿列表已发生变化，请刷新后重新选择；本次没有删除任何草稿");
+    if (draft.socialDeliveryBatches?.some(batch => batch.targets.some(target => target.status === "sending"))) throw new Error("草稿正在交付，请等存稿结果返回后再删除");
     return draft;
   });
   const ids = new Set(targets.map(draft => draft.id));
   const deletedAt = new Date().toISOString();
+  for (const draft of targets) for (const batch of draft.socialDeliveryBatches ?? []) for (const target of batch.targets) {
+    if (socialTargetActive(target)) { target.status = "cancelled"; target.detail = "草稿已移入回收站，交付已取消"; }
+  }
   state.draftTrash = [...targets.map(draft => ({ draft, deletedAt })), ...(state.draftTrash ?? [])];
   state.drafts = state.drafts.filter(draft => !ids.has(draft.id));
   return { draftIds: [...ids] };

@@ -1046,6 +1046,7 @@ export interface XiaoheihePublishOptions {
 export interface ArticleDraft {
   xiaoheiheOptions?: XiaoheihePublishOptions;
   socialDeliveries?: import("./social-delivery-types.js").SocialDeliveryReceipt[];
+  socialDeliveryBatches?: import("./social-delivery-types.js").SocialDeliveryBatch[];
   sourceChangeReviews?: Array<{url: string; observedHash: string; packageHash?: string; documentHash: string; reason: string; reviewedAt: string}>;
   editorialBaseline?: DraftEditorialBaseline;
   revisionId?: string;

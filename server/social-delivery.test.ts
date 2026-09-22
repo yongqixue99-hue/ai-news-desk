@@ -31,6 +31,20 @@ const fixture = () => {
   return { desk, dependencies, calls, get state() { return state; }, set state(value: WorkflowState) { state = value; }, setSync: (fn: typeof onSync) => { onSync = fn; }, setUsername: (name: string) => { username = name; }, setQuality: (fn: typeof quality) => { quality = fn; }, send: () => desk.deliver("d", "zhihu", "作者", state.drafts[0]!.updatedAt, "uid-1") };
 };
 
+test("Baijiahao accepts the editor's 2–64 character titles without truncation", async () => {
+  for (const length of [2, 31, 64]) {
+    const f = fixture(); f.state.drafts[0]!.title = "文".repeat(length);
+    f.setSync(async () => ({ results: [{ platform: "baijiahao", success: true, draftOnly: true, postId: "456", postUrl: "https://baijiahao.baidu.com/builder/rc/edit?article_id=456" }] }));
+    const receipt = await f.desk.deliver("d", "baijiahao", "作者", f.state.drafts[0]!.updatedAt, "uid-1");
+    assert.equal(receipt.status, "reported"); assert.equal(receipt.title.length, length);
+  }
+  for (const length of [0, 1, 65]) {
+    const f = fixture(); f.state.drafts[0]!.title = "文".repeat(length);
+    await assert.rejects(f.desk.deliver("d", "baijiahao", "作者", f.state.drafts[0]!.updatedAt, "uid-1"), /2–64/);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
 test("only verified public adapters are offered, even when helper lists Toutiao", () => {
   const accounts = socialAccounts([{ id: "toutiao", isAuthenticated: true, username: "作者" }, { id: "zhihu", isAuthenticated: true, username: "作者" }]);
   assert.equal(accounts.find(item => item.id === "toutiao")?.available, false);
