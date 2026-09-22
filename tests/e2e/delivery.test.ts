@@ -137,7 +137,7 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
     assert.equal(await page.getByRole('button', { name: '填入小黑盒编辑器', exact: true }).isDisabled(), true);
     // First delivery must expose setup even though no fill receipt exists yet.
-    assert.equal(await page.getByRole('textbox', { name: '关联社区', exact: true }).isVisible(), true);
+    assert.equal(await page.getByLabel('关联社区', { exact: true }).isVisible(), true);
     await page.locator('.publishing-prep > details > summary').filter({ hasText: '发送形式' }).click();
     assert.equal(await page.getByRole('group', { name: '小黑盒发送形式' }).isVisible(), true);
     assert.equal(await page.getByRole('heading', { name: '发送前检查', exact: true }).isVisible(), true);
