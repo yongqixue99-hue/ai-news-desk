@@ -407,7 +407,9 @@ test("production routes, strategy controls, completion, draft resumption and mob
     const articleBeforeGallery = await prose.innerHTML();
     await page.getByRole("navigation", { name: "草稿辅助工具" }).getByRole("button", { name: "交付", exact: true }).click();
     await page.getByRole("tablist", { name: "常用发布平台" }).getByRole("tab", { name: /小黑盒/u }).click();
-    await page.locator("summary").filter({ hasText: /^发送形式/u }).click();
+    await page.locator(".publishing-prep > details > summary").filter({ hasText: "发送形式" }).click({ timeout: 10_000 }).catch(async error => {
+      throw new Error(`${error.message}\nPage errors: ${JSON.stringify(pageErrors)}\nVisible page: ${(await page.locator("body").innerText()).slice(-6000)}`);
+    });
     await page.getByRole("group", { name: "小黑盒发送形式" }).getByRole("button", { name: /图文/u }).click();
     await page.getByRole("button", { name: "加入图集：测试图片 a", exact: true }).click();
     await page.getByRole("button", { name: "加入图集：测试图片 b", exact: true }).click();
