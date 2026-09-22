@@ -201,3 +201,46 @@
 @media (max-width: 380px) {
   .draft-management-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Library controls stay beside the documents they affect. */
+.draft-library-selection-bar { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 6px 10px; font-size: 11px; color: var(--muted); }
+.draft-library-selection-bar label { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.draft-library-selection-bar button { border: 0; background: transparent; color: var(--accent-deep); cursor: pointer; padding: 4px 0; }
+.draft-library-row { position: relative; min-width: 0; flex-shrink: 0; display: flex; align-items: flex-start; }
+.draft-library-row.is-selecting { gap: 4px; }
+.draft-library-row > input { margin: 15px 0 0 4px; flex: 0 0 auto; accent-color: var(--accent); }
+.draft-page-refined .draft-library-row > .draft-list-item { flex: 1; width: 0; min-width: 0; }
+.draft-library-selection-bar input { accent-color: var(--accent); }
+.draft-management-selection { max-height: 240px; overflow-y: auto; padding-left: 22px; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.draft-trash-tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 15px 0 4px; }
+.draft-trash-tools input { flex: 1; min-width: 140px; border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; font-size: 12px; }
+.draft-trash-tools button { font-size: 12px; }
+.draft-page-refined .drawer-empty > button { display: block; margin: 10px auto; }
+.draft-pane-meta { display: flex; align-items: center; gap: 16px; }
+.draft-pane-meta > span { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.draft-focus-toggle { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: #6d7068; padding: 7px 0; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.draft-focus-toggle:hover, .draft-focus-toggle[aria-pressed=true] { color: var(--accent-deep); }
+.draft-page-refined .utility-drawer-scroll > .settings-tabs { position: sticky; top: 0; z-index: 1; margin: 0; padding: 0 16px; gap: 16px; background: #fff; }
+.draft-page-refined .utility-drawer-scroll > .settings-tabs button { font-size: 12px; padding-block: 12px; }
+.draft-page-refined .utility-section[hidden] { display: none; }
+/* Focus is temporary and never rewrites the user's navigation preferences. */
+.app-shell:has(.draft-focus-mode) { grid-template-columns: minmax(0, 1fr); }
+.app-shell:has(.draft-focus-mode) .main-sidebar, .app-shell:has(.draft-focus-mode) .mobile-notification-button { display: none; }
+.app-shell:has(.draft-focus-mode) .app-main { grid-column: 1; padding-bottom: 0; }
+.draft-page-refined.draft-focus-mode { height: 100dvh; }
+.draft-focus-mode .draft-management-bar, .draft-focus-mode .draft-management-notice:not(.error), .draft-focus-mode .draft-library-trigger, .draft-focus-mode .draft-utility-rail { display: none; }
+.draft-page-refined.draft-focus-mode .draft-topbar-v2 { grid-template-columns: minmax(0, 1fr) auto; padding-inline: 24px; }
+.draft-page-refined.draft-focus-mode .draft-stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.draft-focus-mode .draft-document-area { grid-column: 1; }
+@media (max-width: 720px) {
+  .draft-pane-meta > span { display: none; }
+  .draft-page-refined.draft-focus-mode .draft-topbar-v2 { min-height: 58px; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto; padding: 8px 12px; }
+  .draft-focus-mode .draft-document-heading { grid-column: 1; grid-row: 1; padding-right: 0; }
+  .draft-focus-mode .draft-header-controls { grid-column: 2; grid-row: 1; }
+  .draft-focus-mode .draft-header-controls > .secondary-button, .draft-focus-mode .draft-header-controls > .draft-delivery-trigger { display: none; }
+  .draft-focus-mode .draft-lifecycle-control { display: none; }
+}
+@media (max-width: 480px) {
+  .draft-page-refined.mode-preview .preview-pane .draft-pane-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; height: auto; }
+  .draft-page-refined.mode-preview .preview-pane .draft-theme-control { grid-column: 1 / -1; justify-self: end; margin-bottom: 5px; }
+}

@@ -4,6 +4,7 @@ import type { ArticleDraft, WorkflowState } from "./types.js";
 
 export interface DraftLibrarySelection { id: string; updatedAt: string; }
 export interface TrashedDraftSummary extends DraftLibrarySelection { title: string; deletedAt: string; }
+export type DraftTrashSelection = Pick<TrashedDraftSummary, "id" | "updatedAt" | "deletedAt">;
 
 /** DraftDesk's manual entry point: no generated text or fabricated evidence package. */
 export const createBlankDraftInState = (state: WorkflowState): ArticleDraft => {
@@ -56,3 +57,17 @@ export const draftTrashSummaries = (state: WorkflowState): TrashedDraftSummary[]
   (state.draftTrash ?? []).map(({ draft, deletedAt }) => ({
     id: draft.id, title: draft.title, updatedAt: draft.updatedAt, deletedAt,
   }));
+
+export const restoreTrashedDraftsInState = (state: WorkflowState, selection: DraftTrashSelection[]): ArticleDraft[] => {
+  if (!Array.isArray(selection) || !selection.length
+    || selection.some(item => !item || typeof item.id !== "string" || typeof item.updatedAt !== "string" || typeof item.deletedAt !== "string")
+    || new Set(selection.map(item => item.id)).size !== selection.length) throw new Error("请选择要恢复的草稿");
+  const byId = new Map((state.draftTrash ?? []).map(item => [item.draft.id, item]));
+  for (const item of selection) {
+    const entry = byId.get(item.id);
+    if (!entry || entry.deletedAt !== item.deletedAt || entry.draft.updatedAt !== item.updatedAt || state.drafts.some(draft => draft.id === item.id)) {
+      throw new Error("回收站已发生变化，请重新打开后选择；本次没有恢复任何草稿");
+    }
+  }
+  return selection.map(item => restoreDraftFromTrashInState(state, item.id));
+};

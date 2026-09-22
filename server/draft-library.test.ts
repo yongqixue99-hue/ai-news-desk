@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createDefaultState, upgradeState } from "./defaults.js";
-import { createBlankDraftInState, trashDraftsInState, restoreDraftFromTrashInState } from "./draft-library.js";
+import { createBlankDraftInState, trashDraftsInState, restoreDraftFromTrashInState, restoreTrashedDraftsInState, draftTrashSummaries } from "./draft-library.js";
 import { normalizeDraftCatalog } from "./draft-catalog.js";
 import { LocalDatabase } from "./local-database.js";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -82,4 +82,19 @@ test("trash is persisted in SQLite and survives reopening the workspace", async 
     assert.deepEqual(reloaded.draftTrash?.[0]?.draft, JSON.parse(JSON.stringify(draft)));
     assert.equal(restoreDraftFromTrashInState(reloaded, draft.id).id, draft.id);
   } finally { await rm(workflowRoot, { recursive: true, force: true }); }
+});
+
+test("bulk restore validates the displayed trash snapshot atomically and preserves later deletions", () => {
+  const state = createDefaultState();
+  const first = createBlankDraftInState(state), second = createBlankDraftInState(state);
+  trashDraftsInState(state, state.drafts.map(({ id, updatedAt }) => ({ id, updatedAt })));
+  const selection = draftTrashSummaries(state);
+  const later = createBlankDraftInState(state);
+  trashDraftsInState(state, [{ id: later.id, updatedAt: later.updatedAt }]);
+  assert.throws(() => restoreTrashedDraftsInState(state, [selection[0], { ...selection[1], deletedAt: "stale" }]), /变化/);
+  assert.equal(state.drafts.length, 0);
+  const restored = restoreTrashedDraftsInState(state, selection);
+  assert.deepEqual(new Set(restored.map(d => d.id)), new Set([first.id, second.id]));
+  assert.deepEqual(state.draftTrash?.map(item => item.draft.id), [later.id]);
+  assert.throws(() => restoreTrashedDraftsInState(state, selection), /变化/);
 });

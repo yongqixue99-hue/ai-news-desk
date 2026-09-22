@@ -1,6 +1,8 @@
 import { MultiDeliveryPanel } from "./MultiDeliveryPanel";
 import { DraftLibraryActions } from "./DraftLibraryActions";
-import type { DraftLibrarySelection } from "../../server/draft-library.js";
+import { SettingsTabs } from "./SettingsTabs";
+import { filterDraftLibrary, type DraftFilter, type DraftSort } from "../draft-library-view";
+import type { DraftLibrarySelection, DraftTrashSelection } from "../../server/draft-library.js";
 import { socialPlatforms } from "../../server/social-delivery-types";
 import { EditObservationForm } from "./EditObservationForm";
 import { DraftQualityPanel } from "./DraftQualityPanel";
@@ -21,6 +23,8 @@ import {
   ExternalLink,
   FileText,
   FolderOpen,
+  Maximize2,
+  Minimize2,
   History,
   ImagePlus,
   Images,
@@ -111,6 +115,7 @@ interface DraftWorkspaceProps {
   onCreateDraft: () => Promise<void>;
   onTrashDrafts: (selection: DraftLibrarySelection[]) => Promise<void>;
   onRestoreTrashedDraft: (draftId: string) => Promise<void>;
+  onRestoreTrashedDrafts: (selection: DraftTrashSelection[]) => Promise<void>;
   onSave: (draftId: string, patch: Partial<ArticleDraft>, saveMode: DraftSaveMode) => Promise<ArticleDraft>;
   onCompleteInline?: (
     draftId: string,
@@ -251,6 +256,7 @@ export function DraftWorkspace({
   onCreateDraft,
   onTrashDrafts,
   onRestoreTrashedDraft,
+  onRestoreTrashedDrafts,
   onSave,
   onCompleteInline,
   onLoadRevisions,
@@ -275,8 +281,7 @@ export function DraftWorkspace({
   const managementLock = useRef(false);
   const currentDrafts = drafts.filter((draft) => draft.status !== "shelved");
   const shelvedDraftCount = drafts.length - currentDrafts.length;
-  const visibleDrafts = showShelvedDrafts ? drafts : currentDrafts;
-  const selected = visibleDrafts.find((draft) => draft.id === activeDraftId) ?? currentDrafts[0] ?? drafts[0];
+  const selected = drafts.find((draft) => draft.id === activeDraftId) ?? currentDrafts[0] ?? drafts[0];
   const [editing, setEditing] = useState<ArticleDraft | undefined>(() => editableDraft(selected));
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
   const [compactLayout, setCompactLayout] = useState(isCompactViewport);
@@ -286,7 +291,14 @@ export function DraftWorkspace({
   const [wechatMetadata, setWechatMetadata] = useState<WeChatDraftMetadata>(() =>
     wechatMetadataFor(selected, wechatSettings));
   const [draftSearch, setDraftSearch] = useState("");
-  const [draftFilter, setDraftFilter] = useState("all");
+  const [draftFilter, setDraftFilter] = useState<DraftFilter>("all");
+  const [draftSort, setDraftSort] = useState<DraftSort>("updated");
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedDraftIds, setSelectedDraftIds] = useState<string[]>([]);
+  const [focusMode, setFocusMode] = useState(false);
+  const [imageTab, setImageTab] = useState<"draft" | "materials" | "add">("draft");
+
+  useEffect(() => { setSelectedDraftIds([]); }, [draftSearch, draftFilter, showShelvedDrafts]);
   const [topicInput, setTopicInput] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [imageCaption, setImageCaption] = useState("");
@@ -354,6 +366,8 @@ export function DraftWorkspace({
     editingRef.current = next;
     persistedUpdatedAt.current = selected?.updatedAt;
     setOptimizationUndo(undefined);
+    setImageTab("draft");
+    if (selected?.status === "shelved") setShowShelvedDrafts(true);
     setEditing(next);
     setWechatMetadata(wechatMetadataFor(next, wechatSettings));
     setFillResult(selected?.fillResult);
@@ -434,16 +448,11 @@ export function DraftWorkspace({
     ? `${editing.title}${textFromHtml(editing.bodyHtml || "")}`.replace(/\s/g, "").length
     : 0;
 
-  const filteredDrafts = useMemo(() => {
-    const query = draftSearch.trim().toLowerCase();
-    return visibleDrafts.filter((draft) => {
-      const matchesStatus = draftFilter === "all"
-        || (draftFilter === "working" && ["editing", "reviewing", "needs-images"].includes(draft.status))
-        || (draftFilter === "ready" && draft.status === "ready")
-        || (draftFilter === "delivered" && ["filled", "published"].includes(draft.status));
-      return matchesStatus && `${draft.title} ${draft.sources.map((source) => source.label).join(" ")}`.toLowerCase().includes(query);
-    }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }, [draftSearch, draftFilter, visibleDrafts]);
+  const searchableDrafts = useMemo(() => drafts.map(draft => ({ draft, bodyText: textFromHtml(bodyHtmlFor(draft)) })), [drafts]);
+  const filteredDrafts = useMemo(() => filterDraftLibrary(searchableDrafts, {
+    query: draftSearch, status: draftFilter, sort: draftSort, includeShelved: showShelvedDrafts,
+  }), [searchableDrafts, draftSearch, draftFilter, draftSort, showShelvedDrafts]);
+  const selectedLibraryDrafts = filteredDrafts.filter(draft => selectedDraftIds.includes(draft.id));
 
   const save = useCallback(async (mode: DraftSaveMode = "manual") => {
     if (activeSaveRef.current) {
@@ -608,14 +617,15 @@ export function DraftWorkspace({
         event.preventDefault();
         void save("manual").catch(() => undefined);
       }
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.isComposing) {
+        if (focusMode) { setFocusMode(false); return; }
         setDraftLibraryOpen(false);
         setUtilityTab(null);
       }
     };
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [save]);
+  }, [save, focusMode]);
 
   const manageDrafts = async (action: (saved?: ArticleDraft) => Promise<void>) => {
     if (managementLock.current) return;
@@ -633,20 +643,30 @@ export function DraftWorkspace({
   };
   const libraryActions = <DraftLibraryActions
     drafts={drafts}
+    selectedDrafts={batchMode ? selectedLibraryDrafts : undefined}
     current={editing ? { ...editing, updatedAt: persistedUpdatedAt.current ?? editing.updatedAt } : undefined}
     disabled={busy || managementBusy || Boolean(agentBusy) || imageBusy || deliveryBusy || confirmingDraft || confirmingPublication || Boolean(restoringRevisionId)}
     onCreate={() => manageDrafts(async () => {
       await onCreateDraft();
+      setBatchMode(false); setSelectedDraftIds([]);
       setShowShelvedDrafts(false); setDraftSearch(""); setDraftFilter("all"); setViewMode("edit"); setUtilityTab(null);
       if (window.matchMedia("(max-width: 1279px)").matches) setDraftLibraryOpen(false);
     })}
     onTrash={(selection) => manageDrafts(async saved => {
       await onTrashDrafts(selection.map(item => editingRef.current?.id === item.id ? { id: item.id, updatedAt: saved?.updatedAt ?? persistedUpdatedAt.current ?? item.updatedAt } : item));
       selection.forEach(item => clearDraftRecoverySnapshot(window.localStorage, item.id));
+      setSelectedDraftIds([]); setBatchMode(false);
       setUtilityTab(null);
+    })}
+    onRestoreMany={(selection) => manageDrafts(async () => {
+      await onRestoreTrashedDrafts(selection);
+      selection.forEach(item => clearDraftRecoverySnapshot(window.localStorage, item.id));
+      setSelectedDraftIds([]); setBatchMode(false); setShowShelvedDrafts(true); setDraftSearch(""); setDraftFilter("all"); setViewMode("edit"); setUtilityTab(null);
+      if (window.matchMedia("(max-width: 1279px)").matches) setDraftLibraryOpen(false);
     })}
     onRestore={(id) => manageDrafts(async () => {
       await onRestoreTrashedDraft(id);
+      setBatchMode(false); setSelectedDraftIds([]);
       clearDraftRecoverySnapshot(window.localStorage, id);
       setShowShelvedDrafts(true); setDraftSearch(""); setDraftFilter("all"); setViewMode("edit"); setUtilityTab(null);
       if (window.matchMedia("(max-width: 1279px)").matches) setDraftLibraryOpen(false);
@@ -1331,6 +1351,7 @@ export function DraftWorkspace({
   const confirmedContent = editing.editorialBaseline?.confirmed;
   const confirmationCurrent = confirmedContent && draftDocumentKey(editing) === draftDocumentKey({ ...confirmedContent.snapshot, provenance: editing.provenance });
 
+  const focusButton = <button className="draft-focus-toggle" aria-pressed={focusMode} title={focusMode ? "退出专注写作（Esc）" : "收起两侧面板，专心写作"} onClick={() => setFocusMode(value => !value)}>{focusMode ? <Minimize2 size={13} /> : <Maximize2 size={13} />}{focusMode ? "退出专注" : "专注写作"}</button>;
   const editorPane = (
     <section key={editing.id} data-testid="draft-editor" className="draft-pane editor-pane" aria-label="正文编辑区">
       <div className="draft-pane-heading">
@@ -1339,7 +1360,7 @@ export function DraftWorkspace({
           <button className={viewMode === "split" ? "active" : ""} aria-pressed={viewMode === "split"} onClick={() => chooseViewMode("split")}><Columns2 size={14} />对照</button>
           <button aria-pressed={false} onClick={() => chooseViewMode("preview")}>预览</button>
         </div>
-        <span>{articleCharCount.toLocaleString()} 字 · {insertedMediaIds.size} 张图</span>
+        <div className="draft-pane-meta"><span>{articleCharCount.toLocaleString()} 字 · {insertedMediaIds.size} 张图</span>{focusButton}</div>
       </div>
       <RichArticleEditor
         key={`${editing.id}-editor`}
@@ -1371,6 +1392,7 @@ export function DraftWorkspace({
           <button aria-pressed={false} onClick={() => chooseViewMode("split")}><Columns2 size={14} />对照</button>
           <button className="active" aria-pressed={true} onClick={() => chooseViewMode("preview")}>预览</button>
         </div> : <strong>内容预览</strong>}
+        {viewMode === "preview" ? focusButton : null}
         <label className="draft-theme-control" title="预览排版主题">
           <Palette size={14} />
           <select aria-label="排版主题" value={editing.layoutTheme ?? "news-clean"} onChange={(event) => updateEditing({ layoutTheme: event.target.value as DraftLayoutTheme })}>
@@ -1392,7 +1414,7 @@ export function DraftWorkspace({
   );
 
   return (
-    <div className={`page draft-page draft-page-v2 draft-page-refined mode-${viewMode}`}>
+    <div className={`page draft-page draft-page-v2 draft-page-refined mode-${viewMode} ${focusMode ? "draft-focus-mode" : ""}`}>
       <header className="draft-topbar-v2" inert={managementBusy}>
         <button
           className={draftLibraryOpen ? "draft-library-trigger active" : "draft-library-trigger"}
@@ -1435,7 +1457,7 @@ export function DraftWorkspace({
           <button className="draft-quick-save" aria-label="保存草稿" title="保存草稿并创建版本（⌘/Ctrl+S）" onClick={() => void save("manual").catch(() => undefined)} disabled={saving}>
             {saving ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}
           </button>
-          <button className="primary-button draft-delivery-trigger" aria-expanded={utilityTab === "publish"} onClick={() => setUtilityTab((tab) => tab === "publish" ? null : "publish")}><Send size={14} />交付草稿</button>
+          <button className="primary-button draft-delivery-trigger" aria-expanded={utilityTab === "publish"} onClick={() => { setFocusMode(false); setUtilityTab((tab) => tab === "publish" ? null : "publish"); }}><Send size={14} />交付草稿</button>
         </div>
       </header>
 
@@ -1491,7 +1513,7 @@ export function DraftWorkspace({
       ) : null}
 
       <div inert={managementBusy} className={`draft-stage ${draftLibraryOpen ? "library-open" : ""} ${utilityTab ? "utility-open" : ""}`}>
-        {draftLibraryOpen ? (
+        {draftLibraryOpen && !focusMode ? (
           <aside id="draft-library" className="draft-library-drawer" aria-label="草稿库">
             <div className="drawer-title-row">
               <div><strong>草稿库</strong><span>{currentDrafts.length} 篇当前草稿</span></div>
@@ -1499,18 +1521,26 @@ export function DraftWorkspace({
             </div>
             <label className="draft-search-field">
               <Search size={15} />
-              <input value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} aria-label="搜索草稿" placeholder="搜索标题或来源" />
+              <input value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} aria-label="搜索草稿" placeholder="搜索标题、正文或来源" />
             </label>
             <div className="draft-library-filter">
-              <select aria-label="筛选草稿" value={draftFilter} onChange={(event) => setDraftFilter(event.target.value)}>
+              <select aria-label="筛选草稿" value={draftFilter} onChange={(event) => setDraftFilter(event.target.value as DraftFilter)}>
                 <option value="all">全部状态</option><option value="working">待处理</option><option value="ready">待交付</option><option value="delivered">已交付／发布</option>
               </select>
-              <span>{filteredDrafts.length} 篇 · 最近修改</span>
+              <select aria-label="草稿排序" value={draftSort} onChange={event => setDraftSort(event.target.value as DraftSort)}>
+                <option value="updated">最近修改</option><option value="created">最近创建</option><option value="title">标题顺序</option>
+              </select>
+            </div>
+            <div className="draft-library-selection-bar">
+              {batchMode ? <label><input type="checkbox" aria-label="全选当前结果" checked={filteredDrafts.length > 0 && selectedLibraryDrafts.length === filteredDrafts.length} onChange={event => setSelectedDraftIds(event.target.checked ? filteredDrafts.map(draft => draft.id) : [])} />全选结果</label> : <span>{filteredDrafts.length} 篇草稿</span>}
+              {batchMode ? <span>已选 {selectedLibraryDrafts.length} 篇</span> : null}
+              <button onClick={() => { setBatchMode(value => !value); setSelectedDraftIds([]); }}>{batchMode ? "取消多选" : "多选"}</button>
             </div>
             <div className="draft-list">
               {filteredDrafts.map((draft) => (
+                <div className={`draft-library-row ${batchMode ? "is-selecting" : ""}`} key={draft.id}>
+                {batchMode ? <input type="checkbox" aria-label={`选择草稿 ${draft.title || "未命名草稿"}`} checked={selectedDraftIds.includes(draft.id)} onChange={event => setSelectedDraftIds(ids => event.target.checked ? [...ids, draft.id] : ids.filter(id => id !== draft.id))} /> : null}
                 <button
-                  key={draft.id}
                   className={draft.id === editing.id ? "draft-list-item active" : "draft-list-item"}
                   disabled={Boolean(switchingDraftId)}
                   aria-current={draft.id === editing.id ? "true" : undefined}
@@ -1519,9 +1549,9 @@ export function DraftWorkspace({
                   <span className="draft-list-meta"><span className="draft-source">{draft.sources[0]?.label ?? (draft.provenance.generatedBy === "human" ? "手写草稿" : "AI 新闻")}</span><time dateTime={draft.updatedAt}>{formatSaved(draft.updatedAt)}</time></span>
                   <strong>{draft.title || "未命名草稿"}</strong>
                   <span className="draft-list-footer"><span className={`draft-status ${draft.status}`}>{draftStatusLabel[draft.status]}</span>{draft.draftStrategy ? <span>{strategyLabels[draft.draftStrategy]}</span> : null}</span>
-                </button>
+                </button></div>
               ))}
-              {!filteredDrafts.length ? <p className="drawer-empty">没有匹配的草稿</p> : null}
+              {!filteredDrafts.length ? <div className="drawer-empty">没有匹配的草稿<button className="text-button" onClick={() => { setDraftSearch(""); setDraftFilter("all"); }}>清除筛选</button></div> : null}
             </div>
             {shelvedDraftCount ? (
               <button className="draft-history-toggle" aria-pressed={showShelvedDrafts} onClick={() => { setShowShelvedDrafts((value) => !value); setDraftFilter("all"); }}>
@@ -1560,7 +1590,7 @@ export function DraftWorkspace({
           })}
         </nav>
 
-        {utilityTab ? (
+        {utilityTab && !focusMode ? (
           <aside id="draft-utility-panel" className="draft-utility-drawer" role="tabpanel" aria-label={`${utilityTabs.find((tab) => tab.id === utilityTab)?.label}面板`}>
             <div className="drawer-title-row utility-drawer-title">
               <div><strong>{utilityHeading.title}</strong><span>{utilityHeading.subtitle}</span></div>
@@ -1737,50 +1767,8 @@ export function DraftWorkspace({
 
               {utilityTab === "images" ? (
                 <>
-                  <section className="utility-section image-import-section">
-                    <div className="inspector-heading"><h3>添加图片</h3><span>{insertedMediaIds.size}/{editing.images.length} 已用</span></div>
-                    <button className="utility-upload-button" onClick={() => drawerFileInput.current?.click()} disabled={imageBusy}><ImagePlus size={16} />上传本地图片</button>
-                    <input
-                      ref={drawerFileInput}
-                      hidden
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif"
-                      onChange={async (event) => {
-                        const file = event.target.files?.[0];
-                        if (!file) return;
-                        setImageBusy(true);
-                        setImageError("");
-                        try { await uploadImage(file); }
-                        catch (error) { setImageError(error instanceof Error ? error.message : String(error)); }
-                        finally { setImageBusy(false); event.target.value = ""; }
-                      }}
-                    />
-                    <div className="image-url-fields drawer-image-url-fields">
-                      <input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="图片 URL" />
-                      <input value={imageCaption} onChange={(event) => setImageCaption(event.target.value)} placeholder="图片说明（可选）" />
-                      <button onClick={() => void importDrawerImage()} disabled={!imageUrl.trim() || imageBusy}>{imageBusy ? "正在处理…" : "下载到配图库"}</button>
-                    </div>
-                    {imageError ? <p className="image-upload-error">{imageError}</p> : null}
-                  </section>
-                  <section className="utility-section draft-material-library">
-                    <div className="inspector-heading"><h3>通用素材库</h3><span>{materials.length} 张</span></div>
-                    <label className="draft-material-search"><Search size={13} /><input value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="搜人物、公司或标签" /></label>
-                    <p className="image-library-hint">先把光标放到正文，再点素材；系统会复制一份到当前草稿。</p>
-                    <div className="inspector-image-grid material-inspector-grid">
-                      {materials.filter((material) => {
-                        const query = materialSearch.trim().toLowerCase();
-                        return !query || `${material.title} ${material.attribution} ${material.tags.join(" ")} ${material.entityTags.join(" ")}`.toLowerCase().includes(query);
-                      }).map((material) => (
-                        <button key={material.id} className="inspector-image material-inspector-item" disabled={Boolean(materialBusyId)} title={`插入到当前光标 · ${material.attribution}`} onClick={() => void addMaterial(material)}>
-                          <img src={material.publicPath} alt={material.title} />
-                          <span>{material.title}</span>
-                          <small>{materialBusyId === material.id ? "正在复制…" : material.rights === "check-required" ? "插入 · 权限待确认" : "一键插入"}</small>
-                        </button>
-                      ))}
-                      {!materials.length ? <p className="empty-inspector">素材库还是空的。请先到“AI 设置 → 图片素材库”加入常用图片。</p> : null}
-                    </div>
-                  </section>
-                  <section className="utility-section">
+                  <SettingsTabs id="draft-images" label="配图分类" value={imageTab} onChange={setImageTab} tabs={[{ id: "draft", label: `本稿配图 ${editing.images.length}` }, { id: "materials", label: "通用素材" }, { id: "add", label: "添加图片" }]} />
+                  <section role="tabpanel" id="draft-images-panel-draft" aria-labelledby="draft-images-tab-draft" hidden={imageTab !== "draft"} className="utility-section">
                     <div className="inspector-heading"><h3>本稿配图库</h3><span>{editing.images.length} 张</span></div>
                     <p className="image-library-hint">先把光标放到正文，再点图片插入；同一张图可重复使用。</p>
                     <div className="inspector-image-grid">
@@ -1807,6 +1795,49 @@ export function DraftWorkspace({
                         </article>
                       )) : <p className="empty-inspector">暂时没有来源图。可上传、粘贴截图，或填写图片 URL。</p>}
                     </div>
+                  </section>
+                  <section role="tabpanel" id="draft-images-panel-materials" aria-labelledby="draft-images-tab-materials" hidden={imageTab !== "materials"} className="utility-section draft-material-library">
+                    <div className="inspector-heading"><h3>通用素材库</h3><span>{materials.length} 张</span></div>
+                    <label className="draft-material-search"><Search size={13} /><input value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="搜人物、公司或标签" /></label>
+                    <p className="image-library-hint">先把光标放到正文，再点素材；系统会复制一份到当前草稿。</p>
+                    <div className="inspector-image-grid material-inspector-grid">
+                      {materials.filter((material) => {
+                        const query = materialSearch.trim().toLowerCase();
+                        return !query || `${material.title} ${material.attribution} ${material.tags.join(" ")} ${material.entityTags.join(" ")}`.toLowerCase().includes(query);
+                      }).map((material) => (
+                        <button key={material.id} className="inspector-image material-inspector-item" disabled={Boolean(materialBusyId)} title={`插入到当前光标 · ${material.attribution}`} onClick={() => void addMaterial(material)}>
+                          <img src={material.publicPath} alt={material.title} />
+                          <span>{material.title}</span>
+                          <small>{materialBusyId === material.id ? "正在复制…" : material.rights === "check-required" ? "插入 · 权限待确认" : "一键插入"}</small>
+                        </button>
+                      ))}
+                      {!materials.length ? <p className="empty-inspector">素材库还是空的。请先到“AI 设置 → 图片素材库”加入常用图片。</p> : null}
+                    </div>
+                  </section>
+                  <section role="tabpanel" id="draft-images-panel-add" aria-labelledby="draft-images-tab-add" hidden={imageTab !== "add"} className="utility-section image-import-section">
+                    <div className="inspector-heading"><h3>添加图片</h3><span>{insertedMediaIds.size}/{editing.images.length} 已用</span></div>
+                    <button className="utility-upload-button" onClick={() => drawerFileInput.current?.click()} disabled={imageBusy}><ImagePlus size={16} />上传本地图片</button>
+                    <input
+                      ref={drawerFileInput}
+                      hidden
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        setImageBusy(true);
+                        setImageError("");
+                        try { await uploadImage(file); }
+                        catch (error) { setImageError(error instanceof Error ? error.message : String(error)); }
+                        finally { setImageBusy(false); event.target.value = ""; }
+                      }}
+                    />
+                    <div className="image-url-fields drawer-image-url-fields">
+                      <input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="图片 URL" />
+                      <input value={imageCaption} onChange={(event) => setImageCaption(event.target.value)} placeholder="图片说明（可选）" />
+                      <button onClick={() => void importDrawerImage()} disabled={!imageUrl.trim() || imageBusy}>{imageBusy ? "正在处理…" : "下载到配图库"}</button>
+                    </div>
+                    {imageError ? <p className="image-upload-error">{imageError}</p> : null}
                   </section>
                 </>
               ) : null}

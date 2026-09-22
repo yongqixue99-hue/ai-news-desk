@@ -11,6 +11,7 @@ import { PageBoundary } from "./components/PageBoundary";
 import { TodayPage } from "./components/TodayPage";
 import { api, type MaterialMetadataInput, type ShellView } from "./api";
 import { resolveBootstrap, type BootstrapState } from "./bootstrap-state";
+import { readLastDraft, rememberLastDraft, resolveDraftId } from "./draft-library-view";
 import { useHashPageNavigation } from "./hooks/useHashPageNavigation";
 import type {
   ArticleDraft,
@@ -64,7 +65,7 @@ function App() {
   useEffect(() => { if (page !== "schedule") setSchedulePlatform(undefined); }, [page]);
   const [homeStoryId, setHomeStoryId] = useState<string>();
   const [activeRunId, setActiveRunId] = useState<string>();
-  const [activeDraftId, setActiveDraftId] = useState<string>();
+  const [activeDraftId, setActiveDraftId] = useState<string | undefined>(() => readLastDraft(() => window.localStorage));
   const [notice, setNotice] = useState<NoticeState>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [health, setHealth] = useState<HealthState>();
@@ -86,9 +87,13 @@ function App() {
       activeRunCount: next.runs.filter((run) => ["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status)).length,
     });
     setActiveRunId((current) => chooseWorkbenchRun(next.runs, current)?.id);
-    setActiveDraftId((current) => current ?? next.drafts[0]?.id);
+    setActiveDraftId((current) => resolveDraftId(next.drafts, current));
     return next;
   }, []);
+
+  useEffect(() => {
+    if (state) rememberLastDraft(() => window.localStorage, resolveDraftId(state.drafts, activeDraftId));
+  }, [activeDraftId, state?.drafts]);
 
   const refreshShell = useCallback(async () => {
     try {
@@ -1412,6 +1417,12 @@ function App() {
               const draft = await api.restoreTrashedDraft(id);
               setState(current => current ? { ...current, drafts: [draft, ...current.drafts.filter(item => item.id !== id)] } : current);
               setActiveDraftId(draft.id);
+            }}
+            onRestoreTrashedDrafts={async selection => {
+              const restored = await api.restoreTrashedDrafts(selection);
+              const ids = new Set(restored.map(draft => draft.id));
+              setState(current => current ? { ...current, drafts: [...restored, ...current.drafts.filter(item => !ids.has(item.id))] } : current);
+              setActiveDraftId(restored[0]?.id);
             }}
             onSave={saveDraft}
             onCompleteInline={state.aiSettings.completionProviderId

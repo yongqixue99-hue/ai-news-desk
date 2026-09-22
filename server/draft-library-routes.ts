@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { createBlankDraftInState, draftTrashSummaries, restoreDraftFromTrashInState, trashDraftsInState } from "./draft-library.js";
+import { createBlankDraftInState, draftTrashSummaries, restoreDraftFromTrashInState, restoreTrashedDraftsInState, trashDraftsInState } from "./draft-library.js";
 import { readState, updateState } from "./storage.js";
 
 export const registerDraftLibraryRoutes = (app: Express) => {
@@ -19,6 +19,13 @@ export const registerDraftLibraryRoutes = (app: Express) => {
   app.post("/api/draft-trash/:draftId/restore", async (request, response) => {
     try {
       response.json(await updateState(state => restoreDraftFromTrashInState(state, String(request.params.draftId))));
+    } catch (error) {
+      response.status(409).json({ error: error instanceof Error ? error.message : "恢复失败，请重试" });
+    }
+  });
+  app.post("/api/draft-trash/restore", async (request, response) => {
+    try {
+      response.json(await updateState(state => restoreTrashedDraftsInState(state, request.body?.drafts)));
     } catch (error) {
       response.status(409).json({ error: error instanceof Error ? error.message : "恢复失败，请重试" });
     }

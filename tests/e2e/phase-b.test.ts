@@ -233,6 +233,57 @@ test("stage B editor saves, confirms, expires proposals and recovers without liv
     await page.getByRole("button", { name: "恢复 手写新草稿", exact: true }).click();
     await editor.waitFor();
     await page.screenshot({ path: path.join(artifacts, "library-restored-mobile.png"), fullPage: true });
+    // Focus mode works on a narrow screen and restores the regular management controls.
+    await page.getByRole("button", { name: "专注写作", exact: true }).click();
+    assert.equal(await page.getByRole("group", { name: "草稿管理" }).isVisible(), false);
+    assert.equal(await page.locator(".main-sidebar").isVisible(), false);
+    assert.equal(await page.getByRole("button", { name: "退出专注", exact: true }).isVisible(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: path.join(artifacts, "focus-mobile.png"), fullPage: true });
+    await page.keyboard.press("Escape");
+    assert.equal(await page.getByRole("group", { name: "草稿管理" }).isVisible(), true);
+    // The article's own images are first; changing image tabs preserves an unfinished URL.
+    await tools.getByRole("button", { name: "图片", exact: true }).click();
+    assert.equal(await page.getByRole("tab", { name: /^本稿配图/u }).getAttribute("aria-selected"), "true");
+    assert.equal(await page.getByRole("heading", { name: "通用素材库", exact: true }).isVisible(), false);
+    await page.getByRole("tab", { name: "添加图片", exact: true }).click();
+    await page.getByPlaceholder("图片 URL", { exact: true }).fill("https://example.com/unfinished.png");
+    await page.getByRole("tab", { name: "通用素材", exact: true }).click();
+    await page.getByRole("tab", { name: "添加图片", exact: true }).click();
+    assert.equal(await page.getByPlaceholder("图片 URL", { exact: true }).inputValue(), "https://example.com/unfinished.png");
+    await page.getByRole("button", { name: "关闭右侧面板", exact: true }).click();
+    // Bulk restore, body search and multi-select all use the isolated real API.
+    await page.getByRole("button", { name: "回收站", exact: true }).click();
+    await page.getByRole("button", { name: "恢复当前结果 (1)", exact: true }).click();
+    await page.getByRole("button", { name: "确认恢复", exact: true }).click();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    if (await libraryButton.getAttribute("aria-expanded") !== "true") await libraryButton.click();
+    await page.getByLabel("搜索草稿", { exact: true }).fill("空白草稿里手写");
+    assert.equal(await page.locator(".draft-list-item").count(), 1);
+    await page.getByRole("button", { name: "多选", exact: true }).click();
+    await page.getByRole("checkbox", { name: "全选当前结果", exact: true }).check();
+    assert.equal(await page.getByRole("button", { name: "删除选中 (1)", exact: true }).isEnabled(), true);
+    await page.getByLabel("搜索草稿", { exact: true }).fill("");
+    assert.equal(await page.getByRole("button", { name: "删除选中 (0)", exact: true }).isEnabled(), false);
+    await page.getByLabel("草稿排序", { exact: true }).selectOption("title");
+    await page.getByRole("button", { name: "取消多选", exact: true }).click();
+    await page.locator(".draft-list-item").filter({ hasText: "手写新草稿" }).click();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('[aria-label="文章标题"]')?.value === "手写新草稿");
+    await page.getByRole("button", { name: "多选", exact: true }).click();
+    await page.getByRole("checkbox", { name: "全选当前结果", exact: true }).check();
+    await page.getByRole("button", { name: "删除选中 (2)", exact: true }).click();
+    const batchDialog = page.getByRole("dialog", { name: "删除选中的 2 篇草稿？" });
+    assert.equal(await batchDialog.getByRole("listitem").count(), 2);
+    await batchDialog.getByRole("button", { name: "确认删除", exact: true }).click();
+    await page.getByRole("heading", { name: "还没有草稿", exact: true }).waitFor();
+    await page.getByRole("button", { name: "回收站", exact: true }).click();
+    await page.getByLabel("搜索回收站").fill("手写");
+    await page.getByRole("button", { name: "恢复当前结果 (1)", exact: true }).click();
+    await page.getByRole("button", { name: "确认恢复", exact: true }).click();
+    await editor.waitFor();
+    assert.equal((await (await page.request.get(`${origin}/api/draft-trash`)).json()).length, 1, "filtered restore leaves unrelated trash alone");
     assert.deepEqual(errors, []);
     await writeFile(path.join(artifacts, "checks.json"), JSON.stringify({ widths: [1440, 820, 390, 320], confirmed: confirmed.editorialBaseline?.confirmed, assisted: assisted.editorialBaseline?.confirmed, proposalCount, pageErrors: errors }, null, 2));
   } finally {
