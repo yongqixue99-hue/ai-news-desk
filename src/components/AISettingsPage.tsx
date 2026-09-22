@@ -77,6 +77,7 @@ interface AISettingsPageProps {
 
 const rightsLabels: Record<ImageMaterial["rights"], string> = {
   owned: "自有／已授权",
+  "user-provided": "用户提供",
   licensed: "许可使用",
   official: "官方来源（仍需复核）",
   "editorial-screenshot": "评论性截图",

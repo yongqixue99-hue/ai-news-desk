@@ -26,6 +26,7 @@ import { sortCandidates } from "./scoring.js";
 import { normalizeWorkflowNotifications } from "./notifications.js";
 import { normalizeDraftPublicationState } from "./publication-state.js";
 import { normalizeDraftCatalog } from "./draft-catalog.js";
+import { normalizeLegacyUserUpload } from "./user-provided-media.js";
 import { applySpendingPolicy } from "./spending-policy.js";
 
 import { officialKnowledgeSources } from "./official-knowledge.js";
@@ -1826,6 +1827,7 @@ export const upgradeState = (state: WorkflowState): WorkflowState => {
   ]);
   state.drafts = normalizeDraftCatalog((state.drafts ?? []).map((draft) => normalizeDraftPublicationState({
     ...draft,
+    images: (draft.images ?? []).map(placement => ({ ...placement, image: normalizeLegacyUserUpload(placement.image) })),
     status: validDraftStatuses.has(draft.status) ? draft.status : "editing",
     contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
   })));

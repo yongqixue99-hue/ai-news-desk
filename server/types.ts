@@ -404,6 +404,7 @@ export interface SourceImage {
     | "commentary-screenshot"
     | "editorial-screenshot"
     | "owned"
+    | "user-provided"
     | "licensed"
     | "check-required"
     | "expired";
@@ -883,6 +884,7 @@ export interface ImageMaterial {
   tags: string[];
   rights:
     | "owned"
+    | "user-provided"
     | "licensed"
     | "official"
     | "editorial-screenshot"

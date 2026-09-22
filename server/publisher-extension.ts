@@ -229,9 +229,7 @@ const jobImages = async (draft: ArticleDraft): Promise<ExtensionPublisherImage[]
       mimeType: inspected.contentType,
       dataUrl: `data:${inspected.contentType};base64,${inspected.bytes.toString("base64")}`,
       caption: captions.get(placement.id)
-        || placement.caption.trim()
-        || placement.image.caption.trim()
-        || "配图",
+        ?? (placement.caption.trim() || placement.image.caption.trim() || "配图"),
     });
   }
   if (results.length !== inserted.length) {

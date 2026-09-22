@@ -299,3 +299,5 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows-service.ps1
 侧栏“聚合资讯”（手机端“更多”）直接浏览 AIHOT、AlphaSignal、Ben’s Bites、AINews 的平台摘要，支持筛选、打开来源和留作选题。读取失败、内容滞后和待接入平台分别显示；浏览不调用模型改写。AIBase 与 AI工具集目前仅提供网站入口。详见 [实施与验证记录](docs/2026-09-20-aggregations.md)。
 
 2026-09-20 排序更新：“全部平台”默认按工作台规则显示热点精选，最新动态、日报另列；单平台保留自身标题、摘要和原生顺序。AIHOT 已接入真实 Top 10 热点榜与精选理由，其余平台明确使用订阅顺序。详见 [两层排序规则](docs/2026-09-20-aggregation-ranking.md)。
+
+小黑盒交付会自动连接常用 Chrome。用户主动上传、粘贴或通过 URL 导入的图片直接按“用户提供”交付，无需重复勾选平台确认；旧本地上传稿件自动兼容。详见 [连接与上传图片修复](docs/design/xiaoheihe-delivery-2026-09-22/reliability.md)。

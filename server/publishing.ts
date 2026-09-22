@@ -65,7 +65,8 @@ export const ensurePublisherConnected = async (
   const status = dependencies.status ?? (() => publisherStatus(settings));
   if ((await status()).ok) return;
   await (dependencies.open ?? (() => openPublisher(settings)))();
-  for (let attempt = 0; attempt < (dependencies.attempts ?? 20); attempt += 1) {
+  // Chrome's suspended worker can take one 30-second alarm cycle to wake.
+  for (let attempt = 0; attempt < (dependencies.attempts ?? 60); attempt += 1) {
     await (dependencies.wait ?? (() => new Promise(resolve => setTimeout(resolve, 700))))();
     if ((await status()).ok) return;
   }

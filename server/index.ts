@@ -95,6 +95,7 @@ import {
   recordXiaoheiheFillAttempt,
 } from "./publication-state.js";
 import { importDraftImageFromUrl, saveUploadedDraftImage } from "./media.js";
+import { normalizeLegacyUserUpload } from "./user-provided-media.js";
 import {
   buildScreenshotImagePostDraft,
   saveScreenshotImagePostAssets,
@@ -256,7 +257,7 @@ const port = Number(process.env.AI_NEWS_DESK_PORT || 4317);
 const deliveryDesk = createDeliveryDesk();
 const portableArchiveImportConfirmations = createPortableArchiveImportConfirmationDesk();
 
-app.use(createLocalSecurityMiddleware(port));
+app.use(createLocalSecurityMiddleware(port, { publisherExtensionToken: () => extensionPublisherBridge.token }));
 app.use((request, response, next) => {
   const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
   if (mutating && request.path !== "/api/data/archive/import" && isPortableArchiveImportActive()) {
@@ -381,7 +382,8 @@ const publisherPreflightFor = async (
     return {
       id: placement.id,
       available: inspected.available && fingerprintMatches,
-      caption: captions.get(placement.id) || placement.caption || placement.image.caption,
+      caption: captions.get(placement.id) ?? (placement.caption || placement.image.caption),
+      captionRequired: placement.image.rights !== "user-provided",
     };
   }));
   const selection = draft.xiaoheiheOptions ? xiaoheiheSelection(draft) : undefined;
@@ -2458,6 +2460,7 @@ app.patch(
       if (body.xiaoheiheOptions !== undefined) {
         target.xiaoheiheOptions = normalizeXiaoheiheOptions(body.xiaoheiheOptions);
       }
+      target.images = target.images.map(placement => ({ ...placement, image: normalizeLegacyUserUpload(placement.image) }));
       if (body.wechatMetadata !== undefined) target.wechatMetadata = normalizeWeChatMetadata(body.wechatMetadata);
       if (body.imagePostImageIds !== undefined && (!Array.isArray(body.imagePostImageIds) || body.imagePostImageIds.some(id => typeof id !== "string" || !target.images.some(image => image.id === id)) || new Set(body.imagePostImageIds).size !== body.imagePostImageIds.length || body.imagePostImageIds.length > 18)) throw new Error("图集包含无效、重复或过多图片，请重新选择");
       if (body.topics !== undefined) {
@@ -3171,12 +3174,10 @@ app.post(
     if (request.body?.updatedAt && request.body.updatedAt !== draft.updatedAt) throw new Error("草稿已在其他窗口变化，请刷新后重新填入");
     const draftSnapshot = structuredClone(draft);
     const expectedRevisionHash = publicationRevisionHash(draftSnapshot, "xiaoheihe");
-    let preflight = await publisherPreflightFor(draftSnapshot, state.settings, expectedRevisionHash);
-    if (preflight.blocking.some(issue => issue.capability === "transport")
-      && preflight.blocking.every(issue => ["transport", "protocol", "login", "editor"].includes(issue.capability))) {
-      await ensurePublisherConnected(state.settings);
-      preflight = await publisherPreflightFor(draftSnapshot, state.settings, expectedRevisionHash);
-    }
+    // Delivery owns connection recovery. An offline snapshot is not a failed
+    // delivery and must not prevent Chrome from opening alongside other checks.
+    await ensurePublisherConnected(state.settings);
+    const preflight = await publisherPreflightFor(draftSnapshot, state.settings, expectedRevisionHash);
     const attempt = createPublisherAttempt(preflight);
     if (!preflight.canQueueFill) {
       const receipt = completePublisherAttempt(attempt, { steps: [] });

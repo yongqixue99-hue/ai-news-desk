@@ -46,6 +46,7 @@ export interface PublisherPreflightImage {
   id: string;
   available: boolean;
   caption?: string;
+  captionRequired?: boolean;
 }
 
 export interface PublisherPreflightDraft {
@@ -400,12 +401,14 @@ export const evaluatePublisherPreflight = (
     {
       id: "captions",
       label: "图注",
-      status: input.draft.images.every((image) => image.caption?.trim()) ? "pass" : "blocked",
-      required: input.draft.images.length > 0,
+      status: input.draft.images.every((image) => image.captionRequired === false || image.caption?.trim()) ? "pass" : "blocked",
+      required: input.draft.images.some(image => image.captionRequired !== false),
       detail: input.draft.images.length
-        ? `${input.draft.images.filter((image) => image.caption?.trim()).length}/${input.draft.images.length} 张有图注`
+        ? input.draft.images.every(image => image.captionRequired === false)
+          ? "用户提供的图片，图注选填"
+          : `${input.draft.images.filter((image) => image.caption?.trim()).length}/${input.draft.images.length} 张有图注`
         : "无图片，无需图注",
-      issueCode: input.draft.images.every((image) => image.caption?.trim())
+      issueCode: input.draft.images.every((image) => image.captionRequired === false || image.caption?.trim())
         ? undefined
         : "PREFLIGHT_CAPTIONS_MISSING",
       action: "为每张待上传图片填写可读图注，避免平台出现“请输入图片描述”。",

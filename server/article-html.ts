@@ -63,7 +63,9 @@ const figureCaptionHtml = (
 ].join("；")}）</p>`;
 
 const mustKeepVisibleAttribution = (placement: ArticleDraft["images"][number]) =>
-  placement.image.rights !== "owned";
+  placement.image.rights !== "owned"
+  && !(placement.image.rights === "user-provided" && placement.image.sourceUrl === "local-upload"
+    && placement.image.attribution === "本地上传");
 
 const xiaoheiheImageCaption = (value: string) => {
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -183,7 +185,10 @@ export const publisherImageCaptions = (draft: ArticleDraft) => {
       || placement.caption.trim()
       || placement.image.caption.trim()
       || "配图";
-    captions.set(mediaId, xiaoheiheImageCaption(caption));
+    const internalUploadLabel = placement.image.rights === "user-provided"
+      && placement.image.sourceUrl === "local-upload"
+      && /^(?:image|img|pasted[-_ ]?image|blob|本地图片|用户补充配图|配图)$/iu.test(caption);
+    captions.set(mediaId, internalUploadLabel ? "" : xiaoheiheImageCaption(caption));
   });
   return captions;
 };

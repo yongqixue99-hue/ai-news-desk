@@ -55,6 +55,17 @@ test("sending automatically connects once and a connected browser requires no ex
   await assert.rejects(ensurePublisherConnected(settings, { ...dependencies, attempts: 1, status: async () => ({ mode: "chrome-extension", ok: false, detail: "offline" }) }), /尚未响应/);
 });
 
+test("delivery waits through Chrome's normal thirty-second background wake interval", async () => {
+  let reads = 0;
+  let opened = 0;
+  await ensurePublisherConnected(createDefaultState().settings, {
+    status: async () => ({ mode: "chrome-extension", ok: ++reads > 45, detail: "wake pending" }),
+    open: async () => { opened++; },
+    wait: async () => {},
+  });
+  assert.equal(opened, 1);
+});
+
 test("participating requires a verified cover and receipt cannot omit publishing options", () => {
   const input = { runtime: { mode: "chrome-extension" as const, connected: true, protocolVersion: "0.1.24" }, draft: { id: "draft", title: "测试标题", bodyHtml: "<p>这是一段用于发布前检查的独立测试内容，正文长度足够。</p>", community: "CodeX · Steam", topics: [...XHH_FIXED_TOPICS], images: [], xiaoheiheOptions: { creationPlan: "hot" as const, coverPlacementId: "cover" }, coverAvailable: false } };
   assert.equal(evaluatePublisherPreflight(input).canQueueFill, false);
