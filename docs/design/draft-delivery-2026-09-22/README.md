@@ -16,7 +16,7 @@
 - 增加回归：元数据持久化和版本绑定、网络不确定记录重启保留、不同版本并发、空响应与 HTTP 503、只读回查、回查重试不重复写、远端人工改稿保护、独立封面权限、保存后生命周期刷新。
 - 浏览器使用独立临时数据目录，测试作者/摘要保存及切平台保留；通过本地模拟 Chrome 传输回执走通「保存→检查→填入→继续编辑→再保存」；1280、390、320 像素下人工检查布局。模拟回执不等于真实平台验收。
 - E2E 同步覆盖上述完整客户端流程及其他平台的独立失败反馈。正式 `.workflow/` 未用于测试数据写入。
-- 实际账号只读诊断：微信公众号返回出口 IP 未加入白名单；小黑盒常用 Chrome 填入助手未连接。应用可明确解释并引导处理，但这两项外部连接修复前不能声称真实双平台交付验收成功。
+- 实际账号只读诊断：微信公众号返回出口 IP 未加入白名单；小黑盒助手离线的实际原因是没有打开 Chrome 工作台连接页。通过现有已安装助手打开连接页后，真实连接恢复在线，账号已登录；连接按钮也已修正为离线时打开连接页。公众号白名单处理前仍不能声称真实双平台投递验收成功。
 - 协议依据：仓库已有微信 draft/add、draft/update 实现和小黑盒 Chrome 填入协议；新增微信 draft/get 回读。官方文档链接见下方，本轮在线正文无法稳定访问，未将搜索摘要当作已验证的新接口约束。
 
 官方接口参考：[新增草稿](https://developers.weixin.qq.com/doc/service/api/draftbox/draftmanage/api_draft_add.html)、[获取草稿](https://developers.weixin.qq.com/doc/service/api/draftbox/draftmanage/api_draft_get.html)、[修改草稿](https://developers.weixin.qq.com/doc/service/api/draftbox/draftmanage/api_draft_update.html)。

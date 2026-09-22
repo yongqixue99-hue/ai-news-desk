@@ -6,8 +6,23 @@ import {
   MINIMUM_EXTENSION_VERSION,
   fillViaChromeExtension,
   prepareJob,
+  openRegularChromePublisher,
   type ExtensionPublisherJob,
 } from "./publisher-extension.js";
+
+test("the disconnected Chrome launcher opens the local pairing page before the platform editor", async () => {
+  const opened: string[] = [];
+  const offline = { mode: "chrome-extension" as const, ok: false, detail: "offline" };
+  await openRegularChromePublisher("https://xiaoheihe.cn/community/user/post_list", {
+    open: async url => { opened.push(url); }, status: () => offline,
+  });
+  assert.deepEqual(opened, ["http://127.0.0.1:4317/#drafts"]);
+  opened.length = 0;
+  await openRegularChromePublisher("https://xiaoheihe.cn/community/user/post_list", {
+    open: async url => { opened.push(url); }, status: () => ({ ...offline, ok: true }),
+  });
+  assert.deepEqual(opened, ["https://www.xiaoheihe.cn/creator/editor/draft/article"]);
+});
 import { publicationRevisionHash } from "./publication-state.js";
 import { workflowMediaRoot } from "./storage.js";
 import type { ArticleDraft } from "./types.js";

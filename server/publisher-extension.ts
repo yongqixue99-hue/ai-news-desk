@@ -253,9 +253,19 @@ export const prepareJob = async (draft: ArticleDraft, editorUrl: string): Promis
 
 export const extensionPublisherStatus = () => extensionPublisherBridge.status();
 
-export const openRegularChromePublisher = async (editorUrl: string) => {
-  await openRegularChrome(editorUrl);
-  return extensionPublisherStatus();
+export const openRegularChromePublisher = async (
+  _editorUrl: string,
+  dependencies: { open?: (url: string) => Promise<void>; status?: () => PublisherStatus } = {},
+) => {
+  const status = dependencies.status ?? extensionPublisherStatus;
+  const connected = status().ok;
+  // The installed helper pairs through its content script on the local workbench.
+  // Opening only Xiaoheihe never establishes that connection for the desktop app.
+  await (dependencies.open ?? openRegularChrome)(connected
+    ? XIAOHEIHE_ARTICLE_EDITOR_URL
+    : "http://127.0.0.1:4317/#drafts");
+  const result = status();
+  return !result.ok ? { ...result, detail: "已在常用 Chrome 打开连接页。等待助手连接后即可返回 App；若仍离线，请检查新闻台浏览器助手是否启用" } : result;
 };
 
 export const fillViaChromeExtension = async (

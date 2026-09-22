@@ -1058,7 +1058,7 @@ function App() {
         message: extensionMode
           ? result.ok
             ? "已在常用 Chrome 打开小黑盒。系统只会填入，不会代你发布。"
-            : "已打开常用 Chrome；加载填入助手并刷新工作台后即可连接。"
+            : result.detail
           : result.ok
             ? "CDP 备用浏览器已启动。首次使用请在新窗口中登录小黑盒。"
             : result.detail,
