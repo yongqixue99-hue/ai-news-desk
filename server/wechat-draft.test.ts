@@ -247,3 +247,71 @@ test("delivery rechecks current evidence before create, update and unchanged rec
  await assert.rejects(desk.syncDraft({draft,previousReceipt:receipt}),/已变化/u);
  assert.equal(writes,1);
 });
+
+test("WeChat success is verified by reading the remote draft, and remote edits are not overwritten", async () => {
+  let remote: import("./wechat-draft.js").WeChatDraftArticlePayload | undefined;
+  let writes = 0;
+  const gateway = {
+    countDrafts: async () => 0,
+    uploadContentImage: async () => ({ url: "https://mmbiz.qpic.cn/verified.jpg" }),
+    uploadPermanentImage: async () => ({ mediaId: "cover" }),
+    addDraft: async (article: import("./wechat-draft.js").WeChatDraftArticlePayload) => { remote = article; writes++; return { mediaId: "remote" }; },
+    updateDraft: async (_id: string, article: import("./wechat-draft.js").WeChatDraftArticlePayload) => { remote = article; writes++; },
+    getDraft: async () => remote!,
+  };
+  const desk = createWeChatDraftDesk({ gateway, loadImage: async () => ({ bytes: new Uint8Array([1]), fileName: "test.png", contentType: "image/png" }) });
+  const draft = articleDraft();
+  const first = await desk.syncDraft({ draft });
+  assert.equal(first.verification, "verified", "an upload receipt alone cannot prove readable content");
+  remote = { ...remote!, title: "在微信后台人工改过的标题" };
+  await assert.rejects(desk.syncDraft({ draft, previousReceipt: first }), /微信后台.*变化|微信后台.*修改/u);
+  assert.equal(writes, 1, "read-back conflict must never silently overwrite platform edits");
+});
+
+test("a lost read-back keeps the remote id and the retry verifies without a second write", async () => {
+  let remote: import("./wechat-draft.js").WeChatDraftArticlePayload;
+  let writes = 0, readingFails = true;
+  const draft = articleDraft();
+  const desk = createWeChatDraftDesk({
+    loadImage: async () => ({ bytes: new Uint8Array([1]), fileName: "cover.png", contentType: "image/png" }),
+    gateway: {
+      countDrafts: async () => 0,
+      uploadContentImage: async () => ({ url: "https://mmbiz.qpic.cn/content" }),
+      uploadPermanentImage: async () => ({ mediaId: "cover" }),
+      addDraft: async article => { remote = { ...article, digest: "微信自动提取的摘要" }; writes++; return { mediaId: "same-draft" }; },
+      updateDraft: async () => { throw new Error("must not update unchanged draft"); },
+      getDraft: async () => { if (readingFails) throw new Error("网络中断"); return remote; },
+    },
+  });
+  const pending = await desk.syncDraft({ draft });
+  assert.equal(pending.verification, "pending");
+  assert.equal(pending.mediaId, "same-draft");
+  readingFails = false;
+  const verified = await desk.syncDraft({ draft, previousReceipt: pending });
+  assert.equal(verified.verification, "verified");
+  assert.equal(verified.operation, "unchanged");
+  remote!.digest = "平台人工修改的摘要";
+  await assert.rejects(desk.syncDraft({ draft, previousReceipt: verified }), /微信后台.*修改/);
+  assert.equal(writes, 1);
+});
+
+test("a separately selected cover is checked and uploaded without adding it to the body", async () => {
+  const draft = articleDraft();
+  draft.bodyHtml = '<p>正文不必插入与封面相同的图片。</p>';
+  let bodyUploads = 0, coverUploads = 0;
+  const desk = createWeChatDraftDesk({
+    loadImage: async () => ({ bytes: new Uint8Array([1]), fileName: "cover.png", contentType: "image/png" }),
+    gateway: {
+      countDrafts: async () => 0,
+      uploadContentImage: async () => { bodyUploads++; return { url: "https://mmbiz.qpic.cn/body" }; },
+      uploadPermanentImage: async () => { coverUploads++; return { mediaId: "cover" }; },
+      addDraft: async article => { assert.doesNotMatch(article.content, /<img/u); return { mediaId: "draft" }; },
+      updateDraft: async () => {},
+    },
+  });
+  const receipt = await desk.syncDraft({ draft, coverPlacementId: 'placement-1' });
+  assert.equal(receipt.imageCount, 0); assert.equal(bodyUploads, 0); assert.equal(coverUploads, 1);
+  draft.images[0].image.allowedPlatforms = ['xiaoheihe'];
+  await assert.rejects(desk.syncDraft({ draft, coverPlacementId: 'placement-1' }), /确认可用于 wechat/);
+  assert.equal(coverUploads, 1, 'a separate cover must obey the same rights gate');
+});

@@ -153,3 +153,11 @@ test("a save that clears the final warning removes the old warning instead of re
   const merged = mergeSavedDraftMetadata(current, draft({ qualityWarnings: [] }), JSON.stringify(editableDraftContent(current)))!;
   assert.equal(buildDraftQualityView(merged.qualityWarnings).warnings.length, 0);
 });
+
+test("saving edits to a previously filled draft refreshes its lifecycle status", () => {
+  const current = draft({ title: "填入后修改的标题", status: "filled" });
+  const saved = draft({ ...current, status: "editing", updatedAt: "2026-09-22T05:00:00Z" });
+  const merged = mergeSavedDraftMetadata(current, saved, JSON.stringify(editableDraftContent(current)))!;
+  assert.equal(merged.status, "editing", "the header must not keep claiming the new text is already filled");
+  assert.equal(merged.title, current.title);
+});

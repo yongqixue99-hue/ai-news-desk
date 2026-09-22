@@ -913,8 +913,33 @@ export interface DraftImagePlacement {
   caption: string;
 }
 
+export interface WeChatDraftMetadata {
+  author: string;
+  digest: string;
+  contentSourceUrl: string;
+  coverPlacementId?: string;
+}
+
+export interface WeChatSyncAttempt {
+  id: string;
+  appId: string;
+  startedAt: string;
+  revisionHash: string;
+  operation: "created" | "updated";
+  mediaId?: string;
+  status: "sending" | "unknown" | "failed" | "complete" | "not-received";
+  detail?: string;
+}
+
 export interface WeChatDraftSyncReceipt {
   schemaVersion: "wechat-draft-receipt/v1";
+  appId?: string;
+  verification?: "verified" | "pending";
+  verificationDetail?: string;
+  verifiedAt?: string;
+  remoteFingerprint?: string;
+  remoteContentFingerprint?: string;
+  sentDigest?: string;
   draftId: string;
   mediaId: string;
   operation: "created" | "updated" | "unchanged";
@@ -1090,6 +1115,8 @@ export interface ArticleDraft {
   publisherReceipt?: PublisherReceipt;
   /** Latest revision synced to the personal WeChat official-account draft box. */
   wechatDraft?: WeChatDraftSyncReceipt;
+  wechatMetadata?: WeChatDraftMetadata;
+  wechatSyncAttempts?: WeChatSyncAttempt[];
   /** Version-bound acknowledgement per publication platform. */
   publicationConfirmations?: Partial<Record<PublicationPlatform, PlatformPublicationConfirmation>>;
   /**
@@ -1122,6 +1149,7 @@ export interface DraftGenerationAttempt {
 export type DraftSaveMode = "auto" | "manual";
 
 export interface DraftRevisionSnapshot {
+  wechatMetadata?: WeChatDraftMetadata;
   sourceChangeReviews?: ArticleDraft["sourceChangeReviews"];
   contentFormat?: "article" | "image-post";
   imagePostImageIds?: string[];
@@ -1156,6 +1184,7 @@ export interface PublisherStep {
 }
 
 export interface PublisherResult {
+  localDraftUpdatedAt?: string;
   at: string;
   ok: boolean;
   /** Local publishable revision actually read by the platform adapter. */

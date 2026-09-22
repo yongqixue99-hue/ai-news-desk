@@ -3,6 +3,7 @@ export type DeliveryChannel = "wechat" | "xiaoheihe";
 export interface DeliveryRequest {
   draftId: string;
   channel: DeliveryChannel;
+  revision?: string;
 }
 
 export type DeliveryPreparationStatus = "prepared" | "failed" | "skipped";
@@ -80,19 +81,22 @@ export const prepareDeliveryTargets = async ({
  * structured receipt format; this layer never invokes a final publish API.
  */
 export const createDeliveryDesk = () => {
-  const inFlight = new Map<string, Promise<unknown>>();
+  const inFlight = new Map<string, { revision?: string; task: Promise<unknown> }>();
   const sync = <T>(request: DeliveryRequest, operation: () => Promise<T>): Promise<T> => {
     const key = `${request.channel}:${request.draftId}`;
     const existing = inFlight.get(key);
-    if (existing) return existing as Promise<T>;
+    if (existing) {
+      if (existing.revision !== request.revision) return Promise.reject(new Error("该平台正在发送另一个版本，请等待结果后再试"));
+      return existing.task as Promise<T>;
+    }
     const task = Promise.resolve().then(operation);
-    inFlight.set(key, task);
+    inFlight.set(key, { revision: request.revision, task });
     const release = () => {
-      if (inFlight.get(key) === task) inFlight.delete(key);
+      if (inFlight.get(key)?.task === task) inFlight.delete(key);
     };
     void task.then(release, release);
     return task;
   };
-  return { sync };
+  return { sync, isBusy: (draftId: string, channel: DeliveryChannel) => inFlight.has(`${channel}:${draftId}`) };
 };
 

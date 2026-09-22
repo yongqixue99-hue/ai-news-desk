@@ -1,3 +1,4 @@
+import type { PrimaryDeliveryStatus, wechatPreflight } from "../server/primary-delivery.js";
 import type { AggregationView } from "../server/aggregation-desk.js";
 import type { DraftOverview } from "../server/draft-overview.js";
 import type { CommunityPlatform, TopicFeedView } from "../server/topic-feeds.js";
@@ -717,9 +718,11 @@ export const api = {
       method: "POST",
     body: "{}",
   }),
+  primaryDeliveryStatus: (draftId: string) => request<PrimaryDeliveryStatus & { wechatPreflight: ReturnType<typeof wechatPreflight> }>(`/api/drafts/${draftId}/delivery-status`),
+  resolveWeChatAttempt: (draftId: string, attemptId: string) => request<{ ok: boolean }>(`/api/drafts/${draftId}/wechat-attempts/${attemptId}/resolve`, { method: "POST", body: JSON.stringify({ resolution: "not-received", confirmed: true }) }),
   syncWeChatDraft: (
     draftId: string,
-    input: { author?: string; digest?: string; contentSourceUrl?: string },
+    input: { author?: string; digest?: string; contentSourceUrl?: string; coverPlacementId?: string; updatedAt?: string },
   ) => request<{ receipt: WeChatDraftSyncReceipt; draft: ArticleDraft }>(
     `/api/drafts/${draftId}/wechat-sync`,
     { method: "POST", body: JSON.stringify(input) },
@@ -760,10 +763,10 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
-  fillDraft: (draftId: string) =>
+  fillDraft: (draftId: string, updatedAt?: string) =>
     request<PublisherResult>(`/api/drafts/${draftId}/fill`, {
       method: "POST",
-      body: "{}",
+      body: JSON.stringify({ updatedAt }),
     }),
   confirmPublished: (draftId: string, platform: "xiaoheihe" | "wechat" = "xiaoheihe") =>
     request<{ confirmation: PlatformPublicationConfirmation; recentTopics: string[]; recentCommunities: string[] }>(

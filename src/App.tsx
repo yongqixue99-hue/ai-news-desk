@@ -1071,10 +1071,10 @@ function App() {
     }
   };
 
-  const fillDraft = async (draftId: string): Promise<PublisherResult | undefined> => {
+  const fillDraft = async (draftId: string, updatedAt?: string): Promise<PublisherResult | undefined> => {
     setActionBusy(true);
     try {
-      const result = await api.fillDraft(draftId);
+      const result = await api.fillDraft(draftId, updatedAt);
       setNotice({
         kind: result.ok ? "success" : "info",
         message: result.ok ? "标题和正文已填入小黑盒，请检查后手动发布。" : "已完成部分填入，请查看右侧结果。",
@@ -1083,7 +1083,7 @@ function App() {
       return result;
     } catch (error) {
       reportError(error);
-      return undefined;
+      throw error;
     } finally {
       setActionBusy(false);
     }
@@ -1091,7 +1091,7 @@ function App() {
 
   const syncWeChatDraft = async (
     draftId: string,
-    input: { author?: string; digest?: string; contentSourceUrl?: string },
+    input: { author?: string; digest?: string; contentSourceUrl?: string; coverPlacementId?: string; updatedAt?: string },
   ): Promise<WeChatDraftSyncReceipt | undefined> => {
     setActionBusy(true);
     try {
@@ -1101,8 +1101,8 @@ function App() {
         drafts: current.drafts.map((draft) => draft.id === draftId ? result.draft : draft),
       } : current);
       setNotice({
-        kind: "success",
-        message: result.receipt.operation === "created"
+        kind: result.receipt.verification === "verified" ? "success" : "info",
+        message: result.receipt.verification !== "verified" ? result.receipt.verificationDetail || "微信已接收，请打开草稿箱核对" : result.receipt.operation === "created"
           ? "文章已进入微信公众号草稿箱，请在公众平台预览并手动发布。"
           : result.receipt.operation === "updated"
             ? "公众号草稿已更新；不会重复创建，也不会自动发布。"
@@ -1111,7 +1111,7 @@ function App() {
       return result.receipt;
     } catch (error) {
       reportError(error);
-      return undefined;
+      throw error;
     } finally {
       setActionBusy(false);
     }

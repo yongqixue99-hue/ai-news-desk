@@ -29,6 +29,7 @@ export interface DraftRecoveryStorage {
 
 type DraftRecoveryContent = Pick<
   ArticleDraft,
+  | "wechatMetadata"
   | "aiAssistedSinceConfirmation"
   | "title"
   | "contentFormat"
@@ -58,6 +59,7 @@ const RECOVERY_KEY_PREFIX = "ai-news-desk:draft-recovery:v1:";
 export const draftRecoveryKey = (draftId: string) => `${RECOVERY_KEY_PREFIX}${draftId}`;
 
 export const editableDraftContent = (draft: ArticleDraft): DraftRecoveryContent => ({
+  wechatMetadata: draft.wechatMetadata,
   aiAssistedSinceConfirmation: draft.aiAssistedSinceConfirmation,
   contentFormat: draft.contentFormat,
   imagePostImageIds: draft.imagePostImageIds,
@@ -83,7 +85,8 @@ export const mergeSavedDraftMetadata = (
 ): ArticleDraft | undefined => {
   if (current?.id !== saved.id
     || JSON.stringify(editableDraftContent(current)) !== requestContentSnapshot) return current;
-  return { ...current, updatedAt: saved.updatedAt, revisionId: saved.revisionId, editorialBaseline: saved.editorialBaseline, aiAssistedSinceConfirmation: saved.aiAssistedSinceConfirmation,
+  return { ...current, status: saved.status, publicationConfirmations: saved.publicationConfirmations,
+    updatedAt: saved.updatedAt, revisionId: saved.revisionId, editorialBaseline: saved.editorialBaseline, aiAssistedSinceConfirmation: saved.aiAssistedSinceConfirmation,
     qualityWarnings: saved.qualityWarnings, factClaims: saved.factClaims, writingBrief: saved.writingBrief };
 };
 

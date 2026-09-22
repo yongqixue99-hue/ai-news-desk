@@ -1,3 +1,4 @@
+import { wechatMetadataFor } from "../../server/wechat-metadata.js";
 import { MultiDeliveryPanel } from "./MultiDeliveryPanel";
 import { DraftLibraryActions } from "./DraftLibraryActions";
 import { SettingsTabs } from "./SettingsTabs";
@@ -37,6 +38,7 @@ import {
   Save,
   Search,
   Send,
+  Settings2,
   ShieldAlert,
   RotateCcw,
   SendHorizontal,
@@ -70,7 +72,6 @@ import { draftStatusLabel, manualDraftStatuses } from "../draft-lifecycle-view";
 import { buildDraftQualityView } from "../draft-quality-view";
 import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
 import { buildExternalWritingPrompt } from "../external-writing-bridge";
-import { buildDistributionTargets } from "../distribution-view";
 import { publisherBlockingGuidance, publisherFillButtonLabel } from "../publisher-guidance";
 import { getRovingTabTarget } from "../hooks/rovingTabs";
 import type { CompletionAvailability } from "../../server/editorial-controls.js";
@@ -151,10 +152,10 @@ interface DraftWorkspaceProps {
   onLaunchPublisher: () => Promise<void>;
   onOpenPublisherSettings: (platform?: "wechat" | "social" | "xiaoheihe") => void;
   onPublisherPreflight: (draftId: string) => Promise<PublisherPreflightResult>;
-  onFill: (draftId: string) => Promise<PublisherResult | undefined>;
+  onFill: (draftId: string, updatedAt?: string) => Promise<PublisherResult | undefined>;
   onSyncWeChatDraft: (
     draftId: string,
-    input: { author?: string; digest?: string; contentSourceUrl?: string },
+    input: { author?: string; digest?: string; contentSourceUrl?: string; coverPlacementId?: string; updatedAt?: string },
   ) => Promise<WeChatDraftSyncReceipt | undefined>;
   onConfirmPublished: (draftId: string, platform: PublishPlatform) => Promise<PlatformPublicationConfirmation>;
 }
@@ -227,14 +228,6 @@ const editableDraft = (draft: ArticleDraft | undefined) => {
   return next;
 };
 
-const wechatMetadataFor = (
-  draft: ArticleDraft | undefined,
-  settings: WeChatChannelSettings,
-): WeChatDraftMetadata => ({
-  author: settings.defaultAuthor,
-  digest: Array.from(draft?.take.trim() ?? "").slice(0, 120).join(""),
-  contentSourceUrl: draft?.provenance.originalUrl || "",
-});
 
 export function DraftWorkspace({
   completion,
@@ -246,7 +239,7 @@ export function DraftWorkspace({
   optimizationProvider,
   activeDraftId,
   busy,
-  publisherStatus,
+  publisherStatus: initialPublisherStatus,
   wechatSettings,
   recentTopics,
   recentCommunities,
@@ -287,6 +280,9 @@ export function DraftWorkspace({
   const [compactLayout, setCompactLayout] = useState(isCompactViewport);
   const [draftLibraryOpen, setDraftLibraryOpen] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
   const [utilityTab, setUtilityTab] = useState<UtilityTab | null>(null);
+  const [publisherStatus, setPublisherStatus] = useState(initialPublisherStatus);
+  const [deliveryView, setDeliveryView] = useState<Awaited<ReturnType<typeof api.primaryDeliveryStatus>>>();
+  useEffect(() => setPublisherStatus(initialPublisherStatus), [initialPublisherStatus]);
   const [publishPlatform, setPublishPlatform] = useState<PublishPlatform>("wechat");
   const [wechatMetadata, setWechatMetadata] = useState<WeChatDraftMetadata>(() =>
     wechatMetadataFor(selected, wechatSettings));
@@ -421,7 +417,7 @@ export function DraftWorkspace({
   useEffect(() => {
     const media = window.matchMedia("(max-width: 1279px)");
     const keepActiveToolVisible = () => {
-      if (utilityTab && media.matches) setDraftLibraryOpen(false);
+      if (utilityTab && (media.matches || utilityTab === "publish")) setDraftLibraryOpen(false);
     };
     keepActiveToolVisible();
     media.addEventListener("change", keepActiveToolVisible);
@@ -501,12 +497,12 @@ export function DraftWorkspace({
   }, []);
 
   useEffect(() => {
-    if (!dirty || saving || managementBusy) return;
+    if (!dirty || saving || managementBusy || deliveryBusy) return;
     const timer = window.setTimeout(() => {
       void save("auto").catch(() => undefined);
     }, 1_100);
     return () => window.clearTimeout(timer);
-  }, [dirty, editVersion, save, saving, managementBusy]);
+  }, [dirty, editVersion, save, saving, managementBusy, deliveryBusy]);
 
   useEffect(() => {
     if (!dirty || !editing) return;
@@ -673,6 +669,17 @@ export function DraftWorkspace({
     })}
   />;
 
+  useEffect(() => {
+    if (utilityTab !== "publish" || !editing) return;
+    let active = true;
+    const refresh = () => {
+      void api.publisherStatus().then(status => { if (active) setPublisherStatus(status); }).catch(() => undefined);
+      void api.primaryDeliveryStatus(editing.id).then(status => { if (active) setDeliveryView(status); }).catch(() => undefined);
+    };
+    refresh(); const timer = window.setInterval(refresh, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [utilityTab, editing?.id, editing?.updatedAt]);
+
   if (!editing) {
     return (
       <div className="page empty-drafts-page">
@@ -706,8 +713,11 @@ export function DraftWorkspace({
     setPreflight(undefined);
   };
 
+
+
   const updateWechatMetadata = (metadata: WeChatDraftMetadata) => {
     setWechatMetadata(metadata);
+    updateEditing({ wechatMetadata: metadata });
   };
 
   const confirmEditorialDraft = async () => {
@@ -919,17 +929,19 @@ export function DraftWorkspace({
     const latestPreflight = await checkPublisher(saveFirst);
     if (!latestPreflight) throw new Error("小黑盒发布前检查未完成，请查看连接状态后重试");
     if (!latestPreflight.canQueueFill) throw new Error(latestPreflight.summary);
-    const result = await onFill(editing.id);
+    const result = await onFill(editing.id, persistedUpdatedAt.current);
     if (!result) throw new Error("小黑盒填入未完成，请查看页面顶部提示");
     setFillResult(result);
+    if (result.localDraftUpdatedAt) { persistedUpdatedAt.current = result.localDraftUpdatedAt; setLastSavedAt(result.localDraftUpdatedAt); }
     if (result?.preflight) setPreflight(result.preflight);
     setEditing((current) => {
       if (!current) return current;
       const next = {
         ...current,
         fillResult: result,
-        publisherReceipt: result.receipt,
-        status: result.ok ? "filled" as const : "editing" as const,
+        updatedAt: result.localDraftUpdatedAt ?? current.updatedAt,
+        publisherReceipt: result.ok ? result.receipt : current.publisherReceipt,
+        status: result.ok ? "filled" as const : current.status,
         publicationConfirmations: result.ok
           ? withoutPlatformPublicationConfirmation(current, "xiaoheihe")
           : current.publicationConfirmations,
@@ -956,8 +968,14 @@ export function DraftWorkspace({
     }
   };
 
-  const syncWeChat = async (input: { author?: string; digest?: string; contentSourceUrl?: string }) => {
-    const receipt = await onSyncWeChatDraft(editing.id, input);
+  const syncWeChat = async (input: { author?: string; digest?: string; contentSourceUrl?: string; coverPlacementId?: string }) => {
+    if (deliveryLock.current) throw new Error("正在发送，请等待当前操作完成");
+    deliveryLock.current = true; setDeliveryBusy(true);
+    try {
+    updateWechatMetadata({ author: input.author ?? "", digest: input.digest ?? "", contentSourceUrl: input.contentSourceUrl ?? "", coverPlacementId: input.coverPlacementId });
+    const saved = await save("manual");
+    if (!saved || dirtyRef.current) throw new Error("仍有未保存修改，请保存后再同步");
+    const receipt = await onSyncWeChatDraft(editing.id, { ...input, updatedAt: saved.updatedAt });
     if (receipt) {
       setEditing((current) => {
         if (!current) return current;
@@ -974,6 +992,7 @@ export function DraftWorkspace({
       });
     }
     return receipt;
+    } finally { deliveryLock.current = false; setDeliveryBusy(false); }
   };
 
   const confirmPublication = async (platform: PublishPlatform) => {
@@ -1249,6 +1268,7 @@ export function DraftWorkspace({
   const publishMetadataReady = Boolean(fillResult?.ok && ["分区", "话题"].every(
     (name) => fillResult.steps.find((step) => step.name === name)?.ok === true,
   ));
+
   const readiness = [
     { label: `标题 ${editing.title.trim().length}/60 字`, ok: editing.title.trim().length > 0 && editing.title.trim().length <= 60 },
     { label: `正文已插入 ${insertedMediaIds.size} 张图`, ok: insertedMediaIds.size > 0 },
@@ -1278,12 +1298,13 @@ export function DraftWorkspace({
         ? { title: "版本历史", subtitle: "自动保存与随时恢复" }
         : { title: "交付草稿", subtitle: "同步后，由你在平台手动发布" };
   const publisherReady = Boolean(publisherStatus?.ok);
-  const distributionTargets = buildDistributionTargets({
-    draft: editing,
-    dirty,
-    publisherReady,
-    wechatConfigured: Boolean(wechatSettings.appId && wechatSettings.appSecretConfigured),
-  });
+  const deliveryStatusLabel = (platform: PublishPlatform) => {
+    const status = deliveryView?.[platform].status;
+    if (dirty && ["current", "pending"].includes(status || "")) return "修改待同步";
+    return status === "current" ? platform === "wechat" ? "已核对" : "已填入"
+      : status === "changed" ? "修改待同步" : status === "unknown" ? "待核对结果"
+      : status === "pending" ? "待回读核对" : status === "failed" ? "需要处理" : "未发送";
+  };
   const draftQuality = buildDraftQualityView(editing.qualityWarnings);
   const extensionPublisher = publisherStatus?.mode !== "cdp";
   const exactBlockingGuidance = dirty ? undefined : publisherBlockingGuidance(preflight);
@@ -1353,7 +1374,7 @@ export function DraftWorkspace({
 
   const focusButton = <button className="draft-focus-toggle" aria-pressed={focusMode} title={focusMode ? "退出专注写作（Esc）" : "收起两侧面板，专心写作"} onClick={() => setFocusMode(value => !value)}>{focusMode ? <Minimize2 size={13} /> : <Maximize2 size={13} />}{focusMode ? "退出专注" : "专注写作"}</button>;
   const editorPane = (
-    <section key={editing.id} data-testid="draft-editor" className="draft-pane editor-pane" aria-label="正文编辑区">
+    <section key={editing.id} data-testid="draft-editor" className="draft-pane editor-pane" aria-label="正文编辑区" inert={deliveryBusy}>
       <div className="draft-pane-heading">
         <div className="draft-view-switch" aria-label="编辑与预览视图">
           <button className={viewMode === "edit" ? "active" : ""} aria-pressed={viewMode === "edit"} onClick={() => chooseViewMode("edit")}><Pencil size={14} />编辑</button>
@@ -1415,7 +1436,7 @@ export function DraftWorkspace({
 
   return (
     <div className={`page draft-page draft-page-v2 draft-page-refined mode-${viewMode} ${focusMode ? "draft-focus-mode" : ""}`}>
-      <header className="draft-topbar-v2" inert={managementBusy}>
+      <header className="draft-topbar-v2" inert={managementBusy || deliveryBusy}>
         <button
           className={draftLibraryOpen ? "draft-library-trigger active" : "draft-library-trigger"}
           aria-expanded={draftLibraryOpen}
@@ -1512,9 +1533,9 @@ export function DraftWorkspace({
         </div>
       ) : null}
 
-      <div inert={managementBusy} className={`draft-stage ${draftLibraryOpen ? "library-open" : ""} ${utilityTab ? "utility-open" : ""}`}>
+      <div inert={managementBusy} className={`draft-stage ${utilityTab === "publish" ? "delivery-open" : ""} ${draftLibraryOpen ? "library-open" : ""} ${utilityTab ? "utility-open" : ""}`}>
         {draftLibraryOpen && !focusMode ? (
-          <aside id="draft-library" className="draft-library-drawer" aria-label="草稿库">
+          <aside id="draft-library" className="draft-library-drawer" aria-label="草稿库" inert={deliveryBusy}>
             <div className="drawer-title-row">
               <div><strong>草稿库</strong><span>{currentDrafts.length} 篇当前草稿</span></div>
               <button aria-label="关闭草稿库" onClick={() => setDraftLibraryOpen(false)}><X size={16} /></button>
@@ -1913,42 +1934,73 @@ export function DraftWorkspace({
 
               {utilityTab === "publish" ? (
                 <>
-                  <section className="utility-section">
-                    <div className="distribution-heading">
-                      <span>一稿多投</span>
-                      <h3 className="utility-section-title">多平台分发台</h3>
-                      <p>正文只编辑一份；各平台分别做格式、图片和权限检查，再送到草稿箱或编辑器。</p>
-                    </div>
-                    <div className="distribution-flow" aria-label="多平台分发边界">
-                      <span>当前正文</span><i>→</i><span>平台适配</span><i>→</i><span>草稿／编辑器</span><i>→</i><strong>你手动发布</strong>
-                    </div>
-                    <MultiDeliveryPanel key={editing.id} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} wechatConfigured={Boolean(wechatSettings.appId && wechatSettings.appSecretConfigured)} publisherReady={publisherReady} save={() => save("manual")} prepareWechat={() => syncWeChat(wechatMetadata)} prepareXiaoheihe={() => prepareXiaoheihe(false)} onBusy={setDeliveryBusy} onOpenSettings={() => onOpenPublisherSettings("social")} />
-                    <div className="platform-options">
-                      {distributionTargets.map((target) => (
-                        <button
-                          key={target.id}
-                          className={publishPlatform === target.id ? `active status-${target.status}` : `status-${target.status}`}
-                          aria-pressed={publishPlatform === target.id}
-                          onClick={() => setPublishPlatform(target.id)}
-                        >
-                          <span>{target.label}</span>
-                          <small>{target.operation} · 最终发布由你确认</small>
-                          <em>{target.statusLabel}</em>
-                          {publishPlatform === target.id ? <CheckCircle2 size={17} /> : null}
-                        </button>
-                      ))}
-                    </div>
-                    {publishPlatform === "xiaoheihe" ? (
-                      <div className={publisherReady ? "publisher-connection ready" : "publisher-connection"}>
-                        <span><i />{extensionPublisher ? "常用 Chrome 填入助手" : "CDP 备用浏览器"}</span>
-                        <small>{publisherStatus?.detail ?? "正在检查连接状态"}</small>
-                      </div>
-                    ) : null}
-                  </section>
+                  <div className="delivery-platform-tabs" role="tablist" aria-label="常用发布平台">
+                    {([ ["wechat", "微信公众号"], ["xiaoheihe", "小黑盒"] ] as const).map(([id, name]) => <button key={id} role="tab" aria-selected={publishPlatform === id} disabled={deliveryBusy} tabIndex={publishPlatform === id ? 0 : -1} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? "wechat" : event.key === "End" ? "xiaoheihe" : id === "wechat" ? "xiaoheihe" : "wechat"; setPublishPlatform(next); event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-platform="${next}"]`)?.focus(); }} data-platform={id} onClick={() => setPublishPlatform(id)}><strong>{name}</strong><span>{deliveryStatusLabel(id)}</span></button>)}
+                  </div>
                   {publishPlatform === "xiaoheihe" ? (
                     <>
-                  <section className="utility-section publishing-prep">
-                    <XiaoheiheFormatPanel draft={editing} selectedIds={[...insertedMediaIds]} onChange={updateEditing} disabled={busy || deliveryBusy} />
+                  <div className="delivery-account"><div><strong>小黑盒创作中心</strong><span className={publisherReady ? "is-ready" : ""}>{publisherReady ? "填入助手已连接" : "填入助手未连接"}</span></div><button aria-label="小黑盒连接设置" onClick={() => onOpenPublisherSettings("xiaoheihe")}><Settings2 size={15} /></button></div>
+              <div className="utility-publish-actions xhh-primary-actions">
+                <div className="publish-secondary-actions" inert={deliveryBusy}>
+                  <button onClick={() => void save("manual").catch(() => undefined)} disabled={saving}><Save size={15} />保存</button>
+                  <button onClick={() => void copyFormatted()}><Palette size={15} />{copiedRich ? "已复制" : "复制排版"}</button>
+                  <button onClick={() => void copy()}><FileText size={15} />{copied ? "已复制" : "纯文本"}</button>
+                </div>
+                {!publisherReady || loginRequired ? (
+                  <button
+                    className="outline-accent-button full"
+                    onClick={onLaunchPublisher}
+                  >
+                    {loginRequired
+                      ? "打开小黑盒登录页"
+                      : extensionPublisher
+                        ? "打开 Chrome 连接助手"
+                        : "打开小黑盒浏览器"}
+                  </button>
+                ) : null}
+                <button
+                  className="primary-button full"
+                  aria-describedby={`${editing.id}-publish-guidance`}
+                  onClick={() => void fill()}
+                  disabled={busy || deliveryBusy || preflightBusy || !publisherReady}
+                >
+                  {busy || deliveryBusy || preflightBusy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
+                  {deliveryBusy ? "正在保存、检查并填入…" : "填入小黑盒编辑器"}
+                </button>
+                <p
+                  className={!publisherReady || loginRequired ? "publish-guidance blocked" : evidenceView.factUncertainties.length || uncheckedImageCount ? "publish-guidance warning" : "publish-guidance"}
+                  id={`${editing.id}-publish-guidance`}
+                >
+                  {!publisherReady ? "连接助手后，自动填写正文、图片、分区和话题" : loginRequired ? "完成登录后重新填入" : "保存 → 检查 → 填入，由你在小黑盒发布"}
+                </p>
+              </div>
+                  {fillResult ? (
+                    <section className={fillResult.ok && !dirty && deliveryView?.xiaoheihe.status === "current" ? "fill-result success" : "fill-result warning"}>
+                      <strong>{(dirty || deliveryView?.xiaoheihe.status === "changed") && fillResult.ok ? "上次版本已填入，当前修改待同步" : fillResult.receipt?.outcome === "filled" ? "已填入并逐项核验" : fillResult.ok ? "已填入编辑器" : "部分步骤需要处理"}</strong>
+                      {fillResult.steps.filter(step => !step.ok).map(step => <span key={step.name}>! {step.name}：{step.detail}</span>)}
+                      <a href="https://www.xiaoheihe.cn/creator/editor/draft/article" target="_blank" rel="noreferrer">打开小黑盒检查 <ExternalLink size={12} /></a>
+                      <details className="delivery-options"><summary>查看填入明细</summary>{fillResult.steps.map(step => <p key={step.name}>{step.ok ? "✓" : "!"} {step.name}：{step.detail}</p>)}</details>
+                      {fillResult.receipt ? <small>交付回执 {fillResult.receipt.attemptId.slice(0, 16)} · {fillResult.receipt.summary}</small> : null}
+                      {publishMetadataReady ? (
+                        <div className="publication-memory-confirm">
+                          <p>在小黑盒完成最终发布后，再确认保存这次分区与标签。</p>
+                          <button
+                            disabled={rememberedPublication || confirmingPublication || dirty || deliveryView?.xiaoheihe.status !== "current"}
+                            onClick={() => void confirmPublication("xiaoheihe")}
+                          >
+                            {rememberedPublication
+                              ? <><Check size={13} />已保存到历史</>
+                              : confirmingPublication
+                                ? <><LoaderCircle className="spin" size={13} />正在保存…</>
+                                : <><History size={13} />我已发布，保存标签</>}
+                          </button>
+                        </div>
+                      ) : fillResult.ok ? (
+                        <p className="publication-memory-blocked">分区或标签未成功填入，本次不会进入历史记录。</p>
+                      ) : null}
+                  {preflightError ? <p className="delivery-error" role="alert">{preflightError}</p> : null}
+                  <section className="utility-section publishing-prep" inert={deliveryBusy}>
+                    <details className="delivery-options"><summary>发送形式 <span>{editing.contentFormat === "image-post" ? "图文图集" : "文章"}</span></summary><XiaoheiheFormatPanel draft={editing} selectedIds={[...insertedMediaIds]} onChange={updateEditing} disabled={busy || deliveryBusy} /></details>
                     <h3>分区与话题</h3>
                     <label>
                       <span>关联社区</span>
@@ -1968,7 +2020,7 @@ export function DraftWorkspace({
                         <button aria-label="添加话题" onClick={addTopic}><Plus size={15} /></button>
                       </div>
                     </div>
-                    <div className="topic-history">
+                    <details className="topic-history delivery-options"><summary>使用历史标签</summary>
                       <div className="topic-history-heading">
                         <span><History size={13} />历史标签</span>
                         <small>发布成功后保留 · 最近 20 个</small>
@@ -1992,31 +2044,29 @@ export function DraftWorkspace({
                       ) : (
                         <p className="topic-history-empty">暂无历史标签。这里不会自动生成，只有你确认发布成功的标签才会出现。</p>
                       )}
-                    </div>
+                    </details>
                   </section>
-                  <section className="utility-section">
+                  <section className="utility-section delivery-xhh-checks" inert={deliveryBusy}>
                     <div className="inspector-heading">
-                      <h3>发布前检查</h3>
+                      <h3>发送前检查</h3>
                       <button
                         className="preflight-refresh"
                         disabled={preflightBusy}
                         onClick={() => void checkPublisher(true)}
                       >{preflightBusy ? <LoaderCircle className="spin" size={13} /> : <RotateCcw size={13} />}重新检查</button>
                     </div>
-                    <div className="publish-checklist">
-                      {readiness.map((item) => <span key={item.label} className={item.ok ? "ok" : "warning"}>{item.ok ? <CheckCircle2 size={15} /> : <Info size={15} />}{item.label}</span>)}
-                    </div>
+
                     {preflight ? (
                       <div className={`publisher-preflight-card ${preflight.canQueueFill ? "ready" : "blocked"}`}>
                         <strong>{preflight.summary}</strong>
-                        <div className="publisher-capability-list">
+                        <details className="delivery-options"><summary>平台检查明细</summary><div className="publisher-capability-list">
                           {preflight.capabilities.map((capability) => (
                             <span key={capability.id} className={capability.status}>
                               {capability.status === "pass" ? <CheckCircle2 size={14} /> : <Info size={14} />}
                               <span><b>{capability.label}</b><small>{capability.detail}</small></span>
                             </span>
                           ))}
-                        </div>
+                        </div></details>
                         <small className="manual-publish-note">{preflight.finalPublish.detail}</small>
                       </div>
                     ) : (
@@ -2024,30 +2074,9 @@ export function DraftWorkspace({
                         {preflightBusy ? <LoaderCircle className="spin" size={15} /> : <CheckCircle2 size={15} />}检查小黑盒兼容性
                       </button>
                     )}
-                    {preflightError ? <p className="preflight-error">{preflightError}</p> : null}
+
                   </section>
-                  {fillResult ? (
-                    <section className={fillResult.ok ? "fill-result success" : "fill-result warning"}>
-                      <strong>{fillResult.receipt?.outcome === "filled" ? "已填入并逐项核验" : fillResult.ok ? "已填入编辑器" : "部分步骤需要处理"}</strong>
-                      {fillResult.steps.map((step) => <span key={step.name}>{step.ok ? "✓" : "!"} {step.name}：{step.detail}</span>)}
-                      {fillResult.receipt ? <small>交付回执 {fillResult.receipt.attemptId.slice(0, 16)} · {fillResult.receipt.summary}</small> : null}
-                      {publishMetadataReady ? (
-                        <div className="publication-memory-confirm">
-                          <p>在小黑盒完成最终发布后，再确认保存这次分区与标签。</p>
-                          <button
-                            disabled={rememberedPublication || confirmingPublication}
-                            onClick={() => void confirmPublication("xiaoheihe")}
-                          >
-                            {rememberedPublication
-                              ? <><Check size={13} />已保存到历史</>
-                              : confirmingPublication
-                                ? <><LoaderCircle className="spin" size={13} />正在保存…</>
-                                : <><History size={13} />我已发布，保存标签</>}
-                          </button>
-                        </div>
-                      ) : fillResult.ok ? (
-                        <p className="publication-memory-blocked">分区或标签未成功填入，本次不会进入历史记录。</p>
-                      ) : null}
+
                     </section>
                   ) : null}
                   {xiaoheihePublication ? (
@@ -2119,6 +2148,7 @@ export function DraftWorkspace({
                       busy={busy || deliveryBusy}
                       copiedFormatted={copiedRich}
                       onMetadataChange={updateWechatMetadata}
+                      onFix={tab => setUtilityTab(tab)}
                       onSaveDraft={() => save("manual")}
                       onSync={syncWeChat}
                       onCopyFormatted={copyFormatted}
@@ -2126,46 +2156,12 @@ export function DraftWorkspace({
                       onOpenSettings={() => onOpenPublisherSettings("wechat")}
                     />
                   )}
+                  <details className="delivery-other-platforms"><summary>其他平台 · 知乎、百家号</summary><MultiDeliveryPanel key={editing.id} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} save={() => save("manual")} onBusy={setDeliveryBusy} onOpenSettings={() => onOpenPublisherSettings("social")} /></details>
                 </>
               ) : null}
             </div>
 
-            {utilityTab === "publish" && publishPlatform === "xiaoheihe" ? (
-              <div className="utility-publish-actions">
-                <div className="publish-secondary-actions">
-                  <button onClick={() => void save("manual").catch(() => undefined)} disabled={saving}><Save size={15} />保存</button>
-                  <button onClick={() => void copyFormatted()}><Palette size={15} />{copiedRich ? "已复制" : "复制排版"}</button>
-                  <button onClick={() => void copy()}><FileText size={15} />{copied ? "已复制" : "纯文本"}</button>
-                </div>
-                {!publisherReady || loginRequired ? (
-                  <button
-                    className="outline-accent-button full"
-                    onClick={extensionPublisher && !loginRequired ? () => onOpenPublisherSettings("xiaoheihe") : onLaunchPublisher}
-                  >
-                    {loginRequired
-                      ? "打开小黑盒登录页"
-                      : extensionPublisher
-                        ? "设置常用 Chrome 填入助手"
-                        : "启动 CDP 备用浏览器"}
-                  </button>
-                ) : null}
-                <button
-                  className="primary-button full"
-                  aria-describedby={`${editing.id}-publish-guidance`}
-                  onClick={() => void fill()}
-                  disabled={busy || deliveryBusy || preflightBusy || !publisherReady}
-                >
-                  {busy || deliveryBusy || preflightBusy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
-                  {deliveryBusy ? "正在保存、检查并填入…" : publisherFillButtonLabel({ preflightBusy, busy, loginRequired })}
-                </button>
-                <p
-                  className={!publisherReady || loginRequired ? "publish-guidance blocked" : evidenceView.factUncertainties.length || uncheckedImageCount ? "publish-guidance warning" : "publish-guidance"}
-                  id={`${editing.id}-publish-guidance`}
-                >
-                  {publishGuidance}
-                </p>
-              </div>
-            ) : null}
+
           </aside>
         ) : null}
       </div>

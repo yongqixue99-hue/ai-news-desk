@@ -4,17 +4,16 @@ import { socialDeliveryApi } from "../api";
 import { socialPlatforms, type SocialDeliveryStatus, type SocialDeliveryReceipt } from "../../server/social-delivery-types";
 import type { ArticleDraft } from "../types";
 
-type Target = "wechat" | "xiaoheihe" | typeof socialPlatforms[number]["id"];
-const names: Record<Target, string> = { wechat: "微信公众号", xiaoheihe: "小黑盒", zhihu: "知乎", baijiahao: "百家号", toutiao: "今日头条" };
+type Target = typeof socialPlatforms[number]["id"];
+const names: Record<Target, string> = { zhihu: "知乎", baijiahao: "百家号", toutiao: "今日头条" };
 interface Props {
-  draft: ArticleDraft; dirty: boolean; disabled: boolean; wechatConfigured: boolean; publisherReady: boolean;
+  draft: ArticleDraft; dirty: boolean; disabled: boolean;
   save: () => Promise<ArticleDraft | undefined>;
-  prepareWechat: () => Promise<unknown>; prepareXiaoheihe: () => Promise<unknown>;
   onBusy: (busy: boolean) => void;
   onOpenSettings: () => void;
 }
 export function MultiDeliveryPanel(props: Props) {
-  const [selected, setSelected] = useState<Target[]>(["wechat"]);
+  const [selected, setSelected] = useState<Target[]>([]);
   const [status, setStatus] = useState<SocialDeliveryStatus>();
   const [receipts, setReceipts] = useState<SocialDeliveryReceipt[]>([]);
   const [revisions, setRevisions] = useState<Record<string, string>>({});
@@ -46,18 +45,10 @@ export function MultiDeliveryPanel(props: Props) {
         setProgress(current => ({ ...current, [target]: "正在检查并投递…" }));
         try {
           let detail = "";
-          if (target === "wechat") {
-            if (!props.wechatConfigured) throw new Error("请先到设置填写 AppSecret 并测试草稿接口");
-            if (!await props.prepareWechat()) throw new Error("微信没有返回草稿回执，请查看连接设置");
-            detail = "已同步公众号草稿箱";
-          } else if (target === "xiaoheihe") {
-            await props.prepareXiaoheihe(); detail = "已填入小黑盒编辑器，请在平台检查";
-          } else {
-            const account = status?.accounts.find(account => account.id === target);
-            if (!account?.available || !account.authenticated || !account.username || !account.accountId) throw new Error(account?.detail || "请先连接文章同步助手");
-            const receipt = await socialDeliveryApi.deliver(saved.id, { platform: target, account: account.username, accountId: account.accountId, updatedAt: saved.updatedAt });
-            detail = receipt.detail;
-          }
+          const account = status?.accounts.find(account => account.id === target);
+          if (!account?.available || !account.authenticated || !account.username || !account.accountId) throw new Error(account?.detail || "请先连接文章同步助手");
+          const receipt = await socialDeliveryApi.deliver(saved.id, { platform: target, account: account.username, accountId: account.accountId, updatedAt: saved.updatedAt });
+          detail = receipt.detail;
           setProgress(current => ({ ...current, [target]: detail }));
         } catch (error) { setProgress(current => ({ ...current, [target]: error instanceof Error ? error.message : String(error) })); }
       }));
@@ -76,9 +67,7 @@ export function MultiDeliveryPanel(props: Props) {
     <div className="social-heading"><strong>选择这篇文章的投递平台</strong><button type="button" aria-label="刷新平台账号与回执" disabled={refreshing || busy} onClick={() => void refresh().catch(error => setError(String(error)))}><RefreshCw size={14} className={refreshing ? "spin" : ""} /></button></div>
     <div className="social-targets">{(Object.keys(names) as Target[]).map(target => {
       const social = status?.accounts.find(item => item.id === target);
-      const reason = target === "wechat" ? props.wechatConfigured ? "已配置 · 同步草稿箱" : "待填写 AppSecret"
-        : target === "xiaoheihe" ? props.publisherReady ? "填入助手已连接" : "待连接小黑盒助手"
-          : social?.detail || "待连接文章同步助手";
+      const reason = social?.detail || "待连接文章同步助手";
       return <label key={target} className={selected.includes(target) ? "selected" : ""}>
         <input type="checkbox" checked={selected.includes(target)} disabled={busy || target === "toutiao"} onChange={event => setSelected(current => event.target.checked ? [...current, target] : current.filter(item => item !== target))} />
         <span><b>{names[target]}</b><small>{target === "toutiao" ? "待接入 · 暂不自动投递" : reason}</small></span>

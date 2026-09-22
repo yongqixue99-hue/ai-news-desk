@@ -20,8 +20,9 @@ const normalizedTextSet = (values: string[] | undefined) => [...new Set(
   (values ?? []).map((value) => normalizedText(value).toLowerCase()).filter(Boolean),
 )].sort();
 
-const publishableImages = (draft: ArticleDraft) => {
+const publishableImages = (draft: ArticleDraft, platform: PublicationPlatform) => {
   const inserted = insertedMediaIds(draft);
+  if (platform === "wechat" && draft.wechatMetadata?.coverPlacementId) inserted.add(draft.wechatMetadata.coverPlacementId);
   return draft.images
     .filter((placement) => inserted.has(placement.id))
     .map((placement) => ({
@@ -57,11 +58,12 @@ export const publicationRevisionHash = (
   contentFormat: draft.contentFormat ?? "article",
   title: normalizedText(draft.title),
   bodyHtml: normalizedDraftBodyHtml(draft),
-  images: publishableImages(draft),
+  images: publishableImages(draft, platform),
   ...(platform === "wechat" ? {
     // The sync API uses take as its default digest, so it is publishable even
     // when bodyHtml is already the authoritative article document.
     defaultDigest: normalizedText(draft.take),
+    ...(draft.wechatMetadata ? { metadata: draft.wechatMetadata } : {}),
   } : {}),
   ...(platform === "xiaoheihe" ? {
     imagePostImageIds: draft.contentFormat === "image-post" ? [...insertedMediaIds(draft)] : undefined,
