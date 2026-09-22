@@ -52,7 +52,7 @@ test("extension image jobs carry the native Xiaoheihe description", () => {
 });
 
 test("the app rejects extension versions from before reliable article routing", () => {
-  assert.equal(MINIMUM_EXTENSION_VERSION, "0.1.23");
+  assert.equal(MINIMUM_EXTENSION_VERSION, "0.1.24");
 });
 
 test("an article job targets Xiaoheihe's direct article editor instead of the content list", async () => {
@@ -224,4 +224,17 @@ test("extension bridge gives a job to one client and resolves its report", async
 test("extension bridge rejects publishing while the helper is disconnected", () => {
   const bridge = new ExtensionPublisherBridge(Date.now, 20);
   assert.throws(() => bridge.submit(job()), /尚未连接/);
+});
+
+test("a long image upload cannot be claimed twice by the workbench and background worker", async () => {
+  let clock = 1;
+  const bridge = new ExtensionPublisherBridge(() => clock, 1000);
+  bridge.heartbeat(bridge.token, "client", MINIMUM_EXTENSION_VERSION);
+  const completion = bridge.submit(job("long-upload"));
+  assert.ok(bridge.claim(bridge.token, "client"));
+  clock += 31_000;
+  const duplicate = bridge.claim(bridge.token, "client");
+  bridge.complete(bridge.token, "client", "long-upload", { steps: [] });
+  await completion;
+  assert.equal(duplicate, undefined);
 });

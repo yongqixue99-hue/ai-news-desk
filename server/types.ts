@@ -310,6 +310,7 @@ export interface WeChatConnectionResult {
 }
 
 export interface Settings {
+  xiaoheiheNextCompanion?: "Steam" | "数码硬件";
   socialBridge?: import("./social-delivery-types.js").SocialBridgeSettings;
   homeLayout?: import("./home-layout.js").HomeLayout;
   windowHours: number;
@@ -1036,7 +1037,14 @@ export interface DraftEditorialBaseline {
   confirmed?: { id: string; revisionId: string; contentHash: string; confirmedAt: string; snapshot: DraftRevisionSnapshot; learningEligible: boolean; reason?: string };
 }
 
+export interface XiaoheihePublishOptions {
+  companionCommunity?: "Steam" | "数码硬件";
+  creationPlan: "none" | "standard" | "hot";
+  coverPlacementId?: string;
+}
+
 export interface ArticleDraft {
+  xiaoheiheOptions?: XiaoheihePublishOptions;
   socialDeliveries?: import("./social-delivery-types.js").SocialDeliveryReceipt[];
   sourceChangeReviews?: Array<{url: string; observedHash: string; packageHash?: string; documentHash: string; reason: string; reviewedAt: string}>;
   editorialBaseline?: DraftEditorialBaseline;
@@ -1149,6 +1157,7 @@ export interface DraftGenerationAttempt {
 export type DraftSaveMode = "auto" | "manual";
 
 export interface DraftRevisionSnapshot {
+  xiaoheiheOptions?: XiaoheihePublishOptions;
   wechatMetadata?: WeChatDraftMetadata;
   sourceChangeReviews?: ArticleDraft["sourceChangeReviews"];
   contentFormat?: "article" | "image-post";

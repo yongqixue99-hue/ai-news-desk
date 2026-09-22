@@ -54,6 +54,9 @@ async function reportJob(token, jobId, result) {
 }
 
 async function bridgeTick() {
+  // Reloading/updating an extension leaves its old content scripts on open tabs.
+  // The background worker now owns those jobs; the detached script must go quiet.
+  try { if (!chrome.runtime?.id) return; } catch { return; }
   if (busy) return;
   busy = true;
   try {

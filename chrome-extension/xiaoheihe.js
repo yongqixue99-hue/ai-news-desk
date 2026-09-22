@@ -301,8 +301,9 @@ async function fillImagePost(job) {
     });
     steps.push({ name: "配图", ok: Boolean(upload?.ok), detail: String(upload?.detail || "图集上传没有返回结果") });
     if (!upload?.ok) return { pageUrl: location.href, steps };
-    steps.push(await chooseCommunity(job.community));
+    steps.push(await chooseCommunities(job));
     steps.push(await chooseTopics(job.topics));
+    steps.push(...await configurePublishing(job));
   } catch (error) {
     steps.push({ name: "页面操作", ok: false, detail: error instanceof Error ? error.message : String(error) });
   }
@@ -453,6 +454,24 @@ async function chooseCommunity(community) {
   return { name: "分区", ok: false, detail: `${community}选项已点击，但页面没有显示为已选择` };
 }
 
+async function chooseCommunities(job) {
+  const communities = Array.isArray(job.communities) ? job.communities : [job.community];
+  if (!communities.length || communities.length > 2 || (communities.includes("盒友杂谈") && communities.length !== 1)) return { name: "分区", ok: false, detail: "社区组合无效" };
+  for (const community of communities) {
+    const result = await chooseCommunity(community);
+    if (!result.ok) return result;
+  }
+  const selected = [...document.querySelectorAll('.editor__topic-item .topic-item__text')].map(item => item.textContent?.trim().toLowerCase());
+  const ok = selected.length === communities.length && communities.every(value => selected.includes(value.toLowerCase()));
+  return { name: "分区", ok, detail: ok ? communities.join(" · ") : "关联社区与本篇设置不一致" };
+}
+
+async function configurePublishing(job) {
+  if (!job.publishing) return [];
+  if (!globalThis.XiaoheiheSettings) return [{ name: "创作计划", ok: false, detail: "请更新新闻台助手后重试" }];
+  return globalThis.XiaoheiheSettings.configure(document, job.publishing, cover => chrome.runtime.sendMessage({ type: "AI_NEWS_UPLOAD_XIAOHEIHE_COVER", payload: cover }));
+}
+
 async function chooseTopics(topics) {
   const missing = [];
   for (const topic of topics || []) {
@@ -471,7 +490,7 @@ async function chooseTopics(topics) {
       missing.push(topic);
       continue;
     }
-    setNativeValue(input, topic);
+    setNativeValue(input, topic.replace(/\s+/g, ""));
     let option;
     for (let attempt = 0; attempt < 24 && !option; attempt += 1) {
       option = domAdapter?.findTopicOption(document, topic);
@@ -531,18 +550,19 @@ async function fillJob(job) {
     fillEditable(readiness.editor, expectedBodyText, bodyHtml);
     await wait(500);
     const actualBodyText = readEditableText(readiness.editor).replace(/\s+/g, "");
-    const bodyOk = expectedBodyText.length === 0 || actualBodyText.length >= Math.min(expectedBodyText.length, 20);
+    const bodyOk = expectedBodyText.length > 0 && actualBodyText === expectedBodyText;
     steps.push({
       name: "正文",
       ok: bodyOk,
-      detail: bodyOk ? `正文已填入并验证（${actualBodyText.length} 字）` : "正文填入后被编辑器清空",
+      detail: bodyOk ? `正文已填入并验证（${actualBodyText.length} 字）` : "正文回读与稿件不一致，请重新发送",
     });
 
     if (!titleOk || !bodyOk) return { pageUrl: location.href, steps };
 
     steps.push(await uploadImages(job));
-    steps.push(await chooseCommunity(String(job.community || "")));
+    steps.push(await chooseCommunities(job));
     steps.push(await chooseTopics(Array.isArray(job.topics) ? job.topics : []));
+    steps.push(...await configurePublishing(job));
   } catch (error) {
     steps.push({
       name: "页面操作",

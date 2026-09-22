@@ -1,13 +1,18 @@
 {
   "manifest_version": 3,
   "name": "AI 新闻工作台 · 浏览器助手",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "把当前 X 原帖链接一键收进本地新闻台，并将草稿填入小黑盒编辑器；不会点击最终发布。",
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["activeTab", "alarms", "scripting", "storage"],
+  "permissions": [
+    "activeTab",
+    "alarms",
+    "scripting",
+    "storage"
+  ],
   "action": {
     "default_title": "AI 新闻工作台助手",
     "default_popup": "popup.html"
@@ -19,13 +24,26 @@
   ],
   "content_scripts": [
     {
-      "matches": ["http://127.0.0.1:4317/*"],
-      "js": ["app-bridge.js"],
+      "matches": [
+        "http://127.0.0.1:4317/*"
+      ],
+      "js": [
+        "app-bridge.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://xiaoheihe.cn/*", "https://*.xiaoheihe.cn/*"],
-      "js": ["xiaoheihe-dom.js", "xiaoheihe-image-post-dom.js", "xiaoheihe-publisher-job.js", "xiaoheihe.js"],
+      "matches": [
+        "https://xiaoheihe.cn/*",
+        "https://*.xiaoheihe.cn/*"
+      ],
+      "js": [
+        "xiaoheihe-dom.js",
+        "xiaoheihe-image-post-dom.js",
+        "xiaoheihe-publisher-job.js",
+        "xiaoheihe-settings.js",
+        "xiaoheihe.js"
+      ],
       "run_at": "document_idle"
     }
   ]

@@ -7,7 +7,7 @@ import {
   XIAOHEIHE_PAGE_SCRIPTS,
 } from "./publisher-bridge.js";
 
-test("an article fill returns an existing Xiaoheihe tab to the configured creator entry", () => {
+test("an article fill preserves another open draft and creates a new editor", () => {
   assert.deepEqual(planEditorTab([
     {
       id: 17,
@@ -16,9 +16,7 @@ test("an article fill returns an existing Xiaoheihe tab to the configured creato
       url: "https://xiaoheihe.cn/creator/editor/draft/image_text/local-1",
     },
   ], "https://xiaoheihe.cn/community/user/post_list"), {
-    type: "navigate",
-    tabId: 17,
-    windowId: 3,
+    type: "create",
     url: "https://xiaoheihe.cn/community/user/post_list",
   });
 });
@@ -28,6 +26,7 @@ test("fallback injection loads the image-integrity module before the page runner
     "xiaoheihe-dom.js",
     "xiaoheihe-image-post-dom.js",
     "xiaoheihe-publisher-job.js",
+    "xiaoheihe-settings.js",
     "xiaoheihe.js",
   ]);
 });

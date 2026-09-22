@@ -29,6 +29,7 @@ export interface DraftRecoveryStorage {
 
 type DraftRecoveryContent = Pick<
   ArticleDraft,
+  | "xiaoheiheOptions"
   | "wechatMetadata"
   | "aiAssistedSinceConfirmation"
   | "title"
@@ -59,6 +60,7 @@ const RECOVERY_KEY_PREFIX = "ai-news-desk:draft-recovery:v1:";
 export const draftRecoveryKey = (draftId: string) => `${RECOVERY_KEY_PREFIX}${draftId}`;
 
 export const editableDraftContent = (draft: ArticleDraft): DraftRecoveryContent => ({
+  xiaoheiheOptions: draft.xiaoheiheOptions,
   wechatMetadata: draft.wechatMetadata,
   aiAssistedSinceConfirmation: draft.aiAssistedSinceConfirmation,
   contentFormat: draft.contentFormat,

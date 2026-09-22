@@ -23,6 +23,7 @@ const normalizedTextSet = (values: string[] | undefined) => [...new Set(
 const publishableImages = (draft: ArticleDraft, platform: PublicationPlatform) => {
   const inserted = insertedMediaIds(draft);
   if (platform === "wechat" && draft.wechatMetadata?.coverPlacementId) inserted.add(draft.wechatMetadata.coverPlacementId);
+  if (platform === "xiaoheihe" && draft.xiaoheiheOptions?.creationPlan !== "none" && draft.xiaoheiheOptions?.coverPlacementId) inserted.add(draft.xiaoheiheOptions.coverPlacementId);
   return draft.images
     .filter((placement) => inserted.has(placement.id))
     .map((placement) => ({
@@ -66,6 +67,7 @@ export const publicationRevisionHash = (
     ...(draft.wechatMetadata ? { metadata: draft.wechatMetadata } : {}),
   } : {}),
   ...(platform === "xiaoheihe" ? {
+    ...(draft.xiaoheiheOptions ? { xiaoheiheOptions: draft.xiaoheiheOptions } : {}),
     imagePostImageIds: draft.contentFormat === "image-post" ? [...insertedMediaIds(draft)] : undefined,
     community: normalizedText(draft.community),
     topics: draft.topics.map((topic) => normalizedText(topic)).filter(Boolean),

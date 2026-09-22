@@ -1,3 +1,6 @@
+import { inspectXiaoheiheCover } from "./xiaoheihe-cover.js";
+import { normalizeXiaoheiheOptions, reserveXiaoheiheDefaults, xiaoheiheSelection } from "./xiaoheihe-publishing.js";
+import { ensurePublisherConnected } from "./publishing.js";
 import type { WeChatDraftSyncReceipt } from "./types.js";
 import { primaryDeliveryStatus, wechatPreflight, beginWeChatAttempt, resolveWeChatAttempt, unresolvedWeChatAttempt } from "./primary-delivery.js";
 import { WeChatApiError } from "./wechat-http.js";
@@ -381,6 +384,10 @@ const publisherPreflightFor = async (
       caption: captions.get(placement.id) || placement.caption || placement.image.caption,
     };
   }));
+  const selection = draft.xiaoheiheOptions ? xiaoheiheSelection(draft) : undefined;
+  const coverId = selection?.options.creationPlan !== "none" ? selection?.options.coverPlacementId : undefined;
+  const cover = coverId ? placementsById.get(coverId) : undefined;
+  const inspectedCover = cover ? await inspectXiaoheiheCover(cover) : undefined;
   const preflight = evaluatePublisherPreflight({
     expectedRevisionHash,
     runtime: publisherRuntimeFromStatus(status, {
@@ -395,8 +402,11 @@ const publisherPreflightFor = async (
       bodyHtml: draft.contentFormat === "image-post"
         ? publisherImagePostBodyHtml(draft)
         : publisherBodyHtml(draft),
-      community: draft.community,
-      topics: draft.topics,
+      community: selection?.communities.join(" · ") ?? draft.community,
+      topics: selection?.topics ?? draft.topics,
+      xiaoheiheOptions: selection?.options,
+      coverProblem: inspectedCover?.reason,
+      coverAvailable: Boolean(inspectedCover?.available && inspectedCover.fingerprint && inspectedCover.fingerprint === cover?.image.fingerprint),
       images: inspectedImages,
     },
     minimumProtocolVersion: MINIMUM_EXTENSION_VERSION,
@@ -406,7 +416,7 @@ const publisherPreflightFor = async (
   // force the editor to clear rights metadata before filling the article.
   const readiness = evaluateDraftReadiness({
     ...draft,
-    images: draft.images.filter((placement) => inserted.has(placement.id)),
+    images: draft.images.filter((placement) => inserted.has(placement.id) || placement.id === coverId),
   }, "xiaoheihe");
   const quality = reviewDraftQuality(draft, await getLocalDatabase());
   readiness.factBlockers.push(...quality.blockers);
@@ -2445,6 +2455,9 @@ app.patch(
       for (const key of ["title", "paragraphs", "take", "sources", "factClaims", "uncertainties", "images", "community", "topics", "status", "contentFormat", "imagePostImageIds", "layoutTheme"] as const) {
         if (body[key] !== undefined) (target[key] as unknown) = body[key];
       }
+      if (body.xiaoheiheOptions !== undefined) {
+        target.xiaoheiheOptions = normalizeXiaoheiheOptions(body.xiaoheiheOptions);
+      }
       if (body.wechatMetadata !== undefined) target.wechatMetadata = normalizeWeChatMetadata(body.wechatMetadata);
       if (body.imagePostImageIds !== undefined && (!Array.isArray(body.imagePostImageIds) || body.imagePostImageIds.some(id => typeof id !== "string" || !target.images.some(image => image.id === id)) || new Set(body.imagePostImageIds).size !== body.imagePostImageIds.length || body.imagePostImageIds.length > 18)) throw new Error("图集包含无效、重复或过多图片，请重新选择");
       if (body.topics !== undefined) {
@@ -2452,6 +2465,7 @@ app.patch(
         target.topics = normalizePublisherTopics(body.topics);
         if (target.topics.length > 5) throw new Error("最多选择 5 个话题");
       }
+      if (body.xiaoheiheOptions !== undefined) reserveXiaoheiheDefaults(target, state.settings, beforeDraft);
       if (body.contentFormat !== undefined && !["article", "image-post"].includes(body.contentFormat)) throw new Error("发送形式无效");
       if (body.bodyHtml !== undefined) target.bodyHtml = sanitizeDraftHtml(body.bodyHtml);
       const contentPackage = target.provenance.contentPackageId
@@ -2817,6 +2831,7 @@ app.get("/api/drafts/:draftId/delivery-status", asyncRoute(async (request, respo
   if (!draft) { response.status(404).json({ error: "草稿不存在" }); return; }
   const quality = reviewDraftQuality(draft, await getLocalDatabase());
   response.json({ ...primaryDeliveryStatus(draft, state.settings.wechat.appId),
+    xiaoheiheNextCompanion: state.settings.xiaoheiheNextCompanion ?? "Steam",
     wechatPreflight: wechatPreflight(draft, state.settings.wechat, quality.blockers) });
 }));
 
@@ -3156,11 +3171,12 @@ app.post(
     if (request.body?.updatedAt && request.body.updatedAt !== draft.updatedAt) throw new Error("草稿已在其他窗口变化，请刷新后重新填入");
     const draftSnapshot = structuredClone(draft);
     const expectedRevisionHash = publicationRevisionHash(draftSnapshot, "xiaoheihe");
-    const preflight = await publisherPreflightFor(
-      draftSnapshot,
-      state.settings,
-      expectedRevisionHash,
-    );
+    let preflight = await publisherPreflightFor(draftSnapshot, state.settings, expectedRevisionHash);
+    if (preflight.blocking.some(issue => issue.capability === "transport")
+      && preflight.blocking.every(issue => ["transport", "protocol", "login", "editor"].includes(issue.capability))) {
+      await ensurePublisherConnected(state.settings);
+      preflight = await publisherPreflightFor(draftSnapshot, state.settings, expectedRevisionHash);
+    }
     const attempt = createPublisherAttempt(preflight);
     if (!preflight.canQueueFill) {
       const receipt = completePublisherAttempt(attempt, { steps: [] });
@@ -3190,7 +3206,7 @@ app.post(
           });
         }
       });
-      response.status(409).json({ error: preflight.summary, preflight, receipt });
+      response.status(409).json({ error: preflight.blocking.filter(issue => !["login", "editor"].includes(issue.capability)).map(issue => issue.message).join("；") || preflight.summary, preflight, receipt });
       return;
     }
     const completed = await deliveryDesk.sync({ draftId, channel: "xiaoheihe", revision: expectedRevisionHash }, async () => {

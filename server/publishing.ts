@@ -56,3 +56,18 @@ export const fillDraftInPublisher = async (
     settings.xiaoheiheEditorUrl,
   );
 };
+
+/** Connecting is part of delivery, not a separate user task. */
+export const ensurePublisherConnected = async (
+  settings: PublisherSettings,
+  dependencies: { status?: () => Promise<PublisherStatus>; open?: () => Promise<unknown>; wait?: () => Promise<void>; attempts?: number } = {},
+) => {
+  const status = dependencies.status ?? (() => publisherStatus(settings));
+  if ((await status()).ok) return;
+  await (dependencies.open ?? (() => openPublisher(settings)))();
+  for (let attempt = 0; attempt < (dependencies.attempts ?? 20); attempt += 1) {
+    await (dependencies.wait ?? (() => new Promise(resolve => setTimeout(resolve, 700))))();
+    if ((await status()).ok) return;
+  }
+  throw new Error("已打开 Chrome，但新闻台助手尚未响应。首次使用请安装助手；已安装时请在 Chrome 扩展页重新加载，再点一次发送。");
+};

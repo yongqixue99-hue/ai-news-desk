@@ -1,3 +1,4 @@
+import type { XiaoheihePublishOptions } from "./types.js";
 import { imagePostCapacity, normalizePublisherTopics } from "./xiaoheihe-format.js";
 import { randomUUID } from "node:crypto";
 
@@ -12,7 +13,10 @@ export type PublisherCapabilityId =
   | "images"
   | "captions"
   | "community"
-  | "topics";
+  | "topics"
+  | "visibility"
+  | "creationPlan"
+  | "cover";
 
 export type PublisherCapabilityStatus = "pass" | "warning" | "blocked" | "unknown";
 
@@ -45,6 +49,9 @@ export interface PublisherPreflightImage {
 }
 
 export interface PublisherPreflightDraft {
+  xiaoheiheOptions?: XiaoheihePublishOptions;
+  coverAvailable?: boolean;
+  coverProblem?: string;
   id: string;
   contentFormat?: "article" | "image-post";
   title: string;
@@ -441,9 +448,19 @@ export const evaluatePublisherPreflight = (
     },
   ];
 
-  if (isImagePost && input.runtime.mode === "cdp") {
+  if (input.draft.xiaoheiheOptions) {
+    const plan = input.draft.xiaoheiheOptions.creationPlan;
+    capabilities.push(
+      { id: "visibility", label: "可见范围", status: "pass", required: true, detail: "所有人可见；填入时核验" },
+      { id: "creationPlan", label: "创作计划", status: "pass", required: true, detail: plan === "none" ? "不参与" : plan === "hot" ? "热点计划" : isImagePost ? "图文计划" : "文章计划" },
+      { id: "cover", label: "内容封面", status: plan === "none" || input.draft.coverAvailable ? "pass" : "blocked", required: true,
+        detail: plan === "none" ? "不参与创作计划，无需封面" : input.draft.coverAvailable ? "封面文件已核验" : input.draft.coverProblem || "请选择一张可用的创作计划封面",
+        issueCode: plan !== "none" && !input.draft.coverAvailable ? "PREFLIGHT_COVER_MISSING" : undefined, action: "在创作计划中选择或上传封面" },
+    );
+  }
+  if ((isImagePost || input.draft.xiaoheiheOptions) && input.runtime.mode === "cdp") {
     const protocol = capabilities.find(capability => capability.id === "protocol")!;
-    Object.assign(protocol, { label: "图文通道", status: "blocked", required: true, detail: "图文图集需要常用 Chrome 填入助手；CDP 备用通道仅支持文章", issueCode: "PREFLIGHT_IMAGE_POST_EXTENSION_REQUIRED", action: "切换到常用 Chrome 填入助手" });
+    Object.assign(protocol, { label: "填入通道", status: "blocked", required: true, detail: "社区、话题和创作计划需要常用 Chrome 填入助手", issueCode: "PREFLIGHT_IMAGE_POST_EXTENSION_REQUIRED", action: "切换到常用 Chrome 填入助手" });
   }
   const blocking: PublisherPreflightIssue[] = capabilities
     .filter((capability) => capability.status === "blocked")
@@ -476,7 +493,7 @@ export const evaluatePublisherPreflight = (
     draftId: input.draft.id,
     mode: input.runtime.mode,
     protocolVersion,
-    draftImageIds: input.draft.images.map((image) => image.id),
+    draftImageIds: [...new Set([...input.draft.images.map((image) => image.id), ...(input.draft.xiaoheiheOptions?.creationPlan !== "none" && input.draft.xiaoheiheOptions?.coverPlacementId ? [input.draft.xiaoheiheOptions.coverPlacementId] : [])])],
     expectedRevisionHash: input.expectedRevisionHash,
     minimumProtocolVersion,
     canQueueFill: queueBlocking.length === 0,
@@ -530,6 +547,9 @@ const reportStepFor = (steps: PublisherReportedStep[], id: PublisherCapabilityId
     captions: /图注|图片描述/,
     community: /分区|社区/,
     topics: /话题/,
+    visibility: /^可见范围$/,
+    creationPlan: /^创作计划$/,
+    cover: /^内容封面$/,
   };
   const pattern = patterns[id];
   return pattern ? steps.find((step) => pattern.test(step.name)) : undefined;
@@ -550,6 +570,9 @@ export const completePublisherAttempt = (
     "images",
     "community",
     "topics",
+    "visibility",
+    "creationPlan",
+    "cover",
   ];
   const editorWriteSucceeded = reportStepFor(report.steps, "title")?.ok === true
     && reportStepFor(report.steps, "body")?.ok === true

@@ -4,6 +4,7 @@ export const XIAOHEIHE_PAGE_SCRIPTS = Object.freeze([
   "xiaoheihe-dom.js",
   "xiaoheihe-image-post-dom.js",
   "xiaoheihe-publisher-job.js",
+  "xiaoheihe-settings.js",
   "xiaoheihe.js",
 ]);
 
@@ -21,20 +22,10 @@ export function planEditorTab(tabs, editorUrl) {
   const usable = (Array.isArray(tabs) ? tabs : []).filter((tab) => Number.isInteger(tab?.id));
   const requested = normalizedEditorUrl(editorUrl);
   const matching = usable.filter((tab) => normalizedEditorUrl(tab.url) === requested);
-  const tab = matching.find((entry) => entry.active)
-    || matching[0]
-    || usable.find((entry) => entry.active)
-    || usable[0];
+  const tab = matching.find((entry) => entry.active) || matching[0];
+  // An existing local draft belongs to the user. Never navigate away from it.
   if (!tab) return { type: "create", url: editorUrl };
-  if (normalizedEditorUrl(tab.url) === requested) {
-    return { type: "activate", tabId: tab.id, windowId: tab.windowId };
-  }
-  return {
-    type: "navigate",
-    tabId: tab.id,
-    windowId: tab.windowId,
-    url: editorUrl,
-  };
+  return { type: "activate", tabId: tab.id, windowId: tab.windowId };
 }
 
 export function startPublisherBridgePolling(

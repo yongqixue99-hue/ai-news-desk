@@ -678,7 +678,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
               />
             </BubbleMenu>
           ) : null}
-          {preview ? <h1 className="preview-article-title">{title}</h1> : onTitleChange ? <DraftTitleField title={title} onChange={onTitleChange} /> : null}
+          {preview ? <div className="draft-paper-heading preview-paper-heading"><span>文章标题</span><h1 className="preview-article-title">{title || "写下标题…"}</h1></div> : onTitleChange ? <DraftTitleField title={title} onChange={onTitleChange} /> : null}
           <EditorContent editor={editor} />
           {!preview && onRequestCompletion ? (
             <div className={`inline-completion-status is-${completionUi.status}`} role="status" aria-live="polite">

@@ -116,7 +116,7 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     assert.equal(await page.getByRole('textbox', {name:'文章标题'}).inputValue(), '多平台测试文章');
     await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', {name:'交付',exact:true}).click();
     const primaryTabs = page.getByRole('tablist', { name: '常用发布平台' });
-    await primaryTabs.getByRole('tab', { name: /微信公众号/ }).waitFor();
+    await primaryTabs.getByRole('tab', { name: /微信公众号/ }).click();
     assert.equal(await page.getByRole('button', { name: '同步到公众号草稿箱', exact: true }).isDisabled(), true);
     assert.equal(await page.getByRole('button', { name: '复制公众号排版', exact: true }).isVisible(), true);
     await page.locator('.wechat-primary').locator('summary').filter({ hasText: '作者与摘要' }).click();
@@ -135,12 +135,13 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
       throw new Error('WeChat metadata was not persisted');
     });
     await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
-    assert.equal(await page.getByRole('button', { name: '填入小黑盒编辑器', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '送到小黑盒', exact: true }).isDisabled(), false);
+    await page.locator('.xhh-disclosure > summary').filter({ hasText: '社区与话题' }).click();
     // First delivery must expose setup even though no fill receipt exists yet.
     assert.equal(await page.getByLabel('关联社区', { exact: true }).isVisible(), true);
-    await page.locator('.publishing-prep > details > summary').filter({ hasText: '发送形式' }).click();
+    await page.locator('.xhh-disclosure > summary').filter({ hasText: '发送形式' }).click();
     assert.equal(await page.getByRole('group', { name: '小黑盒发送形式' }).isVisible(), true);
-    assert.equal(await page.getByRole('heading', { name: '发送前检查', exact: true }).isVisible(), true);
+    assert.equal(await page.getByRole('button', { name: '打开 Chrome 连接助手', exact: true }).isVisible(), false);
     await primaryTabs.getByRole('tab', { name: /微信公众号/ }).click();
     await page.locator('.wechat-primary').locator('summary').filter({ hasText: '作者与摘要' }).click();
     assert.equal(await page.getByRole('textbox', { name: '公众号作者', exact: true }).inputValue(), '测试作者');
@@ -149,14 +150,17 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     const headers = { 'content-type': 'application/json', 'x-ai-news-extension-token': token };
     const clientId = 'delivery-e2e';
     const fillOnce = async () => {
-      await fetch(`${origin}/api/publisher/extension/heartbeat`, { method: 'POST', headers, body: JSON.stringify({ clientId, version: '0.1.23' }) });
+      await fetch(`${origin}/api/publisher/extension/heartbeat`, { method: 'POST', headers, body: JSON.stringify({ clientId, version: '0.1.24' }) });
       const receive = async () => {
         const deadline = Date.now() + 20_000;
         while (Date.now() < deadline) {
           const next = await fetch(`${origin}/api/publisher/extension/jobs/next?clientId=${clientId}`, { headers });
           if (next.status === 200) {
             const job = await next.json();
-            const completed = await fetch(`${origin}/api/publisher/extension/jobs/${job.id}/result`, { method: 'POST', headers, body: JSON.stringify({ clientId, pageUrl: 'https://www.xiaoheihe.cn/creator/editor/draft/article', steps: ['登录','编辑器','标题','正文','配图','图注','分区','话题'].map(name => ({ name, ok: true, detail: '隔离测试传输回执' })) }) });
+            assert.deepEqual(job.communities, ["数码硬件", "Steam"]);
+            assert.deepEqual(job.topics, ["AI", "盒友杂谈", "盒友日常", "Steam 游戏"]);
+            assert.equal(job.publishing.creationPlan, "none");
+            const completed = await fetch(`${origin}/api/publisher/extension/jobs/${job.id}/result`, { method: 'POST', headers, body: JSON.stringify({ clientId, pageUrl: 'https://www.xiaoheihe.cn/creator/editor/draft/article', steps: ['登录','编辑器','标题','正文','配图','图注','分区','话题','可见范围','创作计划','内容封面'].map(name => ({ name, ok: true, detail: '隔离测试传输回执' })) }) });
             assert.equal(completed.status, 200); return;
           }
           await new Promise(resolve => setTimeout(resolve, 100));
@@ -164,9 +168,9 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
         throw new Error('No extension job was queued');
       };
       const job = receive();
-      await page.getByRole('button', { name: '填入小黑盒编辑器', exact: true }).click();
+      await page.getByRole('button', { name: '送到小黑盒', exact: true }).click();
       await job;
-      await page.getByText('已填入并逐项核验', { exact: true }).waitFor();
+      await page.getByText('已填好，可以前往检查', { exact: true }).waitFor();
     };
     await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
     await fillOnce();
@@ -174,14 +178,14 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     const saveAck = page.waitForResponse(response => response.url().endsWith('/api/drafts/delivery-ui') && response.request().method() === 'PATCH');
     await page.getByRole('button', { name: '保存草稿', exact: true }).click();
     assert.equal((await saveAck).status(), 200, 'fill receipt must return the current optimistic save version');
-    await page.getByText('上次版本已填入，当前修改待同步', { exact: true }).waitFor();
+    await page.getByText('内容有更新，再送一次即可', { exact: true }).waitFor();
     const savedAfterFill = await (await fetch(`${origin}/api/drafts/delivery-ui`)).json();
     assert.equal(savedAfterFill.title, '填入后继续编辑的标题');
     assert.notEqual(savedAfterFill.status, 'filled');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: '交付草稿', exact: true }).click();
     await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
-    await page.getByRole('button', { name: '检查小黑盒兼容性', exact: true }).waitFor();
+    await page.getByRole('button', { name: '送到小黑盒', exact: true }).waitFor();
     await fillOnce();
     await primaryTabs.getByRole('tab', { name: /微信公众号/ }).click();
     for (const width of [1440, 390, 320]) {

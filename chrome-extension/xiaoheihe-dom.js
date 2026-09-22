@@ -137,7 +137,7 @@
 
   const findRootByChildText = (document, rootSelector, childSelector, text) => queryAll(document, rootSelector)
     .find((root) => isVisible(root) && [...root.querySelectorAll(childSelector)]
-      .some((child) => child.textContent?.trim() === text));
+      .some((child) => String(child.textContent || '').replace(/\s+/g, '').toLowerCase() === text.replace(/\s+/g, '').toLowerCase()));
 
   const findSelectedCommunity = (document, text) => findRootByChildText(
     document,

@@ -718,7 +718,7 @@ export const api = {
       method: "POST",
     body: "{}",
   }),
-  primaryDeliveryStatus: (draftId: string) => request<PrimaryDeliveryStatus & { wechatPreflight: ReturnType<typeof wechatPreflight> }>(`/api/drafts/${draftId}/delivery-status`),
+  primaryDeliveryStatus: (draftId: string) => request<PrimaryDeliveryStatus & { xiaoheiheNextCompanion?: "Steam" | "数码硬件"; wechatPreflight: ReturnType<typeof wechatPreflight> }>(`/api/drafts/${draftId}/delivery-status`),
   resolveWeChatAttempt: (draftId: string, attemptId: string) => request<{ ok: boolean }>(`/api/drafts/${draftId}/wechat-attempts/${attemptId}/resolve`, { method: "POST", body: JSON.stringify({ resolution: "not-received", confirmed: true }) }),
   syncWeChatDraft: (
     draftId: string,

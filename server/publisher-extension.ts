@@ -1,3 +1,5 @@
+import { inspectXiaoheiheCover } from "./xiaoheihe-cover.js";
+import { xiaoheiheSelection } from "./xiaoheihe-publishing.js";
 import { randomUUID } from "node:crypto";
 import { imagePostCapacity, imagePostEditorUrl, normalizePublisherTopics } from "./xiaoheihe-format.js";
 import path from "node:path";
@@ -22,7 +24,7 @@ import type {
 } from "./types.js";
 
 const extensionInstallPath = workspacePath("chrome-extension");
-export const MINIMUM_EXTENSION_VERSION = "0.1.23";
+export const MINIMUM_EXTENSION_VERSION = "0.1.24";
 const XIAOHEIHE_ARTICLE_EDITOR_URL = "https://www.xiaoheihe.cn/creator/editor/draft/article";
 
 export class UnsupportedExtensionVersionError extends Error {
@@ -45,7 +47,7 @@ const compareExtensionVersions = (left: string, right: string) => {
 // Chrome throttles timers in background tabs. Keep the helper connected across
 // that normal throttling interval while still expiring a genuinely closed tab.
 const connectedWindowMs = 45_000;
-const claimLeaseMs = 30_000;
+
 
 export interface ExtensionPublisherImage {
   id: string;
@@ -64,6 +66,8 @@ export interface ExtensionPublisherJob {
   title: string;
   bodyHtml: string;
   community: string;
+  communities?: string[];
+  publishing?: { contentFormat?: "article" | "image-post"; visibility: "public"; creationPlan: "none" | "standard" | "hot"; cover?: ExtensionPublisherImage };
   topics: string[];
   images: ExtensionPublisherImage[];
 }
@@ -109,7 +113,7 @@ export class ExtensionPublisherBridge {
 
   constructor(
     private readonly now: () => number = Date.now,
-    private readonly timeoutMs = 120_000,
+    private readonly timeoutMs = 240_000,
   ) {}
 
   bootstrap() {
@@ -163,8 +167,8 @@ export class ExtensionPublisherBridge {
     if (!this.client || this.client.id !== clientId) throw new Error("填入助手尚未完成握手");
     const now = this.now();
     for (const pending of this.jobs.values()) {
-      const leaseExpired = pending.claimedAt && now - pending.claimedAt > claimLeaseMs;
-      if (!pending.claimedBy || leaseExpired) {
+      // A timed-out write is ambiguous; never silently re-run it in another tab.
+      if (!pending.claimedBy) {
         pending.claimedBy = clientId;
         pending.claimedAt = now;
         return pending.job;
@@ -236,20 +240,29 @@ const jobImages = async (draft: ArticleDraft): Promise<ExtensionPublisherImage[]
   return results;
 };
 
-export const prepareJob = async (draft: ArticleDraft, editorUrl: string): Promise<ExtensionPublisherJob> => ({
-  id: `publish_${randomUUID()}`,
-  draftId: draft.id,
-  createdAt: new Date().toISOString(),
-  editorUrl: draft.contentFormat === "image-post" ? imagePostEditorUrl : XIAOHEIHE_ARTICLE_EDITOR_URL,
-  contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
-  title: draft.title,
-  bodyHtml: draft.contentFormat === "image-post"
-    ? publisherImagePostBodyHtml(draft)
-    : publisherBodyHtml(draft),
-  community: draft.community.trim(),
-  topics: normalizePublisherTopics(draft.topics),
-  images: await jobImages(draft),
-});
+export const prepareJob = async (draft: ArticleDraft, _editorUrl: string): Promise<ExtensionPublisherJob> => {
+  const selection = draft.xiaoheiheOptions ? xiaoheiheSelection(draft) : undefined;
+  const coverId = selection?.options.creationPlan !== "none" ? selection?.options.coverPlacementId : undefined;
+  let cover: ExtensionPublisherImage | undefined;
+  if (coverId) {
+    const placement = draft.images.find(image => image.id === coverId);
+    if (!placement) throw new Error("创作计划封面不存在，请重新选择");
+    const inspected = await inspectXiaoheiheCover(placement);
+    if (!inspected.available || !inspected.bytes || !inspected.contentType || !placement.image.fingerprint || inspected.fingerprint !== placement.image.fingerprint) throw new Error(inspected.reason || "创作计划封面文件校验失败，请重新上传");
+    cover = { id: placement.id, fileName: `${placement.id}-${path.basename(placement.image.localPath!)}`, mimeType: inspected.contentType,
+      dataUrl: `data:${inspected.contentType};base64,${inspected.bytes.toString("base64")}`, caption: placement.caption };
+  }
+  if (selection && selection.options.creationPlan !== "none" && !cover) throw new Error("参加创作计划需要选择封面");
+  return {
+    id: `publish_${randomUUID()}`, draftId: draft.id, createdAt: new Date().toISOString(),
+    editorUrl: draft.contentFormat === "image-post" ? imagePostEditorUrl : XIAOHEIHE_ARTICLE_EDITOR_URL,
+    contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
+    title: draft.title, bodyHtml: draft.contentFormat === "image-post" ? publisherImagePostBodyHtml(draft) : publisherBodyHtml(draft),
+    community: selection?.community ?? draft.community.trim(), communities: selection?.communities,
+    topics: selection?.topics ?? normalizePublisherTopics(draft.topics), images: await jobImages(draft),
+    publishing: selection ? { contentFormat: draft.contentFormat ?? "article", visibility: "public", creationPlan: selection.options.creationPlan, cover } : undefined,
+  };
+};
 
 export const extensionPublisherStatus = () => extensionPublisherBridge.status();
 
@@ -296,7 +309,7 @@ export const fillViaChromeExtension = async (
   const report = await (dependencies.submit
     ? dependencies.submit(job)
     : extensionPublisherBridge.submit(job));
-  const allStepsOk = ["标题", "正文", "配图", "分区", "话题"].every(
+  const allStepsOk = ["标题", "正文", "配图", "分区", "话题", ...(job.publishing ? ["可见范围", "创作计划", "内容封面"] : [])].every(
     (name) => report.steps.find((step) => step.name === name)?.ok === true,
   ) && report.steps.every((step) => step.ok);
   const result: PublisherResult = {
@@ -305,7 +318,7 @@ export const fillViaChromeExtension = async (
     revisionHash: expectedRevisionHash,
     pageUrl: report.pageUrl,
     community: draftSnapshot.community,
-    topics: [...draftSnapshot.topics],
+    topics: job.topics,
     steps: report.steps,
     warning: "内容通过常用 Chrome 填入；系统不会点击最终发布。请检查正文、图片、分区和话题。",
   };
