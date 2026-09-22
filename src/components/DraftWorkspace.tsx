@@ -1998,6 +1998,8 @@ export function DraftWorkspace({
                       ) : fillResult.ok ? (
                         <p className="publication-memory-blocked">分区或标签未成功填入，本次不会进入历史记录。</p>
                       ) : null}
+                    </section>
+                  ) : null}
                   {preflightError ? <p className="delivery-error" role="alert">{preflightError}</p> : null}
                   <section className="utility-section publishing-prep" inert={deliveryBusy}>
                     <details className="delivery-options"><summary>发送形式 <span>{editing.contentFormat === "image-post" ? "图文图集" : "文章"}</span></summary><XiaoheiheFormatPanel draft={editing} selectedIds={[...insertedMediaIds]} onChange={updateEditing} disabled={busy || deliveryBusy} /></details>
@@ -2076,9 +2078,6 @@ export function DraftWorkspace({
                     )}
 
                   </section>
-
-                    </section>
-                  ) : null}
                   {xiaoheihePublication ? (
                     <section className="utility-section published-material-section">
                       <div className="inspector-heading">
