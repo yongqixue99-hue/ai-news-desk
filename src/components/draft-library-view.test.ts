@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDefaultState } from "../server/defaults.js";
-import { createBlankDraftInState } from "../server/draft-library.js";
-import { filterDraftLibrary, readLastDraft, rememberLastDraft, resolveDraftId } from "./draft-library-view.js";
+import { createDefaultState } from "../../server/defaults.js";
+import { createBlankDraftInState } from "../../server/draft-library.js";
+import { filterDraftLibrary, readLastDraft, rememberLastDraft, resolveDraftId } from "../draft-library-view.js";
 
 test("library searches actual body text, respects history/status filters and never mutates input", () => {
   const state = createDefaultState();
