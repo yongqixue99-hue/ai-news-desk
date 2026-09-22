@@ -46,6 +46,7 @@ import type {
   WeChatConnectionResult,
   WeChatDraftSyncReceipt,
 } from "./types";
+import type { DraftLibrarySelection, TrashedDraftSummary } from "../server/draft-library.js";
 
 const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
   const response = await fetch(url, {
@@ -596,6 +597,10 @@ export const api = {
     body: JSON.stringify({ mode }),
   }),
   draft: (draftId: string) => request<ArticleDraft>(`/api/drafts/${encodeURIComponent(draftId)}`),
+  createBlankDraft: () => request<ArticleDraft>("/api/drafts", { method: "POST", body: "{}" }),
+  trashDrafts: (drafts: DraftLibrarySelection[]) => request<{ draftIds: string[] }>("/api/draft-trash", { method: "POST", body: JSON.stringify({ drafts }) }),
+  draftTrash: () => request<TrashedDraftSummary[]>("/api/draft-trash"),
+  restoreTrashedDraft: (draftId: string) => request<ArticleDraft>(`/api/draft-trash/${encodeURIComponent(draftId)}/restore`, { method: "POST", body: "{}" }),
   confirmDraft: (draftId: string, updatedAt: string) => request<ArticleDraft>(`/api/drafts/${encodeURIComponent(draftId)}/confirm`, { method: "POST", body: JSON.stringify({ updatedAt }) }),
   saveDraft: (draftId: string, draft: Partial<ArticleDraft>, saveMode: DraftSaveMode = "manual") =>
     request<ArticleDraft>(`/api/drafts/${draftId}`, {

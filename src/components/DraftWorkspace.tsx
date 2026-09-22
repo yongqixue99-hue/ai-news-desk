@@ -1,4 +1,6 @@
 import { MultiDeliveryPanel } from "./MultiDeliveryPanel";
+import { DraftLibraryActions } from "./DraftLibraryActions";
+import type { DraftLibrarySelection } from "../../server/draft-library.js";
 import { socialPlatforms } from "../../server/social-delivery-types";
 import { EditObservationForm } from "./EditObservationForm";
 import { DraftQualityPanel } from "./DraftQualityPanel";
@@ -106,6 +108,9 @@ interface DraftWorkspaceProps {
   onGoToday: () => void;
   onOpenWorkbench: () => void;
   onSelectDraft: (draftId: string) => void;
+  onCreateDraft: () => Promise<void>;
+  onTrashDrafts: (selection: DraftLibrarySelection[]) => Promise<void>;
+  onRestoreTrashedDraft: (draftId: string) => Promise<void>;
   onSave: (draftId: string, patch: Partial<ArticleDraft>, saveMode: DraftSaveMode) => Promise<ArticleDraft>;
   onCompleteInline?: (
     draftId: string,
@@ -243,6 +248,9 @@ export function DraftWorkspace({
   onGoToday,
   onOpenWorkbench,
   onSelectDraft,
+  onCreateDraft,
+  onTrashDrafts,
+  onRestoreTrashedDraft,
   onSave,
   onCompleteInline,
   onLoadRevisions,
@@ -263,6 +271,8 @@ export function DraftWorkspace({
   onConfirmPublished,
 }: DraftWorkspaceProps) {
   const [showShelvedDrafts, setShowShelvedDrafts] = useState(false);
+  const [managementBusy, setManagementBusy] = useState(false);
+  const managementLock = useRef(false);
   const currentDrafts = drafts.filter((draft) => draft.status !== "shelved");
   const shelvedDraftCount = drafts.length - currentDrafts.length;
   const visibleDrafts = showShelvedDrafts ? drafts : currentDrafts;
@@ -482,12 +492,12 @@ export function DraftWorkspace({
   }, []);
 
   useEffect(() => {
-    if (!dirty || saving) return;
+    if (!dirty || saving || managementBusy) return;
     const timer = window.setTimeout(() => {
       void save("auto").catch(() => undefined);
     }, 1_100);
     return () => window.clearTimeout(timer);
-  }, [dirty, editVersion, save, saving]);
+  }, [dirty, editVersion, save, saving, managementBusy]);
 
   useEffect(() => {
     if (!dirty || !editing) return;
@@ -592,6 +602,7 @@ export function DraftWorkspace({
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
+      if (managementLock.current || document.querySelector("dialog[open]")) return;
       if (event.defaultPrevented) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
@@ -606,14 +617,51 @@ export function DraftWorkspace({
     return () => window.removeEventListener("keydown", handleKeydown);
   }, [save]);
 
+  const manageDrafts = async (action: (saved?: ArticleDraft) => Promise<void>) => {
+    if (managementLock.current) return;
+    managementLock.current = true;
+    setManagementBusy(true);
+    try {
+      const pending = activeSaveRef.current;
+      const pendingSaved = pending ? await pending : undefined;
+      const saved = dirtyRef.current ? await save("manual") : pendingSaved;
+      await action(saved);
+    } finally {
+      managementLock.current = false;
+      setManagementBusy(false);
+    }
+  };
+  const libraryActions = <DraftLibraryActions
+    drafts={drafts}
+    current={editing ? { ...editing, updatedAt: persistedUpdatedAt.current ?? editing.updatedAt } : undefined}
+    disabled={busy || managementBusy || Boolean(agentBusy) || imageBusy || deliveryBusy || confirmingDraft || confirmingPublication || Boolean(restoringRevisionId)}
+    onCreate={() => manageDrafts(async () => {
+      await onCreateDraft();
+      setShowShelvedDrafts(false); setDraftSearch(""); setDraftFilter("all"); setViewMode("edit"); setUtilityTab(null);
+      if (window.matchMedia("(max-width: 1279px)").matches) setDraftLibraryOpen(false);
+    })}
+    onTrash={(selection) => manageDrafts(async saved => {
+      await onTrashDrafts(selection.map(item => editingRef.current?.id === item.id ? { id: item.id, updatedAt: saved?.updatedAt ?? persistedUpdatedAt.current ?? item.updatedAt } : item));
+      selection.forEach(item => clearDraftRecoverySnapshot(window.localStorage, item.id));
+      setUtilityTab(null);
+    })}
+    onRestore={(id) => manageDrafts(async () => {
+      await onRestoreTrashedDraft(id);
+      clearDraftRecoverySnapshot(window.localStorage, id);
+      setShowShelvedDrafts(true); setDraftSearch(""); setDraftFilter("all"); setViewMode("edit"); setUtilityTab(null);
+      if (window.matchMedia("(max-width: 1279px)").matches) setDraftLibraryOpen(false);
+    })}
+  />;
+
   if (!editing) {
     return (
       <div className="page empty-drafts-page">
-        <header className="page-header"><div><h1>文章草稿</h1><p>生成后的独立快讯会集中保存在这里。</p></div></header>
+        <header className="page-header"><div><h1>文章草稿</h1><p>写新稿，或继续编辑已有文章。</p></div></header>
+        {libraryActions}
         <div className="large-empty-state">
           <Cloud size={35} />
           <h2>还没有草稿</h2>
-          <p>可以从今日事件推荐采用一条新闻，也可以到新闻工作台粘贴链接或上传截图。</p>
+          <p>点击上方“新建草稿”直接开始写作，也可以从选题或链接起稿。删除的文章可在回收站恢复。</p>
           <div className="draft-empty-actions">
             <button type="button" className="primary-button" onClick={onGoToday}>去今日选题</button>
             <button type="button" className="secondary-button" onClick={onOpenWorkbench}>截图／链接成稿</button>
@@ -624,6 +672,7 @@ export function DraftWorkspace({
   }
 
   const updateEditing = (patch: Partial<ArticleDraft>) => {
+    if (managementLock.current) return;
     const current = editingRef.current;
     if (!current) return;
     const next = { ...current, ...patch };
@@ -1230,7 +1279,9 @@ export function DraftWorkspace({
         ? `可以填入，但发布前还有 ${uncheckedImageCount} 张图片需要确认转载权限。`
         : "检查已通过；只填入编辑器，不会自动发布。");
   const passedReadinessCount = readiness.filter((item) => item.ok).length;
-  const nextAction = evidenceView.factDecisionCount
+  const nextAction = editing.provenance.generatedBy === "human" && !editing.provenance.contentPackageId && !editing.sources.length
+    ? { tab: "sources" as const, label: "手写草稿 · 尚未关联来源", detail: "正文由你自行撰写，交付前请核对事实与来源。", action: "查看来源" }
+    : evidenceView.factDecisionCount
     ? {
         tab: "sources" as const,
         label: `${evidenceView.factDecisionCount} 项事实待确认`,
@@ -1281,7 +1332,7 @@ export function DraftWorkspace({
   const confirmationCurrent = confirmedContent && draftDocumentKey(editing) === draftDocumentKey({ ...confirmedContent.snapshot, provenance: editing.provenance });
 
   const editorPane = (
-    <section data-testid="draft-editor" className="draft-pane editor-pane" aria-label="正文编辑区">
+    <section key={editing.id} data-testid="draft-editor" className="draft-pane editor-pane" aria-label="正文编辑区">
       <div className="draft-pane-heading">
         <div className="draft-view-switch" aria-label="编辑与预览视图">
           <button className={viewMode === "edit" ? "active" : ""} aria-pressed={viewMode === "edit"} onClick={() => chooseViewMode("edit")}><Pencil size={14} />编辑</button>
@@ -1313,7 +1364,7 @@ export function DraftWorkspace({
   );
 
   const previewPane = (
-    <section className="draft-pane preview-pane" aria-label="文章内容预览">
+    <section key={editing.id} className="draft-pane preview-pane" aria-label="文章内容预览">
       <div className="draft-pane-heading">
         {viewMode === "preview" ? <div className="draft-view-switch" aria-label="编辑与预览视图">
           <button aria-pressed={false} onClick={() => chooseViewMode("edit")}><Pencil size={14} />编辑</button>
@@ -1342,7 +1393,7 @@ export function DraftWorkspace({
 
   return (
     <div className={`page draft-page draft-page-v2 draft-page-refined mode-${viewMode}`}>
-      <header className="draft-topbar-v2">
+      <header className="draft-topbar-v2" inert={managementBusy}>
         <button
           className={draftLibraryOpen ? "draft-library-trigger active" : "draft-library-trigger"}
           aria-expanded={draftLibraryOpen}
@@ -1387,6 +1438,8 @@ export function DraftWorkspace({
           <button className="primary-button draft-delivery-trigger" aria-expanded={utilityTab === "publish"} onClick={() => setUtilityTab((tab) => tab === "publish" ? null : "publish")}><Send size={14} />交付草稿</button>
         </div>
       </header>
+
+      {libraryActions}
 
       <section className={`draft-next-action next-${nextAction.tab} ${evidenceView.factDecisionCount || draftQuality.warnings.length ? "has-attention" : "is-settled"}`} aria-label="当前草稿的下一步">
         <div className="draft-next-action-copy">
@@ -1437,7 +1490,7 @@ export function DraftWorkspace({
         </div>
       ) : null}
 
-      <div className={`draft-stage ${draftLibraryOpen ? "library-open" : ""} ${utilityTab ? "utility-open" : ""}`}>
+      <div inert={managementBusy} className={`draft-stage ${draftLibraryOpen ? "library-open" : ""} ${utilityTab ? "utility-open" : ""}`}>
         {draftLibraryOpen ? (
           <aside id="draft-library" className="draft-library-drawer" aria-label="草稿库">
             <div className="drawer-title-row">
@@ -1463,7 +1516,7 @@ export function DraftWorkspace({
                   aria-current={draft.id === editing.id ? "true" : undefined}
                   onClick={() => void selectDraft(draft.id)}
                 >
-                  <span className="draft-list-meta"><span className="draft-source">{draft.sources[0]?.label ?? "AI 新闻"}</span><time dateTime={draft.updatedAt}>{formatSaved(draft.updatedAt)}</time></span>
+                  <span className="draft-list-meta"><span className="draft-source">{draft.sources[0]?.label ?? (draft.provenance.generatedBy === "human" ? "手写草稿" : "AI 新闻")}</span><time dateTime={draft.updatedAt}>{formatSaved(draft.updatedAt)}</time></span>
                   <strong>{draft.title || "未命名草稿"}</strong>
                   <span className="draft-list-footer"><span className={`draft-status ${draft.status}`}>{draftStatusLabel[draft.status]}</span>{draft.draftStrategy ? <span>{strategyLabels[draft.draftStrategy]}</span> : null}</span>
                 </button>

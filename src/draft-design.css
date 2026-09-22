@@ -161,3 +161,43 @@
 @media (max-width: 720px) {
   .draft-page-refined .draft-library-drawer, .draft-page-refined .draft-utility-drawer { height: auto; }
 }
+
+/* Persistent, labelled library actions also remain available after the last draft is deleted. */
+.draft-management-bar { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; padding: 9px 20px; border-bottom: 1px solid var(--line); background: #fff; }
+.draft-management-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; font-size: 12px; white-space: nowrap; }
+.draft-management-spacer { flex: 1; }
+.draft-management-link { border: 0; background: transparent; color: #686862; padding: 6px 8px; cursor: pointer; }
+.draft-management-link:hover { color: var(--accent-deep); background: var(--accent-soft); }
+.draft-management-bar button:disabled { opacity: .45; cursor: default; }
+.draft-management-notice { display: flex; align-items: center; justify-content: space-between; padding: 7px 20px; background: #f3f7ef; color: #53694a; font-size: 12px; }
+.draft-management-notice.error, .draft-management-error { color: #b03f33; background: #fff5f2; }
+.draft-management-notice button, .draft-management-dialog header > button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 5px; }
+.draft-management-dialog { width: min(520px, calc(100vw - 32px)); max-height: min(700px, calc(100dvh - 40px)); padding: 24px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: #fff; box-shadow: 0 18px 70px #0003; }
+.draft-management-dialog::backdrop { background: #20242166; }
+.draft-management-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.draft-management-dialog h2 { margin: 0; font-size: 18px; }
+.draft-management-dialog p { font-size: 13px; line-height: 1.8; color: #72726d; overflow-wrap: anywhere; }
+.draft-management-dialog footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.draft-management-dialog button { min-height: 36px; }
+.draft-trash-list { max-height: 45dvh; overflow-y: auto; }
+.draft-trash-row { display: flex; gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.draft-trash-row > div { min-width: 0; flex: 1; }
+.draft-trash-row strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.draft-trash-row small { display: block; font-size: 11px; color: #888a83; margin-top: 5px; }
+.draft-trash-row button { display: flex; flex-shrink: 0; gap: 6px; align-items: center; }
+@media (max-width: 720px) {
+  .draft-management-bar { padding: 8px 12px; gap: 6px; flex-wrap: wrap; }
+  .draft-management-bar button { font-size: 11px; padding-inline: 8px; min-height: 34px; }
+  .draft-management-spacer { display: none; }
+  .draft-management-bar > button { flex: 1 0 auto; }
+  .draft-management-dialog { padding: 20px; }
+}
+.draft-page-refined { display: flex; flex-direction: column; height: 100dvh; min-height: 0; }
+.draft-page-refined > header, .draft-page-refined > section, .draft-page-refined > .source-material-banner, .draft-management-notice { flex-shrink: 0; }
+.draft-page-refined .draft-stage { flex: 1; height: auto; min-height: 0; }
+@media (max-width: 720px) {
+  .draft-page-refined { height: calc(100dvh - 64px); min-height: 0; }
+}
+@media (max-width: 380px) {
+  .draft-management-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

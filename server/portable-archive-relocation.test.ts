@@ -1,3 +1,4 @@
+import { createBlankDraftInState, trashDraftsInState } from "./draft-library.js";
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
@@ -181,4 +182,21 @@ test("portable archive rebasing returns a migrated copy and leaves the verified 
   assert.equal(result.state.materials[0]?.localPath, "E:\\desk\\.workflow\\materials\\openai.png");
   assert.equal(result.state.materials[0]?.evidencePath, "/Users/editor/licenses/openai.pdf");
   assert.deepEqual(result.plan.counts, { relocatable: 1, missing: 0, blocked: 1, unchanged: 0 });
+});
+
+
+test("trashed draft paths remain governed and relocatable across operating systems", () => {
+  const state = createDefaultState();
+  state.aiSettings.skills = [];
+  const draft = createBlankDraftInState(state);
+  draft.intake = { type: "screenshot", sourceAssetPath: "/Users/editor/desk/.workflow/media/trashed.png" };
+  trashDraftsInState(state, [{ id: draft.id, updatedAt: draft.updatedAt }]);
+  const target = "E:\\desk\\.workflow";
+  const manifest = manifestWith("newsdesk.db", "state-backup.json", "media/trashed.png");
+  const plan = createPortableArchiveRelocationPlan(state, manifest, target);
+  assert.equal(plan.entries.find(item => item.ownerId === draft.id)?.status, "relocatable");
+  const rebased = rebasePortableArchiveState(state, manifest, target);
+  assert.equal(rebased.state.draftTrash?.[0]?.draft.intake?.sourceAssetPath, path.win32.join(target, "media", "trashed.png"));
+  const missing = createPortableArchiveRelocationPlan(state, manifestWith("newsdesk.db"), target);
+  assert.equal(missing.entries.find(item => item.ownerId === draft.id)?.status, "missing");
 });

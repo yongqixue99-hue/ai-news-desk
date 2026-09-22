@@ -1,3 +1,4 @@
+import { registerDraftLibraryRoutes } from "./draft-library-routes.js";
 import { registerSocialDeliveryRoutes, startSocialBridge } from "./social-delivery-routes.js";
 import { buildAggregationView, retainAggregationEntry } from "./aggregation-desk.js";
 import { aggregationSourceIds } from "./aggregation-catalog.js";
@@ -402,6 +403,7 @@ const publisherPreflightFor = async (
 };
 
 registerSocialDeliveryRoutes(app);
+registerDraftLibraryRoutes(app);
 
 app.get(
   "/api/bootstrap",
@@ -418,6 +420,7 @@ app.get(
       ...state,
       aiSettings: { ...state.aiSettings, skills },
       draftRevisions: [],
+      draftTrash: [],
       articleAgentThreads: [],
     });
   }),

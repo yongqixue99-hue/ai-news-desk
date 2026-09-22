@@ -186,6 +186,53 @@ test("stage B editor saves, confirms, expires proposals and recovers without liv
     await page.getByRole("heading", { name: "初稿 → 确认稿", exact: true }).waitFor();
     assert.ok(await page.locator(".confirmation-diff-lines .diff-added").count());
     await page.screenshot({ path: path.join(artifacts, "confirmation-diff.png"), fullPage: true });
+    // Library actions use the real API in this isolated workspace, including autosave and stale tabs.
+    await page.getByRole("button", { name: "新建草稿", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('[aria-label="文章标题"]')?.value === "");
+    await title.fill("手写新草稿");
+    await editor.fill("这是在空白草稿里手写的内容。");
+    // Delete immediately, before the debounced autosave: deletion must first preserve the edit.
+    await page.getByRole("button", { name: "删除当前草稿", exact: true }).click();
+    const deletion = page.getByRole("dialog", { name: "删除这篇草稿？" });
+    await deletion.getByRole("button", { name: "取消", exact: true }).click();
+    assert.equal(await title.inputValue(), "手写新草稿");
+    await page.getByRole("button", { name: "删除当前草稿", exact: true }).click();
+    await deletion.getByRole("button", { name: "确认删除", exact: true }).click();
+    await deletion.waitFor({ state: "hidden" });
+    const trash = await (await page.request.get(`${origin}/api/draft-trash`)).json();
+    assert.equal(trash.length, 1);
+    assert.equal(trash[0].title, "手写新草稿");
+    assert.equal((await page.request.patch(`${origin}/api/drafts/${trash[0].id}`, { data: { title: "迟到的自动保存", updatedAt: trash[0].updatedAt } })).status(), 404);
+    await page.getByRole("button", { name: "回收站", exact: true }).click();
+    await page.getByRole("button", { name: "恢复 手写新草稿", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('[aria-label="文章标题"]')?.value === "手写新草稿");
+    assert.ok((await editor.innerText()).includes("这是在空白草稿里手写的内容。"));
+    assert.ok((await title.boundingBox())!.y > (await page.getByRole("group", { name: "草稿管理" }).boundingBox())!.y, "restored title must be visible below library actions");
+    const stale = await page.request.patch(`${origin}/api/drafts/${trash[0].id}`, { data: { title: "恢复前的旧保存", updatedAt: trash[0].updatedAt } });
+    assert.equal(stale.ok(), false);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "清空草稿", exact: true }).click();
+    const clear = page.getByRole("dialog", { name: "清空 2 篇草稿？" });
+    await clear.getByRole("button", { name: "取消", exact: true }).click();
+    await page.getByRole("button", { name: "清空草稿", exact: true }).click();
+    await clear.getByRole("button", { name: "确认清空", exact: true }).click();
+    await page.getByRole("heading", { name: "还没有草稿", exact: true }).waitFor();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("heading", { name: "还没有草稿", exact: true }).waitFor();
+    const overview = await (await page.request.get(`${origin}/api/drafts/overview`)).json();
+    assert.equal(JSON.stringify(overview).includes("手写新草稿"), false);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      for (const label of ["新建草稿", "删除当前草稿", "清空草稿", "回收站"]) {
+        assert.equal(await page.getByRole("button", { name: label, exact: true }).isVisible(), true);
+      }
+      await page.screenshot({ path: path.join(artifacts, `library-empty-${width}.png`), fullPage: true });
+    }
+    await page.getByRole("button", { name: "回收站", exact: true }).click();
+    await page.getByRole("button", { name: "恢复 手写新草稿", exact: true }).click();
+    await editor.waitFor();
+    await page.screenshot({ path: path.join(artifacts, "library-restored-mobile.png"), fullPage: true });
     assert.deepEqual(errors, []);
     await writeFile(path.join(artifacts, "checks.json"), JSON.stringify({ widths: [1440, 820, 390, 320], confirmed: confirmed.editorialBaseline?.confirmed, assisted: assisted.editorialBaseline?.confirmed, proposalCount, pageErrors: errors }, null, 2));
   } finally {

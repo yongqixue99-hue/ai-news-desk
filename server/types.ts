@@ -1270,6 +1270,8 @@ export interface WorkflowState {
   candidateFeedback: CandidateFeedback[];
   runs: WorkflowRun[];
   drafts: ArticleDraft[];
+  /** Recoverable deletions. Kept outside the active catalog so stale saves and jobs cannot reopen them. */
+  draftTrash?: Array<{ draft: ArticleDraft; deletedAt: string }>;
   draftGenerationAttempts: DraftGenerationAttempt[];
   draftRevisions: DraftRevision[];
   articleAgentThreads: ArticleAgentThread[];

@@ -1398,6 +1398,21 @@ function App() {
             onGoToday={() => navigate("today")}
             onOpenWorkbench={() => navigate("workbench")}
             onSelectDraft={setActiveDraftId}
+            onCreateDraft={async () => {
+              const draft = await api.createBlankDraft();
+              setState(current => current ? { ...current, drafts: [draft, ...current.drafts] } : current);
+              setActiveDraftId(draft.id);
+            }}
+            onTrashDrafts={async selection => {
+              const { draftIds } = await api.trashDrafts(selection);
+              setState(current => current ? { ...current, drafts: current.drafts.filter(draft => !draftIds.includes(draft.id)) } : current);
+              setActiveDraftId(current => current && draftIds.includes(current) ? undefined : current);
+            }}
+            onRestoreTrashedDraft={async id => {
+              const draft = await api.restoreTrashedDraft(id);
+              setState(current => current ? { ...current, drafts: [draft, ...current.drafts.filter(item => item.id !== id)] } : current);
+              setActiveDraftId(draft.id);
+            }}
             onSave={saveDraft}
             onCompleteInline={state.aiSettings.completionProviderId
               && !(state.settings.spendingPolicy === "zero-cost" && state.aiSettings.completionProviderId === "gemini")
