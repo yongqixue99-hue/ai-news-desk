@@ -367,7 +367,8 @@ export function DraftWorkspace({
     setEditing(next);
     setWechatMetadata(wechatMetadataFor(next, wechatSettings));
     setFillResult(selected?.fillResult);
-    setPreflight(selected?.fillResult?.preflight);
+    // A receipt describes an earlier attempt, not this revision's readiness.
+    setPreflight(undefined);
     setPreflightError("");
     setConfirmingPublication(false);
     setPublishedImageStatuses([]);

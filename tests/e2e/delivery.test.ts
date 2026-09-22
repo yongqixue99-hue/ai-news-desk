@@ -178,6 +178,10 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     const savedAfterFill = await (await fetch(`${origin}/api/drafts/delivery-ui`)).json();
     assert.equal(savedAfterFill.title, '填入后继续编辑的标题');
     assert.notEqual(savedAfterFill.status, 'filled');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: '交付草稿', exact: true }).click();
+    await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
+    await page.getByRole('button', { name: '检查小黑盒兼容性', exact: true }).waitFor();
     await fillOnce();
     await primaryTabs.getByRole('tab', { name: /微信公众号/ }).click();
     for (const width of [1440, 390, 320]) {
