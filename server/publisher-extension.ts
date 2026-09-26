@@ -1,6 +1,6 @@
 import { inspectXiaoheiheCover } from "./xiaoheihe-cover.js";
 import { xiaoheiheSelection } from "./xiaoheihe-publishing.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { imagePostCapacity, imagePostEditorUrl, normalizePublisherTopics } from "./xiaoheihe-format.js";
 import path from "node:path";
 import {
@@ -31,6 +31,13 @@ export class UnsupportedExtensionVersionError extends Error {
   constructor(readonly version: string) {
     super(`填入助手版本 ${version || "unknown"} 过低，最低需要 ${MINIMUM_EXTENSION_VERSION}`);
     this.name = "UnsupportedExtensionVersionError";
+  }
+}
+
+export class ExtensionPublisherProtocolError extends Error {
+  constructor(readonly status: 401 | 403 | 409 | 410, message: string) {
+    super(message);
+    this.name = "ExtensionPublisherProtocolError";
   }
 }
 
@@ -97,8 +104,27 @@ interface ExtensionClient {
   seenAt: number;
 }
 
+interface AcceptedReport {
+  clientId: string;
+  fingerprint: string;
+  expiresAt: number;
+}
+
+const normalizeReport = (report: ExtensionPublisherReport): ExtensionPublisherReport => ({
+  pageUrl: typeof report.pageUrl === "string" ? report.pageUrl : undefined,
+  steps: Array.isArray(report.steps)
+    ? report.steps.map((step) => ({
+      name: String(step.name || "页面操作").slice(0, 40),
+      ok: Boolean(step.ok),
+      detail: String(step.detail || "").slice(0, 500),
+    }))
+    : [],
+});
+const reportFingerprint = (report: ExtensionPublisherReport) => createHash("sha256")
+  .update(JSON.stringify(report)).digest("hex");
+
 const assertToken = (actual: string | undefined, expected: string) => {
-  if (!actual || actual !== expected) throw new Error("填入助手配对信息无效，请刷新工作台后重试");
+  if (!actual || actual !== expected) throw new ExtensionPublisherProtocolError(401, "填入助手配对信息无效，请刷新工作台后重试");
 };
 
 /**
@@ -110,6 +136,7 @@ export class ExtensionPublisherBridge {
   readonly token = randomUUID();
   private client?: ExtensionClient;
   private jobs = new Map<string, PendingJob>();
+  private acceptedReports = new Map<string, AcceptedReport>();
 
   constructor(
     private readonly now: () => number = Date.now,
@@ -184,21 +211,31 @@ export class ExtensionPublisherBridge {
     report: ExtensionPublisherReport,
   ) {
     assertToken(token, this.token);
+    for (const [id, accepted] of this.acceptedReports) {
+      if (accepted.expiresAt <= this.now()) this.acceptedReports.delete(id);
+    }
     const pending = this.jobs.get(jobId);
-    if (!pending) throw new Error("发布任务已结束或不存在");
-    if (pending.claimedBy !== clientId) throw new Error("发布任务不属于当前填入助手");
+    const accepted = this.acceptedReports.get(jobId);
+    if (!pending && !accepted) throw new ExtensionPublisherProtocolError(410, "发布任务已结束或不存在");
+    if (accepted) {
+      if (accepted.clientId !== clientId) throw new ExtensionPublisherProtocolError(403, "发布任务不属于当前填入助手");
+      if (accepted.fingerprint !== reportFingerprint(normalizeReport(report))) {
+        throw new ExtensionPublisherProtocolError(409, "重传回执与已接收结果不一致");
+      }
+      return { ok: true };
+    }
+    if (!pending) throw new ExtensionPublisherProtocolError(410, "发布任务已结束或不存在");
+    if (pending.claimedBy !== clientId) throw new ExtensionPublisherProtocolError(403, "发布任务不属于当前填入助手");
+    const normalized = normalizeReport(report);
+    this.acceptedReports.set(jobId, {
+      clientId, fingerprint: reportFingerprint(normalized), expiresAt: this.now() + 5 * 60_000,
+    });
+    while (this.acceptedReports.size > 100) {
+      this.acceptedReports.delete(this.acceptedReports.keys().next().value!);
+    }
     clearTimeout(pending.timer);
     this.jobs.delete(jobId);
-    pending.resolve({
-      pageUrl: typeof report.pageUrl === "string" ? report.pageUrl : undefined,
-      steps: Array.isArray(report.steps)
-        ? report.steps.map((step) => ({
-          name: String(step.name || "页面操作").slice(0, 40),
-          ok: Boolean(step.ok),
-          detail: String(step.detail || "").slice(0, 500),
-        }))
-        : [],
-    });
+    pending.resolve(normalized);
     return { ok: true };
   }
 }

@@ -4,6 +4,8 @@ import type { ArticleDraft } from "./types.js";
 import {
   draftRecoveryKey,
   editableDraftContent,
+  isCurrentDraftOperation,
+  acknowledgedDraftTimestamp,
   mergeSavedDraftMetadata,
   persistDraftRecoverySnapshot,
   restoreDraftFromRecovery,
@@ -160,4 +162,38 @@ test("saving edits to a previously filled draft refreshes its lifecycle status",
   const merged = mergeSavedDraftMetadata(current, saved, JSON.stringify(editableDraftContent(current)))!;
   assert.equal(merged.status, "editing", "the header must not keep claiming the new text is already filled");
   assert.equal(merged.title, current.title);
+});
+
+test("a delayed delivery response cannot update another draft after selection changes", async () => {
+  let current = draft();
+  let version = 4;
+  const operation = { draftId: current.id, editVersion: version };
+  let complete!: () => void;
+  const response = new Promise<void>(resolve => { complete = resolve; }).then(() => {
+    if (isCurrentDraftOperation(current, version, operation)) current = { ...current, status: "filled" };
+  });
+  current = draft({ id: "draft-2", title: "另一篇草稿" });
+  version += 1;
+  complete();
+  await response;
+  assert.equal(current.status, "editing");
+  assert.equal(current.title, "另一篇草稿");
+});
+
+test("a delayed delivery response cannot mark newer edits or a reopened draft as delivered", () => {
+  const operation = { draftId: "draft-1", editVersion: 4 };
+  assert.equal(isCurrentDraftOperation(draft({ title: "发送期间的新标题" }), 5, operation), false);
+  assert.equal(isCurrentDraftOperation(draft(), 6, operation), false, "leaving and reopening the same draft is a new editing session");
+  assert.equal(isCurrentDraftOperation(undefined, 4, operation), false);
+  assert.equal(isCurrentDraftOperation(draft(), 4, operation), true);
+});
+
+test("delivery completion advances only persistence metadata even when the user has edited newer text", () => {
+  const current = draft({ title: "发送期间的新标题" });
+  const before = structuredClone(current);
+  const nextTimestamp = acknowledgedDraftTimestamp(current.id, current.id, "2026-09-26T08:00:00Z", "2026-09-26T08:00:00Z", "2026-09-26T08:01:00Z");
+  assert.equal(nextTimestamp, "2026-09-26T08:01:00Z", "the next save must use the server's acknowledged revision");
+  assert.deepEqual(current, before, "acknowledging persistence cannot overwrite newer text or mark it delivered");
+  assert.equal(acknowledgedDraftTimestamp("draft-2", current.id, "2026-09-26T08:00:00Z", "2026-09-26T08:00:00Z", nextTimestamp), "2026-09-26T08:00:00Z");
+  assert.equal(acknowledgedDraftTimestamp(current.id, current.id, "2026-09-26T08:02:00Z", "2026-09-26T08:00:00Z", nextTimestamp), "2026-09-26T08:02:00Z", "out-of-order acknowledgements never roll a newer save backward");
 });

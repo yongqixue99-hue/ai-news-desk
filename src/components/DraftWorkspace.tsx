@@ -57,12 +57,15 @@ import {
 } from "../editor-utils";
 import { applyOptimizationChanges, applyOptimizationChangesToHtml } from "../optimization-patches";
 import {
+  acknowledgedDraftTimestamp,
   clearDraftRecoverySnapshot,
   editableDraftContent,
+  isCurrentDraftOperation,
   mergeSavedDraftMetadata,
   persistDraftRecoverySnapshot,
   restoreDraftFromRecovery,
   switchDraftSafely,
+  type DraftOperationIdentity,
 } from "../draft-stability";
 import { RichArticleEditor, type RichArticleEditorHandle } from "./RichArticleEditor";
 import { WeChatDraftPanel, type WeChatDraftMetadata } from "./WeChatDraftPanel";
@@ -70,7 +73,7 @@ import { DraftEvidencePanel } from "./DraftEvidencePanel";
 import { buildDraftEvidenceView } from "../../server/draft-evidence-view.js";
 import { draftStatusLabel, manualDraftStatuses } from "../draft-lifecycle-view";
 import { buildDraftQualityView } from "../draft-quality-view";
-import { currentPlatformPublicationConfirmation, withoutPlatformPublicationConfirmation } from "../publication-view";
+import { currentDraftDeliverySnapshot, currentPlatformPublicationConfirmation, platformDeliveryView, withoutPlatformPublicationConfirmation, type DraftDeliverySnapshot } from "../publication-view";
 import { buildExternalWritingPrompt } from "../external-writing-bridge";
 import { getRovingTabTarget } from "../hooks/rovingTabs";
 import type { CompletionAvailability } from "../../server/editorial-controls.js";
@@ -282,7 +285,9 @@ export function DraftWorkspace({
   const [draftLibraryOpen, setDraftLibraryOpen] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
   const [utilityTab, setUtilityTab] = useState<UtilityTab | null>(null);
   const [publisherStatus, setPublisherStatus] = useState(initialPublisherStatus);
-  const [deliveryView, setDeliveryView] = useState<Awaited<ReturnType<typeof api.primaryDeliveryStatus>>>();
+  const [deliverySnapshot, setDeliverySnapshot] = useState<DraftDeliverySnapshot<Awaited<ReturnType<typeof api.primaryDeliveryStatus>>>>();
+  const currentDeliverySnapshot = currentDraftDeliverySnapshot(editing, deliverySnapshot);
+  const deliveryView = currentDeliverySnapshot?.value;
   useEffect(() => setPublisherStatus(initialPublisherStatus), [initialPublisherStatus]);
   const [publishPlatform, setPublishPlatform] = useState<PublishPlatform | "social">("xiaoheihe");
   const [wechatMetadata, setWechatMetadata] = useState<WeChatDraftMetadata>(() =>
@@ -461,22 +466,25 @@ export function DraftWorkspace({
   const selectedLibraryDrafts = filteredDrafts.filter(draft => selectedDraftIds.includes(draft.id));
 
   const save = useCallback(async (mode: DraftSaveMode = "manual") => {
+    const requestedDraftId = editingRef.current?.id;
     if (activeSaveRef.current) {
       await activeSaveRef.current.catch(() => undefined);
     }
     const current = editingRef.current;
-    if (!current) return undefined;
+    if (!current || current.id !== requestedDraftId) return undefined;
     const versionAtStart = editVersionRef.current;
     const requestContent = editableDraftContent(current);
     const requestContentSnapshot = JSON.stringify(requestContent);
     setSaving(true);
     setSavingMode(mode);
     setSaveError("");
-    const operation = saveHandlerRef.current(current.id, { ...requestContent, updatedAt: persistedUpdatedAt.current }, mode);
+    const requestUpdatedAt = persistedUpdatedAt.current;
+    const operation = saveHandlerRef.current(current.id, { ...requestContent, updatedAt: requestUpdatedAt }, mode);
     activeSaveRef.current = operation;
     try {
       const saved = await operation;
-      if (editingRef.current?.id === saved.id) persistedUpdatedAt.current = saved.updatedAt;
+      const acknowledgedAt = acknowledgedDraftTimestamp(editingRef.current?.id, saved.id, persistedUpdatedAt.current, requestUpdatedAt, saved.updatedAt);
+      if (acknowledgedAt) persistedUpdatedAt.current = acknowledgedAt;
       const latest = editingRef.current;
       const requestStillCurrent = latest?.id === saved.id && editVersionRef.current === versionAtStart
         && JSON.stringify(editableDraftContent(latest)) === requestContentSnapshot;
@@ -486,8 +494,10 @@ export function DraftWorkspace({
         editingRef.current = next;
         return next;
       });
-      setLastSavedAt(saved.updatedAt);
-      setLastSaveMode(mode);
+      if (editingRef.current?.id === saved.id) {
+        setLastSavedAt(persistedUpdatedAt.current ?? saved.updatedAt);
+        setLastSaveMode(mode);
+      }
       if (requestStillCurrent) {
         dirtyRef.current = false;
         setDirty(false);
@@ -497,8 +507,10 @@ export function DraftWorkspace({
       return saved;
     } catch (error) {
       const latest = editingRef.current;
-      if (latest) persistDraftRecoverySnapshot(window.localStorage, latest);
-      setSaveError(mode === "auto" ? "自动保存失败，内容仍在当前页面" : "保存失败，请重试");
+      if (latest?.id === current.id) {
+        persistDraftRecoverySnapshot(window.localStorage, latest);
+        setSaveError(mode === "auto" ? "自动保存失败，内容仍在当前页面" : "保存失败，请重试");
+      }
       throw error;
     } finally {
       if (activeSaveRef.current === operation) activeSaveRef.current = null;
@@ -682,9 +694,20 @@ export function DraftWorkspace({
   useEffect(() => {
     if (utilityTab !== "publish" || !editing) return;
     let active = true;
+    let refreshing = false;
+    const identity = { draftId: editing.id, updatedAt: editing.updatedAt };
     const refresh = () => {
+      if (refreshing) return;
+      refreshing = true;
       void api.publisherStatus().then(status => { if (active) setPublisherStatus(status); }).catch(() => undefined);
-      void api.primaryDeliveryStatus(editing.id).then(status => { if (active) setDeliveryView(status); }).catch(() => undefined);
+      void api.primaryDeliveryStatus(identity.draftId)
+        .then(value => { if (active) setDeliverySnapshot({ ...identity, value }); })
+        .catch(() => {
+          if (active) setDeliverySnapshot(previous => ({ ...identity,
+            value: currentDraftDeliverySnapshot({ id: identity.draftId, updatedAt: identity.updatedAt }, previous)?.value,
+            loadFailed: true }));
+        })
+        .finally(() => { refreshing = false; });
     };
     refresh(); const timer = window.setInterval(refresh, 5000);
     return () => { active = false; window.clearInterval(timer); };
@@ -911,16 +934,23 @@ export function DraftWorkspace({
     updateImageGovernance(placementId, { allowedPlatforms });
   };
 
-  const prepareXiaoheihe = async (saveFirst: boolean) => {
+  const prepareXiaoheihe = async (saveFirst: boolean, operation: DraftOperationIdentity) => {
     if (saveFirst) await save("manual");
+    if (!isCurrentDraftOperation(editingRef.current, editVersionRef.current, operation)) return undefined;
     if (dirtyRef.current) throw new Error("仍有未保存修改，请稍后重试");
-    const result = await onFill(editing.id, persistedUpdatedAt.current);
+    const requestUpdatedAt = persistedUpdatedAt.current;
+    const result = await onFill(operation.draftId, requestUpdatedAt);
+    const acknowledgedAt = acknowledgedDraftTimestamp(editingRef.current?.id, operation.draftId, persistedUpdatedAt.current, requestUpdatedAt, result?.localDraftUpdatedAt);
+    if (acknowledgedAt && acknowledgedAt !== persistedUpdatedAt.current) {
+      persistedUpdatedAt.current = acknowledgedAt;
+      setLastSavedAt(acknowledgedAt);
+    }
+    if (!isCurrentDraftOperation(editingRef.current, editVersionRef.current, operation)) return result;
     if (!result) throw new Error("小黑盒填入未完成，请查看页面顶部提示");
     setFillResult(result);
-    if (result.localDraftUpdatedAt) { persistedUpdatedAt.current = result.localDraftUpdatedAt; setLastSavedAt(result.localDraftUpdatedAt); }
     if (result?.preflight) setPreflight(result.preflight);
     setEditing((current) => {
-      if (!current) return current;
+      if (!current || !isCurrentDraftOperation(current, editVersionRef.current, operation)) return current;
       const next = {
         ...current,
         fillResult: result,
@@ -942,13 +972,16 @@ export function DraftWorkspace({
     if (deliveryLock.current) return;
     const selection = xiaoheiheSelection(editingRef.current ?? editing, deliveryView?.xiaoheiheNextCompanion);
     updateEditing({ community: selection.community, topics: selection.topics, xiaoheiheOptions: selection.options });
+    const operation = { draftId: editing.id, editVersion: editVersionRef.current };
     deliveryLock.current = true;
     setDeliveryBusy(true);
     setPreflightError("");
     try {
-      await prepareXiaoheihe(true);
+      await prepareXiaoheihe(true, operation);
     } catch (error) {
-      setPreflightError(error instanceof Error ? error.message : String(error));
+      if (isCurrentDraftOperation(editingRef.current, editVersionRef.current, operation)) {
+        setPreflightError(error instanceof Error ? error.message : String(error));
+      }
     } finally {
       deliveryLock.current = false;
       setDeliveryBusy(false);
@@ -960,12 +993,14 @@ export function DraftWorkspace({
     deliveryLock.current = true; setDeliveryBusy(true);
     try {
     updateWechatMetadata({ author: input.author ?? "", digest: input.digest ?? "", contentSourceUrl: input.contentSourceUrl ?? "", coverPlacementId: input.coverPlacementId });
+    const operation = { draftId: editing.id, editVersion: editVersionRef.current };
     const saved = await save("manual");
+    if (!isCurrentDraftOperation(editingRef.current, editVersionRef.current, operation)) return undefined;
     if (!saved || dirtyRef.current) throw new Error("仍有未保存修改，请保存后再同步");
-    const receipt = await onSyncWeChatDraft(editing.id, { ...input, updatedAt: saved.updatedAt });
+    const receipt = await onSyncWeChatDraft(operation.draftId, { ...input, updatedAt: saved.updatedAt });
     if (receipt) {
       setEditing((current) => {
-        if (!current) return current;
+        if (!current || !isCurrentDraftOperation(current, editVersionRef.current, operation)) return current;
         const currentWechatConfirmation = currentPlatformPublicationConfirmation(current, "wechat");
         const next = {
           ...current,
@@ -983,11 +1018,12 @@ export function DraftWorkspace({
   };
 
   const confirmPublication = async (platform: PublishPlatform) => {
+    const operation = { draftId: editing.id, editVersion: editVersionRef.current };
     setConfirmingPublication(true);
     try {
-      const confirmation = await onConfirmPublished(editing.id, platform);
+      const confirmation = await onConfirmPublished(operation.draftId, platform);
       setEditing((current) => {
-        if (!current) return current;
+        if (!current || !isCurrentDraftOperation(current, editVersionRef.current, operation)) return current;
         const next = {
           ...current,
           status: "published" as const,
@@ -1271,13 +1307,9 @@ export function DraftWorkspace({
         ? { title: "版本历史", subtitle: "自动保存与随时恢复" }
         : { title: "交付草稿", subtitle: "同步后，由你在平台手动发布" };
   const publisherReady = Boolean(publisherStatus?.ok);
-  const deliveryStatusLabel = (platform: PublishPlatform) => {
-    const status = deliveryView?.[platform].status;
-    if (dirty && ["current", "pending"].includes(status || "")) return "修改待同步";
-    return status === "current" ? platform === "wechat" ? "已核对" : "已填入"
-      : status === "changed" ? "修改待同步" : status === "unknown" ? "待核对结果"
-      : status === "pending" ? "待回读核对" : status === "failed" ? "需要处理" : "未发送";
-  };
+  const deliveryPresentation = (platform: PublishPlatform) => platformDeliveryView({ platform,
+    status: deliveryView?.[platform].status, dirty, loadFailed: currentDeliverySnapshot?.loadFailed });
+  const deliveryStatusLabel = (platform: PublishPlatform) => deliveryPresentation(platform).label;
   const draftQuality = buildDraftQualityView(editing.qualityWarnings);
   const passedReadinessCount = readiness.filter((item) => item.ok).length;
   const nextAction = editing.provenance.generatedBy === "human" && !editing.provenance.contentPackageId && !editing.sources.length
@@ -1901,7 +1933,7 @@ export function DraftWorkspace({
                   {publishPlatform === "xiaoheihe" ? (
                     <>
                   <XiaoheiheDeliveryPanel key={editing.id} draft={editing} nextCompanion={deliveryView?.xiaoheiheNextCompanion}
-                    busy={busy || deliveryBusy} connected={publisherReady} stale={dirty || deliveryView?.xiaoheihe.status !== "current"}
+                    busy={busy || deliveryBusy} connected={publisherReady} status={deliveryPresentation("xiaoheihe").status}
                     result={fillResult} error={preflightError} selectedImageIds={[...insertedMediaIds]} onChange={updateEditing}
                     onSend={() => void fill()} onSettings={() => onOpenPublisherSettings("xiaoheihe")} onUpload={uploadImage}
                     onConfirmPublished={() => void confirmPublication("xiaoheihe")} publicationRemembered={rememberedPublication} />

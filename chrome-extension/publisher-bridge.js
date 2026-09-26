@@ -42,9 +42,11 @@ export function createPublisherBridgeClient({
   version,
   fetcher = fetch,
   runJob,
+  now = Date.now,
 }) {
   let pairingToken = "";
   let busy = false;
+  let pendingReport;
 
   const request = (path, options = {}) => fetcher(`${origin}${path}`, options);
   const authorizedOptions = (token, options = {}) => ({
@@ -70,6 +72,29 @@ export function createPublisherBridgeClient({
     if (shouldRepairPairing(response.status)) pairingToken = "";
   };
 
+  const reportPending = async (token) => {
+    if (now() - pendingReport.createdAt > 240_000) {
+      pendingReport = undefined;
+      throw new Error("填入结果未获工作台确认；请先检查已打开的小黑盒草稿，不要重复填入");
+    }
+    const response = await request(
+      `/api/publisher/extension/jobs/${encodeURIComponent(pendingReport.jobId)}/result`,
+      authorizedOptions(token, { method: "POST", body: pendingReport.body }),
+    );
+    if (response.status === 410) {
+      pendingReport = undefined;
+      throw new Error("工作台任务已结束，填入结果未确认；请检查已打开的小黑盒草稿，不要重复填入");
+    }
+    if (!response.ok) {
+      repairPairingIfNeeded(response);
+      return { status: "disconnected" };
+    }
+    const acknowledgement = await response.json().catch(() => undefined);
+    if (acknowledgement?.ok !== true) return { status: "disconnected" };
+    pendingReport = undefined;
+    return { status: "completed" };
+  };
+
   const tick = async () => {
     if (busy) return { status: "busy" };
     busy = true;
@@ -86,6 +111,9 @@ export function createPublisherBridgeClient({
         repairPairingIfNeeded(heartbeat);
         return { status: "disconnected" };
       }
+
+      // A lost acknowledgement must retry transport, never the platform write.
+      if (pendingReport) return await reportPending(token);
 
       const next = await request(
         `/api/publisher/extension/jobs/next?clientId=${encodeURIComponent(clientId)}`,
@@ -115,18 +143,12 @@ export function createPublisherBridgeClient({
         };
       }
 
-      const report = await request(
-        `/api/publisher/extension/jobs/${encodeURIComponent(job.id)}/result`,
-        authorizedOptions(token, {
-          method: "POST",
-          body: JSON.stringify({ clientId, ...result }),
-        }),
-      );
-      if (!report.ok) {
-        repairPairingIfNeeded(report);
-        return { status: "disconnected" };
-      }
-      return { status: "completed" };
+      pendingReport = {
+        jobId: job.id,
+        body: JSON.stringify({ ...result, clientId }),
+        createdAt: now(),
+      };
+      return await reportPending(token);
     } finally {
       busy = false;
     }

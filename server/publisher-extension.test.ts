@@ -226,6 +226,53 @@ test("extension bridge rejects publishing while the helper is disconnected", () 
   assert.throws(() => bridge.submit(job()), /尚未连接/);
 });
 
+test("duplicate receipt acknowledgements require the same token, client and result and expire", async () => {
+  let now = 1_000;
+  const bridge = new ExtensionPublisherBridge(() => now, 1_000);
+  bridge.heartbeat(bridge.token, "client", MINIMUM_EXTENSION_VERSION);
+  const completion = bridge.submit(job("receipt-retry"));
+  bridge.claim(bridge.token, "client");
+  const report = { pageUrl: "https://xiaoheihe.cn/editor", steps: [{ name: "配图", ok: false, detail: "上传失败" }] };
+  assert.deepEqual(bridge.complete(bridge.token, "client", "receipt-retry", report), { ok: true });
+  assert.deepEqual(await completion, report, "ACK confirms receipt transport, not successful platform delivery");
+  assert.deepEqual(bridge.complete(bridge.token, "client", "receipt-retry", structuredClone(report)), { ok: true });
+  assert.throws(() => bridge.complete("wrong", "client", "receipt-retry", report), /配对/);
+  assert.throws(() => bridge.complete(bridge.token, "another", "receipt-retry", report), /不属于/);
+  assert.throws(() => bridge.complete(bridge.token, "client", "receipt-retry", { ...report, steps: [{ ...report.steps[0], ok: true }] }), /不一致/);
+  assert.throws(() => bridge.complete(bridge.token, "client", "missing", report), /不存在/);
+  now += 5 * 60_000 + 1;
+  assert.throws(() => bridge.complete(bridge.token, "client", "receipt-retry", report), /不存在/);
+});
+
+test("receipt acknowledgement history retains only the most recent 100 jobs", async () => {
+  const bridge = new ExtensionPublisherBridge(Date.now, 1_000);
+  bridge.heartbeat(bridge.token, "client", MINIMUM_EXTENSION_VERSION);
+  const report = { steps: [{ name: "正文", ok: true, detail: "已填入" }] };
+  for (let index = 0; index < 101; index++) {
+    const id = `receipt-${index}`;
+    const completion = bridge.submit(job(id));
+    assert.equal(bridge.claim(bridge.token, "client")?.id, id);
+    bridge.complete(bridge.token, "client", id, report);
+    await completion;
+  }
+  assert.throws(() => bridge.complete(bridge.token, "client", "receipt-0", report), /不存在/);
+  assert.deepEqual(bridge.complete(bridge.token, "client", "receipt-1", report), { ok: true });
+  assert.deepEqual(bridge.complete(bridge.token, "client", "receipt-100", report), { ok: true });
+});
+
+test("gone receipt jobs are terminal only after valid authentication", async () => {
+  const bridge = new ExtensionPublisherBridge(Date.now, 10);
+  bridge.heartbeat(bridge.token, "client", MINIMUM_EXTENSION_VERSION);
+  const hasStatus = (status: number) => (error: unknown) => error instanceof Error && "status" in error && error.status === status;
+  assert.throws(() => bridge.complete("old-token", "client", "missing", { steps: [] }), hasStatus(401));
+  assert.throws(() => bridge.complete(bridge.token, "client", "missing", { steps: [] }), hasStatus(410));
+  const completion = bridge.submit(job("expired-job"));
+  bridge.claim(bridge.token, "client");
+  assert.throws(() => bridge.complete(bridge.token, "another", "expired-job", { steps: [] }), hasStatus(403));
+  await assert.rejects(completion, /超时/);
+  assert.throws(() => bridge.complete(bridge.token, "client", "expired-job", { steps: [] }), hasStatus(410));
+});
+
 test("a long image upload cannot be claimed twice by the workbench and background worker", async () => {
   let clock = 1;
   const bridge = new ExtensionPublisherBridge(() => clock, 1000);

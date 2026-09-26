@@ -1,5 +1,25 @@
 import type { ArticleDraft } from "./types.js";
 
+export interface DraftOperationIdentity {
+  draftId: string;
+  editVersion: number;
+}
+
+export const isCurrentDraftOperation = (
+  current: Pick<ArticleDraft, "id"> | undefined,
+  editVersion: number,
+  operation: DraftOperationIdentity,
+) => current?.id === operation.draftId && editVersion === operation.editVersion;
+
+export const acknowledgedDraftTimestamp = (
+  currentDraftId: string | undefined,
+  responseDraftId: string,
+  currentTimestamp: string | undefined,
+  requestTimestamp: string | undefined,
+  responseTimestamp: string | undefined,
+) => currentDraftId === responseDraftId && currentTimestamp === requestTimestamp && responseTimestamp
+  ? responseTimestamp : currentTimestamp;
+
 interface SwitchDraftSafelyOptions {
   targetDraftId: string;
   hasDirtyChanges: () => boolean;

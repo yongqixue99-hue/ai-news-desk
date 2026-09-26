@@ -149,7 +149,7 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     const { token } = await (await fetch(`${origin}/api/publisher/extension/bootstrap`)).json();
     const headers = { 'content-type': 'application/json', 'x-ai-news-extension-token': token };
     const clientId = 'delivery-e2e';
-    const fillOnce = async () => {
+    const fillOnce = async (buttonName = '送到小黑盒') => {
       await fetch(`${origin}/api/publisher/extension/heartbeat`, { method: 'POST', headers, body: JSON.stringify({ clientId, version: '0.1.24' }) });
       const receive = async () => {
         const deadline = Date.now() + 20_000;
@@ -168,12 +168,29 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
         throw new Error('No extension job was queued');
       };
       const job = receive();
-      await page.getByRole('button', { name: '送到小黑盒', exact: true }).click();
+      await page.getByRole('button', { name: buttonName, exact: true }).click();
       await job;
       await page.getByText('已填好，可以前往检查', { exact: true }).waitFor();
     };
     await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
     await fillOnce();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: '交付草稿', exact: true }).click();
+    await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
+    await page.getByRole('link', { name: '打开小黑盒检查', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: '送到小黑盒', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: '重新填入', exact: true }).isVisible(), true);
+    assert.equal(await page.getByRole('link', { name: '打开小黑盒检查', exact: true }).getAttribute('href'), 'https://www.xiaoheihe.cn/creator/editor/draft/article');
+    // A failed status read is neither proof of a local edit nor loss of its receipt.
+    await page.route('**/api/drafts/delivery-ui/delivery-status', route => route.fulfill({ status: 503, json: { error: '测试临时断线' } }));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: '交付草稿', exact: true }).click();
+    await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
+    await page.getByText('暂时无法核对交付状态', { exact: true }).waitFor();
+    assert.equal(await page.getByText('内容有更新，再送一次即可', { exact: true }).isVisible(), false);
+    assert.equal(await page.getByRole('link', { name: '查看上次填入页面', exact: true }).isVisible(), true);
+    await page.unroute('**/api/drafts/delivery-ui/delivery-status');
+    await page.getByRole('link', { name: '打开小黑盒检查', exact: true }).waitFor();
     await page.getByRole('textbox', { name: '文章标题', exact: true }).fill('填入后继续编辑的标题');
     const saveAck = page.waitForResponse(response => response.url().endsWith('/api/drafts/delivery-ui') && response.request().method() === 'PATCH');
     await page.getByRole('button', { name: '保存草稿', exact: true }).click();
@@ -185,8 +202,14 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: '交付草稿', exact: true }).click();
     await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
-    await page.getByRole('button', { name: '送到小黑盒', exact: true }).waitFor();
-    await fillOnce();
+    await page.getByRole('button', { name: '更新到小黑盒', exact: true }).waitFor();
+    await fillOnce('更新到小黑盒');
+    for (const width of [1440, 596, 390, 320]) {
+      await page.setViewportSize({ width, height: 1000 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      assert.equal(await page.getByRole('link', { name: '打开小黑盒检查', exact: true }).isVisible(), true);
+      await page.screenshot({ path: path.join(shots, `xiaoheihe-delivery-${width}.png`) });
+    }
     await primaryTabs.getByRole('tab', { name: /微信公众号/ }).click();
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: 1000 });

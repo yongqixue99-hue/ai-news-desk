@@ -4,13 +4,14 @@ import type { ArticleDraft, DraftImagePlacement, PublisherResult } from "../type
 import { XHH_FIXED_TOPICS, xiaoheiheSelection } from "../../server/xiaoheihe-publishing";
 import { XiaoheiheFormatPanel } from "./XiaoheiheFormatPanel";
 import { xiaoheiheTitleLength, xiaoheiheTitleLimit } from "../../server/xiaoheihe-format";
+import type { PlatformDeliveryDisplayStatus } from "../publication-view";
 
 interface Props {
   draft: ArticleDraft;
   nextCompanion?: "Steam" | "数码硬件";
   busy: boolean;
   connected: boolean;
-  stale: boolean;
+  status: PlatformDeliveryDisplayStatus;
   result?: PublisherResult;
   error: string;
   selectedImageIds: string[];
@@ -22,7 +23,7 @@ interface Props {
   publicationRemembered: boolean;
 }
 
-export function XiaoheiheDeliveryPanel({ draft, nextCompanion, busy, connected, stale, result, error, selectedImageIds, onChange, onSend, onSettings, onUpload, onConfirmPublished, publicationRemembered }: Props) {
+export function XiaoheiheDeliveryPanel({ draft, nextCompanion, busy, connected, status, result, error, selectedImageIds, onChange, onSend, onSettings, onUpload, onConfirmPublished, publicationRemembered }: Props) {
   const selection = xiaoheiheSelection(draft, nextCompanion);
   const options = selection.options;
   const titleLength = xiaoheiheTitleLength(draft.title);
@@ -33,17 +34,29 @@ export function XiaoheiheDeliveryPanel({ draft, nextCompanion, busy, connected, 
   const disabled = busy || uploading;
   const update = (patch: Partial<NonNullable<ArticleDraft["xiaoheiheOptions"]>>) => onChange({ xiaoheiheOptions: { ...options, ...patch } });
   const receiptUrl = result?.pageUrl && /^https:\/\/(www\.)?xiaoheihe\.cn\//u.test(result.pageUrl) ? result.pageUrl : "https://www.xiaoheihe.cn/creator/content";
+  const current = status === "current" && result?.ok;
+  const failedSteps = status === "failed" && !result?.ok ? result?.steps.filter(step => !step.ok) ?? [] : [];
+  const repeatedStepError = failedSteps.length > 0 && error === failedSteps.map(step => `${step.name}：${step.detail}`).join("；");
+  const sendLabel = status === "changed" ? "更新到小黑盒" : status === "failed" ? "重试填入" : "送到小黑盒";
+  const receiptLabel = status === "checking" ? "正在核对交付记录"
+    : status === "unknown" ? "暂时无法核对交付状态"
+    : status === "changed" ? "内容有更新，再送一次即可"
+    : status === "failed" ? "还有项目未填好"
+    : current ? "已填好，可以前往检查" : "上次交付记录";
   const planName = options.creationPlan === "none" ? "不参与" : options.creationPlan === "hot" ? "热点计划" : draft.contentFormat === "image-post" ? "图文计划" : "文章计划";
   return <section className="xhh-delivery" aria-label="小黑盒发布设置">
-    <div className="xhh-delivery-heading"><div><strong>送到小黑盒</strong><p><span className={titleLength > xiaoheiheTitleLimit ? "xhh-title-over-limit" : undefined}>标题 {titleLength}/{xiaoheiheTitleLimit} 字</span> · 与小黑盒计数一致</p></div><button className="xhh-icon-button" aria-label="小黑盒连接设置" title="连接设置" onClick={onSettings}><Settings2 size={16} /></button></div>
-    <button className="primary-button full xhh-send" disabled={disabled} onClick={onSend}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}{busy ? "正在准备并填入…" : "送到小黑盒"}</button>
-    <p className="xhh-send-note">{connected ? "自动保存并检查，随后打开小黑盒供你发布" : "自动连接 Chrome 并填入，随后由你检查发布"}</p>
-    {error ? <p className="delivery-error" role="alert">{error}</p> : null}
-    {result ? <div className={`xhh-receipt ${result.ok && !stale ? "ready" : "attention"}`}>
-      <div><strong>{result.ok ? stale ? "内容有更新，再送一次即可" : "已填好，可以前往检查" : "还有项目未填好"}</strong><a href={receiptUrl} target="_blank" rel="noreferrer">打开小黑盒 <ArrowUpRight size={14} /></a></div>
-      {!result.ok ? result.steps.filter(step => !step.ok).map(step => <p key={step.name}>{step.name}：{step.detail}</p>) : null}
-      <details><summary>填入明细</summary>{result.steps.map(step => <p key={step.name}>{step.ok ? "✓" : "!"} {step.name} · {step.detail}</p>)}{result.ok && !stale ? <button className="xhh-text-button" disabled={publicationRemembered || busy} onClick={onConfirmPublished}>{publicationRemembered ? "已记录发布" : "我已在小黑盒发布，记录本次交付"}</button> : null}</details>
-    </div> : null}
+    <div className="xhh-delivery-heading"><div><strong>小黑盒</strong><p><span className={titleLength > xiaoheiheTitleLimit ? "xhh-title-over-limit" : undefined}>标题 {titleLength}/{xiaoheiheTitleLimit} 字</span> · 与小黑盒计数一致</p></div><button className="xhh-icon-button" aria-label="小黑盒连接设置" title="连接设置" onClick={onSettings}><Settings2 size={16} /></button></div>
+    {current && !disabled
+      ? <a className="primary-button full xhh-send" href={receiptUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={17} />打开小黑盒检查</a>
+      : <button className="primary-button full xhh-send" disabled={disabled} onClick={onSend}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}{busy ? "正在准备并填入…" : sendLabel}</button>}
+    <p className="xhh-send-note">{current ? "当前版本已填入，检查后在小黑盒点击发布" : connected ? "自动保存并检查，随后打开小黑盒供你发布" : "自动连接 Chrome 并填入，随后由你检查发布"}</p>
+    {error && !repeatedStepError ? <p className="delivery-error" role="alert">{error}</p> : null}
+    {result ? <div className={`xhh-receipt ${current ? "ready" : status === "changed" || status === "failed" ? "attention" : "neutral"}`}>
+      <div role="status"><strong>{receiptLabel}</strong>{current ? null : <a href={receiptUrl} target="_blank" rel="noreferrer">查看上次填入页面 <ArrowUpRight size={14} /></a>}</div>
+      {failedSteps.length ? <div role="alert">{failedSteps.map(step => <p key={step.name}>{step.name}：{step.detail}</p>)}</div> : null}
+      {current ? <button className="xhh-text-button xhh-refill" disabled={disabled} onClick={onSend}>重新填入</button> : null}
+      <details><summary>填入明细</summary>{result.steps.map(step => <p key={step.name}>{step.ok ? "✓" : "!"} {step.name} · {step.detail}</p>)}{current ? <button className="xhh-text-button" disabled={publicationRemembered || busy} onClick={onConfirmPublished}>{publicationRemembered ? "已记录发布" : "我已在小黑盒发布，记录本次交付"}</button> : null}</details>
+    </div> : status === "checking" || status === "unknown" ? <p className="xhh-status-note" role="status">{receiptLabel}</p> : null}
     <div className="xhh-settings" inert={disabled}>
       <details className="xhh-disclosure"><summary><span><strong>社区与话题</strong><small>{selection.communities.join(" · ")} · {selection.topics.length} 个话题</small></span><ChevronDown size={15} /></summary>
         <label className="xhh-field"><span>主要社区</span><input aria-label="关联社区" list="xhh-community-options" value={draft.community} placeholder="盒友杂谈" onChange={event => onChange({ community: event.target.value, xiaoheiheOptions: options })} /><datalist id="xhh-community-options">{["盒友杂谈", "CodeX", "Steam", "数码硬件"].map(value => <option value={value} key={value} />)}</datalist></label>

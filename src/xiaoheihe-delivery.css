@@ -4,7 +4,7 @@
 .xhh-delivery-heading p { margin: 7px 0 0; color: #777c76; font-size: 12px; }
 .xhh-title-over-limit { color: #b72824; }
 .xhh-icon-button { border: 0; background: transparent; color: #878b85; padding: 5px; cursor: pointer; }
-.xhh-send { min-height: 43px; border-radius: 7px; font-size: 14px; }
+.xhh-send { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 43px; border-radius: 7px; font-size: 14px; text-decoration: none; }
 .xhh-send-note { margin: 10px 0 23px; text-align: center; color: #898d87; font-size: 11px; line-height: 1.6; }
 .xhh-disclosure { border-top: 1px solid #eceee9; padding: 0 0 4px; }
 .xhh-disclosure > summary { display: flex; align-items: center; justify-content: space-between; padding: 17px 0; gap: 10px; cursor: pointer; list-style: none; }
@@ -31,6 +31,9 @@
 .xhh-cover-empty { display: grid; place-items: center; background: #eff1eb; color: #a1a697; }
 .xhh-receipt { border-left: 2px solid #608369; background: #f5f8f3; padding: 13px; margin: 0 0 18px; }
 .xhh-receipt.attention { border-color: #c79441; background: #fdf9f1; }
+.xhh-receipt.neutral { border-color: #b4b9b1; background: #f6f7f5; }
+.xhh-status-note { font-size: 12px; color: #777c76; margin: -10px 0 18px; }
+.xhh-refill { margin-top: 9px; text-decoration: underline; text-underline-offset: 3px; }
 .xhh-receipt > div { display: grid; gap: 8px; }
 .xhh-receipt strong { font-size: 12px; }
 .xhh-receipt a { display: inline-flex; align-items: center; font-size: 12px; color: #48634b; }

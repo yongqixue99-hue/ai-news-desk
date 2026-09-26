@@ -4,6 +4,7 @@ const VERSION = chrome.runtime.getManifest().version;
 
 let pairingToken = "";
 let busy = false;
+let pendingReport;
 
 const workbenchFetch = (path, options = {}) => fetch(`${WORKBENCH_ORIGIN}${path}`, options);
 
@@ -43,14 +44,28 @@ const authorizedOptions = (token, options = {}) => ({
   },
 });
 
-async function reportJob(token, jobId, result) {
-  await workbenchFetch(
-    `/api/publisher/extension/jobs/${encodeURIComponent(jobId)}/result`,
+async function reportPendingJob(token) {
+  if (Date.now() - pendingReport.createdAt > 240_000) {
+    pendingReport = undefined;
+    throw new Error("填入结果未获工作台确认；请先检查已打开的小黑盒草稿，不要重复填入");
+  }
+  const response = await workbenchFetch(
+    `/api/publisher/extension/jobs/${encodeURIComponent(pendingReport.jobId)}/result`,
     authorizedOptions(token, {
       method: "POST",
-      body: JSON.stringify({ clientId: CLIENT_ID, ...result }),
+      body: pendingReport.body,
     }),
   );
+  if (response.status === 410) {
+    pendingReport = undefined;
+    throw new Error("工作台任务已结束，填入结果未确认；请检查已打开的小黑盒草稿，不要重复填入");
+  }
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403 || response.status >= 500) pairingToken = "";
+    return;
+  }
+  const acknowledgement = await response.json().catch(() => undefined);
+  if (acknowledgement?.ok === true) pendingReport = undefined;
 }
 
 async function bridgeTick() {
@@ -70,6 +85,11 @@ async function bridgeTick() {
     );
     if (!heartbeat.ok) {
       if (heartbeat.status === 401 || heartbeat.status === 403 || heartbeat.status === 500) pairingToken = "";
+      return;
+    }
+
+    if (pendingReport) {
+      await reportPendingJob(token);
       return;
     }
 
@@ -95,7 +115,12 @@ async function bridgeTick() {
         }],
       };
     }
-    await reportJob(token, job.id, result);
+    pendingReport = {
+      jobId: job.id,
+      body: JSON.stringify({ ...result, clientId: CLIENT_ID }),
+      createdAt: Date.now(),
+    };
+    await reportPendingJob(token);
   } catch (error) {
     console.warn("[AI 新闻工作台] 填入助手暂时无法连接：", error);
   } finally {
