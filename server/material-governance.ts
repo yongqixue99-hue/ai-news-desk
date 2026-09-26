@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 export type MaterialRightsStatus =
   | "owned"
+  | "user-provided"
   | "licensed"
   | "official"
   | "editorial-screenshot"
@@ -55,6 +56,7 @@ export interface MaterialGovernanceInput {
 
 const rightsStatuses = new Set<MaterialRightsStatus>([
   "owned",
+  "user-provided",
   "licensed",
   "official",
   "editorial-screenshot",

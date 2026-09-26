@@ -1,3 +1,11 @@
+import { inspectXiaoheiheCover } from "./xiaoheihe-cover.js";
+import { normalizeXiaoheiheOptions, reserveXiaoheiheDefaults, xiaoheiheSelection } from "./xiaoheihe-publishing.js";
+import { ensurePublisherConnected } from "./publishing.js";
+import type { WeChatDraftSyncReceipt } from "./types.js";
+import { primaryDeliveryStatus, wechatPreflight, beginWeChatAttempt, resolveWeChatAttempt, unresolvedWeChatAttempt } from "./primary-delivery.js";
+import { WeChatApiError } from "./wechat-http.js";
+import { normalizeWeChatMetadata, wechatMetadataFor } from "./wechat-metadata.js";
+import { registerDraftLibraryRoutes } from "./draft-library-routes.js";
 import { registerSocialDeliveryRoutes, startSocialBridge } from "./social-delivery-routes.js";
 import { buildAggregationView, retainAggregationEntry } from "./aggregation-desk.js";
 import { aggregationSourceIds } from "./aggregation-catalog.js";
@@ -87,6 +95,7 @@ import {
   recordXiaoheiheFillAttempt,
 } from "./publication-state.js";
 import { importDraftImageFromUrl, saveUploadedDraftImage } from "./media.js";
+import { normalizeLegacyUserUpload } from "./user-provided-media.js";
 import {
   buildScreenshotImagePostDraft,
   saveScreenshotImagePostAssets,
@@ -114,11 +123,10 @@ import {
   extensionPublisherBridge,
   MINIMUM_EXTENSION_VERSION,
   UnsupportedExtensionVersionError,
+  ExtensionPublisherProtocolError,
 } from "./publisher-extension.js";
 import {
   appendEditorialReadiness,
-  completePublisherAttempt,
-  createPublisherAttempt,
   evaluatePublisherPreflight,
   publisherRuntimeFromStatus,
 } from "./publisher-preflight.js";
@@ -166,6 +174,7 @@ import { createWeChatDraftDesk } from "./wechat-draft.js";
 import { createWeChatHttpGateway } from "./wechat-http.js";
 import { loadWeChatPlacementImage } from "./wechat-image.js";
 import { createDeliveryDesk } from "./delivery-desk.js";
+import { createXiaoheiheDelivery } from "./xiaoheihe-delivery.js";
 import { contentPackageDesk } from "./content-package-desk.js";
 import { buildHomeNews, buildTodayView, storyById, retainStoryForWriting } from "./story-desk.js";
 import { enrichStoryExplanation } from "./story-explanation-service.js";
@@ -248,7 +257,7 @@ const port = Number(process.env.AI_NEWS_DESK_PORT || 4317);
 const deliveryDesk = createDeliveryDesk();
 const portableArchiveImportConfirmations = createPortableArchiveImportConfirmationDesk();
 
-app.use(createLocalSecurityMiddleware(port));
+app.use(createLocalSecurityMiddleware(port, { publisherExtensionToken: () => extensionPublisherBridge.token }));
 app.use((request, response, next) => {
   const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
   if (mutating && request.path !== "/api/data/archive/import" && isPortableArchiveImportActive()) {
@@ -274,6 +283,15 @@ const asyncRoute =
   (handler: (request: express.Request, response: express.Response) => Promise<void>) =>
   (request: express.Request, response: express.Response, next: express.NextFunction) =>
     handler(request, response).catch(next);
+
+const deliveryRoute = (handler: (request: express.Request, response: express.Response) => Promise<void>) =>
+  asyncRoute(async (request, response) => {
+    try { await handler(request, response); }
+    catch (error) {
+      const detail = error instanceof Error ? error.message : "发送未完成，请检查连接后重试";
+      response.status(error instanceof PublicationRevisionConflictError ? 409 : 400).json({ error: detail });
+    }
+  });
 
 const validDateInput = (value: string) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -364,9 +382,14 @@ const publisherPreflightFor = async (
     return {
       id: placement.id,
       available: inspected.available && fingerprintMatches,
-      caption: captions.get(placement.id) || placement.caption || placement.image.caption,
+      caption: captions.get(placement.id) ?? (placement.caption || placement.image.caption),
+      captionRequired: placement.image.rights !== "user-provided",
     };
   }));
+  const selection = draft.xiaoheiheOptions ? xiaoheiheSelection(draft) : undefined;
+  const coverId = selection?.options.creationPlan !== "none" ? selection?.options.coverPlacementId : undefined;
+  const cover = coverId ? placementsById.get(coverId) : undefined;
+  const inspectedCover = cover ? await inspectXiaoheiheCover(cover) : undefined;
   const preflight = evaluatePublisherPreflight({
     expectedRevisionHash,
     runtime: publisherRuntimeFromStatus(status, {
@@ -381,8 +404,11 @@ const publisherPreflightFor = async (
       bodyHtml: draft.contentFormat === "image-post"
         ? publisherImagePostBodyHtml(draft)
         : publisherBodyHtml(draft),
-      community: draft.community,
-      topics: draft.topics,
+      community: selection?.communities.join(" · ") ?? draft.community,
+      topics: selection?.topics ?? draft.topics,
+      xiaoheiheOptions: selection?.options,
+      coverProblem: inspectedCover?.reason,
+      coverAvailable: Boolean(inspectedCover?.available && inspectedCover.fingerprint && inspectedCover.fingerprint === cover?.image.fingerprint),
       images: inspectedImages,
     },
     minimumProtocolVersion: MINIMUM_EXTENSION_VERSION,
@@ -392,7 +418,7 @@ const publisherPreflightFor = async (
   // force the editor to clear rights metadata before filling the article.
   const readiness = evaluateDraftReadiness({
     ...draft,
-    images: draft.images.filter((placement) => inserted.has(placement.id)),
+    images: draft.images.filter((placement) => inserted.has(placement.id) || placement.id === coverId),
   }, "xiaoheihe");
   const quality = reviewDraftQuality(draft, await getLocalDatabase());
   readiness.factBlockers.push(...quality.blockers);
@@ -402,6 +428,7 @@ const publisherPreflightFor = async (
 };
 
 registerSocialDeliveryRoutes(app);
+registerDraftLibraryRoutes(app);
 
 app.get(
   "/api/bootstrap",
@@ -418,6 +445,7 @@ app.get(
       ...state,
       aiSettings: { ...state.aiSettings, skills },
       draftRevisions: [],
+      draftTrash: [],
       articleAgentThreads: [],
     });
   }),
@@ -2429,12 +2457,18 @@ app.patch(
       for (const key of ["title", "paragraphs", "take", "sources", "factClaims", "uncertainties", "images", "community", "topics", "status", "contentFormat", "imagePostImageIds", "layoutTheme"] as const) {
         if (body[key] !== undefined) (target[key] as unknown) = body[key];
       }
+      if (body.xiaoheiheOptions !== undefined) {
+        target.xiaoheiheOptions = normalizeXiaoheiheOptions(body.xiaoheiheOptions);
+      }
+      target.images = target.images.map(placement => ({ ...placement, image: normalizeLegacyUserUpload(placement.image) }));
+      if (body.wechatMetadata !== undefined) target.wechatMetadata = normalizeWeChatMetadata(body.wechatMetadata);
       if (body.imagePostImageIds !== undefined && (!Array.isArray(body.imagePostImageIds) || body.imagePostImageIds.some(id => typeof id !== "string" || !target.images.some(image => image.id === id)) || new Set(body.imagePostImageIds).size !== body.imagePostImageIds.length || body.imagePostImageIds.length > 18)) throw new Error("图集包含无效、重复或过多图片，请重新选择");
       if (body.topics !== undefined) {
         if (!Array.isArray(body.topics) || body.topics.some(topic => typeof topic !== "string")) throw new Error("话题格式无效");
         target.topics = normalizePublisherTopics(body.topics);
         if (target.topics.length > 5) throw new Error("最多选择 5 个话题");
       }
+      if (body.xiaoheiheOptions !== undefined) reserveXiaoheiheDefaults(target, state.settings, beforeDraft);
       if (body.contentFormat !== undefined && !["article", "image-post"].includes(body.contentFormat)) throw new Error("发送形式无效");
       if (body.bodyHtml !== undefined) target.bodyHtml = sanitizeDraftHtml(body.bodyHtml);
       const contentPackage = target.provenance.contentPackageId
@@ -2794,9 +2828,30 @@ app.post(
   }),
 );
 
+app.get("/api/drafts/:draftId/delivery-status", asyncRoute(async (request, response) => {
+  const state = await readState();
+  const draft = state.drafts.find(item => item.id === request.params.draftId);
+  if (!draft) { response.status(404).json({ error: "草稿不存在" }); return; }
+  const quality = reviewDraftQuality(draft, await getLocalDatabase());
+  response.json({ ...primaryDeliveryStatus(draft, state.settings.wechat.appId),
+    xiaoheiheNextCompanion: state.settings.xiaoheiheNextCompanion ?? "Steam",
+    wechatPreflight: wechatPreflight(draft, state.settings.wechat, quality.blockers) });
+}));
+
+app.post("/api/drafts/:draftId/wechat-attempts/:attemptId/resolve", deliveryRoute(async (request, response) => {
+  if (request.body?.resolution !== "not-received" || request.body?.confirmed !== true) throw new Error("请先在公众号草稿箱确认本次未收到");
+  if (deliveryDesk.isBusy(String(request.params.draftId), "wechat")) throw new Error("发送仍在进行，请等待结果后核对");
+  await updateState(state => {
+    const draft = state.drafts.find(item => item.id === request.params.draftId);
+    if (!draft) throw new Error("草稿不存在");
+    resolveWeChatAttempt(draft, String(request.params.attemptId));
+  });
+  response.json({ ok: true });
+}));
+
 app.post(
   "/api/drafts/:draftId/wechat-sync",
-  asyncRoute(async (request, response) => {
+  deliveryRoute(async (request, response) => {
     const state = await readState();
     const draftId = Array.isArray(request.params.draftId)
       ? request.params.draftId[0]
@@ -2807,10 +2862,10 @@ app.post(
       return;
     }
     if (!state.settings.wechat.appId || !state.settings.wechat.appSecretConfigured) {
-      response.status(400).json({ error: "请先在定时任务页连接微信公众号" });
+      response.status(400).json({ error: "请先在自动化 → 平台连接中连接微信公众号" });
       return;
     }
-    const result = await deliveryDesk.sync({ draftId, channel: "wechat" }, async () => {
+    const result = await deliveryDesk.sync({ draftId, channel: "wechat", revision: request.body?.updatedAt || draft.updatedAt }, async () => {
       const latestState = await readState();
       const latestDraft = latestState.drafts.find((entry) => entry.id === draftId);
       if (!latestDraft) throw new Error("同步开始前本地草稿已被删除");
@@ -2818,42 +2873,59 @@ app.post(
       const quality = reviewDraftQuality(latestDraft, database);
       if (!quality.ready) throw new Error(quality.blockers.join("；"));
       const deliveryHash = publicationRevisionHash(latestDraft,"wechat");
-      const author = typeof request.body?.author === "string"
-        ? request.body.author.trim()
-        : latestState.settings.wechat.defaultAuthor;
-      const digest = typeof request.body?.digest === "string"
-        ? request.body.digest.trim()
-        : Array.from(latestDraft.take.trim()).slice(0, 120).join("");
-      const requestedSourceUrl = typeof request.body?.contentSourceUrl === "string"
-        ? request.body.contentSourceUrl.trim()
-        : latestDraft.provenance.originalUrl;
-      const contentSourceUrl = /^https?:\/\//i.test(requestedSourceUrl) ? requestedSourceUrl : undefined;
+      if (request.body?.updatedAt && request.body.updatedAt !== latestDraft.updatedAt) throw new Error("草稿已在其他窗口变化，请刷新后重新同步");
+      if (unresolvedWeChatAttempt(latestDraft, latestState.settings.wechat.appId)) throw new Error("上次微信发送结果尚未核对，请先检查草稿箱；本次没有重复发送");
+      const { author, digest, contentSourceUrl, coverPlacementId } = wechatMetadataFor(latestDraft, latestState.settings.wechat);
+      const preflight = wechatPreflight(latestDraft, latestState.settings.wechat, quality.blockers);
+      if (!preflight.ready) throw new Error(preflight.blockers.join("；"));
       const gateway = createWeChatHttpGateway({
         appId: latestState.settings.wechat.appId,
         appSecret: await getWeChatAppSecret(),
       });
-      const receipt = await createWeChatDraftDesk({
+      let attemptId: string | undefined;
+      let receipt: WeChatDraftSyncReceipt;
+      try { receipt = await createWeChatDraftDesk({
         gateway,
         loadImage: loadWeChatPlacementImage,
         beforeCommit: async () => {
-          const current = (await readState()).drafts.find(draft => draft.id === latestDraft.id);
+          const currentState = await readState();
+          if (currentState.settings.wechat.appId !== latestState.settings.wechat.appId) throw new Error("公众号账号已变化，请重新检查后同步");
+          const current = currentState.drafts.find(draft => draft.id === latestDraft.id);
           if (!current) throw new Error("草稿已不存在");
           assertPublicationRevision(current,"wechat",deliveryHash);
           const currentQuality = reviewDraftQuality(current,database);
           if (!currentQuality.ready || currentQuality.binding.documentHash !== quality.binding.documentHash || currentQuality.binding.packageHash !== quality.binding.packageHash) throw new Error("正文或来源在交付准备期间变化，请重新核对");
+        },
+        beforeRemoteWrite: async (operation, mediaId) => {
+          await updateState(current => {
+            const target = current.drafts.find(item => item.id === draftId);
+            if (!target) throw new Error("草稿已不存在");
+            assertPublicationRevision(target, "wechat", deliveryHash);
+            attemptId = beginWeChatAttempt(target, latestState.settings.wechat.appId, operation, mediaId).id;
+          });
         },
       }).syncDraft({
         draft: latestDraft,
         author,
         digest,
         contentSourceUrl,
-        previousReceipt: latestDraft.wechatDraft,
-      });
+        coverPlacementId,
+        previousReceipt: !latestDraft.wechatDraft?.appId || latestDraft.wechatDraft.appId === latestState.settings.wechat.appId ? latestDraft.wechatDraft : undefined,
+      }); } catch (error) {
+        if (attemptId) await updateState(current => {
+          const attempt = (current.drafts.find(item => item.id === draftId) ?? current.draftTrash?.find(item => item.draft.id === draftId)?.draft)?.wechatSyncAttempts?.find(item => item.id === attemptId);
+          if (attempt) { attempt.status = error instanceof WeChatApiError && error.definitive ? "failed" : "unknown"; attempt.detail = error instanceof Error ? error.message : "微信未返回明确结果"; }
+        });
+        throw error;
+      }
+      receipt.appId = latestState.settings.wechat.appId;
       receipt.revisionHash = publicationRevisionHash(latestDraft, "wechat");
       const updatedDraft = await updateState((current) => {
-        const target = current.drafts.find((entry) => entry.id === draftId);
+        const target = current.drafts.find((entry) => entry.id === draftId) ?? current.draftTrash?.find(item => item.draft.id === draftId)?.draft;
         if (!target) return undefined;
         attachWeChatDeliveryReceipt(target, receipt, receipt.syncedAt);
+        const attempt = target.wechatSyncAttempts?.find(item => item.id === attemptId);
+        if (attempt) { attempt.status = "complete"; attempt.mediaId = receipt.mediaId; attempt.detail = receipt.verificationDetail; }
         return target;
       });
       return { receipt, draft: updatedDraft };
@@ -3007,7 +3079,7 @@ app.get(
 
 app.get(
   "/api/drafts/:draftId/publisher-preflight",
-  asyncRoute(async (request, response) => {
+  deliveryRoute(async (request, response) => {
     const state = await readState();
     const draft = state.drafts.find((entry) => entry.id === request.params.draftId);
     if (!draft) {
@@ -3072,10 +3144,18 @@ app.post(
     const token = request.header("x-ai-news-extension-token");
     const jobId = Array.isArray(request.params.jobId) ? request.params.jobId[0] : request.params.jobId;
     const clientId = typeof request.body?.clientId === "string" ? request.body.clientId : "";
-    response.json(extensionPublisherBridge.complete(token, clientId, jobId, {
-      pageUrl: typeof request.body?.pageUrl === "string" ? request.body.pageUrl : undefined,
-      steps: Array.isArray(request.body?.steps) ? request.body.steps : [],
-    }));
+    try {
+      response.json(extensionPublisherBridge.complete(token, clientId, jobId, {
+        pageUrl: typeof request.body?.pageUrl === "string" ? request.body.pageUrl : undefined,
+        steps: Array.isArray(request.body?.steps) ? request.body.steps : [],
+      }));
+    } catch (error) {
+      if (error instanceof ExtensionPublisherProtocolError) {
+        response.status(error.status).json({ ok: false, error: error.message });
+        return;
+      }
+      throw error;
+    }
   }),
 );
 
@@ -3087,117 +3167,55 @@ app.post(
   }),
 );
 
+const xiaoheiheDelivery = createXiaoheiheDelivery({
+  deliveryDesk,
+  connect: ensurePublisherConnected,
+  preflight: publisherPreflightFor,
+  fill: fillDraftInPublisher,
+  record: (draftId, result, receipt) => updateState((current) => {
+    current.publisherReceipts.unshift(receipt);
+    current.publisherReceipts = current.publisherReceipts.slice(0, 100);
+    const blocked = receipt.outcome === "blocked";
+    const disconnected = blocked
+      ? result.preflight?.blocking.some(issue => issue.code === "PREFLIGHT_TRANSPORT_DISCONNECTED")
+      : receipt.checks.some(check => check.id === "transport" && !check.ok);
+    if (disconnected) {
+      appendWorkflowNotification(current, {
+        type: "publisher-offline",
+        severity: "error",
+        title: blocked ? "发布助手离线" : "发布助手连接中断",
+        message: blocked
+          ? "当前无法填入小黑盒，请确认 Chrome 扩展已启用并重新连接。"
+          : "填入过程中发布助手失去连接，请重新连接后重试。",
+        dedupeKey: "publisher-offline",
+        target: { page: "schedule", draftId },
+      });
+    }
+    const target = current.drafts.find(entry => entry.id === draftId);
+    if (!target) return;
+    recordXiaoheiheFillAttempt(target, result, receipt, receipt.completedAt);
+    const revision = publicationRevisionHash(target, "xiaoheihe");
+    if (blocked || revision !== receipt.revisionHash) return { revision };
+    target.updatedAt = new Date(Math.max(Date.now(), Date.parse(target.updatedAt) + 1)).toISOString();
+    return { revision, updatedAt: target.updatedAt };
+  }),
+});
+
 app.post(
   "/api/drafts/:draftId/fill",
-  asyncRoute(async (request, response) => {
+  deliveryRoute(async (request, response) => {
     const state = await readState();
     const draftId = Array.isArray(request.params.draftId)
       ? request.params.draftId[0]
       : request.params.draftId;
-    const draft = state.drafts.find((entry) => entry.id === draftId);
+    const draft = state.drafts.find(entry => entry.id === draftId);
     if (!draft) {
       response.status(404).json({ error: "草稿不存在" });
       return;
     }
-    const draftSnapshot = structuredClone(draft);
-    const expectedRevisionHash = publicationRevisionHash(draftSnapshot, "xiaoheihe");
-    const preflight = await publisherPreflightFor(
-      draftSnapshot,
-      state.settings,
-      expectedRevisionHash,
-    );
-    const attempt = createPublisherAttempt(preflight);
-    if (!preflight.canQueueFill) {
-      const receipt = completePublisherAttempt(attempt, { steps: [] });
-      receipt.revisionHash = expectedRevisionHash;
-      const blockedResult = {
-        at: receipt.completedAt,
-        ok: false,
-        revisionHash: expectedRevisionHash,
-        steps: [],
-        warning: preflight.summary,
-        preflight,
-        receipt,
-      };
-      await updateState((current) => {
-        current.publisherReceipts.unshift(receipt);
-        current.publisherReceipts = current.publisherReceipts.slice(0, 100);
-        const target = current.drafts.find((entry) => entry.id === draftId);
-        if (target) recordXiaoheiheFillAttempt(target, blockedResult, receipt, receipt.completedAt);
-        if (preflight.blocking.some((issue) => issue.code === "PREFLIGHT_TRANSPORT_DISCONNECTED")) {
-          appendWorkflowNotification(current, {
-            type: "publisher-offline",
-            severity: "error",
-            title: "发布助手离线",
-            message: "当前无法填入小黑盒，请确认 Chrome 扩展已启用并重新连接。",
-            dedupeKey: "publisher-offline",
-            target: { page: "schedule", draftId },
-          });
-        }
-      });
-      response.status(409).json({ error: preflight.summary, preflight, receipt });
-      return;
-    }
-    let result;
-    try {
-      result = await fillDraftInPublisher(
-        draftSnapshot,
-        expectedRevisionHash,
-        state.settings,
-      );
-    } catch (error) {
-      if (error instanceof PublicationRevisionConflictError) {
-        response.status(error.statusCode).json({
-          error: error.message,
-          code: error.code,
-          expectedRevisionHash: error.expectedRevisionHash,
-          actualRevisionHash: error.actualRevisionHash,
-        });
-        return;
-      }
-      throw error;
-    }
-    if (result.revisionHash !== expectedRevisionHash) {
-      const error = new PublicationRevisionConflictError(
-        draftId,
-        expectedRevisionHash,
-        result.revisionHash || "transport-unversioned",
-      );
-      response.status(error.statusCode).json({
-        error: error.message,
-        code: error.code,
-        expectedRevisionHash: error.expectedRevisionHash,
-        actualRevisionHash: error.actualRevisionHash,
-      });
-      return;
-    }
-    const receipt = completePublisherAttempt(attempt, {
-      pageUrl: result.pageUrl,
-      diagnosticScreenshot: result.diagnosticScreenshot,
-      steps: result.steps,
-      completedAt: result.at,
-    });
-    receipt.revisionHash = expectedRevisionHash;
-    const enriched = { ...result, ok: receipt.outcome === "filled", preflight, receipt };
-    await updateState((current) => {
-      current.publisherReceipts.unshift(receipt);
-      current.publisherReceipts = current.publisherReceipts.slice(0, 100);
-      if (receipt.checks.some((check) => check.id === "transport" && !check.ok)) {
-        appendWorkflowNotification(current, {
-          type: "publisher-offline",
-          severity: "error",
-          title: "发布助手连接中断",
-          message: "填入过程中发布助手失去连接，请重新连接后重试。",
-          dedupeKey: "publisher-offline",
-          target: { page: "schedule", draftId },
-        });
-      }
-      const target = current.drafts.find((entry) => entry.id === draftId);
-      if (!target) return;
-      recordXiaoheiheFillAttempt(target, enriched, receipt, receipt.completedAt);
-      target.updatedAt = new Date().toISOString();
-    });
-    response.json(enriched);
+    if (request.body?.updatedAt && request.body.updatedAt !== draft.updatedAt) throw new Error("草稿已在其他窗口变化，请刷新后重新填入");
+    const result = await xiaoheiheDelivery.deliver(draft, state.settings);
+    response.status(result.status).json(result.body);
   }),
 );
 

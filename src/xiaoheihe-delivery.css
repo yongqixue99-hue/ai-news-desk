@@ -1,0 +1,57 @@
+.xhh-delivery { padding: 22px 20px 12px; color: #222522; }
+.xhh-delivery-heading { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
+.xhh-delivery-heading strong { font-size: 17px; letter-spacing: -.3px; }
+.xhh-delivery-heading p { margin: 7px 0 0; color: #777c76; font-size: 12px; }
+.xhh-title-over-limit { color: #b72824; }
+.xhh-icon-button { border: 0; background: transparent; color: #878b85; padding: 5px; cursor: pointer; }
+.xhh-send { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 43px; border-radius: 7px; font-size: 14px; text-decoration: none; }
+.xhh-send-note { margin: 10px 0 23px; text-align: center; color: #898d87; font-size: 11px; line-height: 1.6; }
+.xhh-disclosure { border-top: 1px solid #eceee9; padding: 0 0 4px; }
+.xhh-disclosure > summary { display: flex; align-items: center; justify-content: space-between; padding: 17px 0; gap: 10px; cursor: pointer; list-style: none; }
+.xhh-disclosure > summary::-webkit-details-marker { display: none; }
+.xhh-disclosure > summary strong { display: block; font-size: 13px; font-weight: 600; }
+.xhh-disclosure > summary small { display: block; font-size: 11px; color: #858b81; margin-top: 7px; line-height: 1.6; }
+.xhh-disclosure > summary > svg { color: #969a92; transition: transform .15s; flex-shrink: 0; }
+.xhh-disclosure[open] > summary > svg { transform: rotate(180deg); }
+.xhh-field { display: grid; gap: 8px; margin: 5px 0 14px; font-size: 12px; }
+.xhh-field span small { color: #94988f; margin-left: 5px; font-weight: 400; }
+.xhh-field input, .xhh-cover-picker select { width: 100%; height: 37px; border: 1px solid #dfe3da; border-radius: 5px; padding: 0 10px; background: #fff; font-size: 12px; }
+.xhh-help { font-size: 11px; line-height: 1.7; color: #878d80; margin: 5px 0 15px; }
+.xhh-field-label { display: block; font-size: 12px; margin: 10px 0; }
+.xhh-fixed-topics { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 17px; }
+.xhh-fixed-topics span { background: #f3f4f1; color: #65715a; border-radius: 4px; padding: 5px 7px; font-size: 11px; }
+.xhh-plan-options { display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; gap: 3px; background: #f4f5f2; border-radius: 6px; margin-bottom: 16px; }
+.xhh-plan-options button { display: flex; gap: 3px; justify-content: center; align-items: center; font-size: 12px; padding: 9px 2px; background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; color: #79806f; }
+.xhh-plan-options button[aria-pressed="true"] { background: #fff; border-color: #e3e6dc; color: #b72824; box-shadow: 0 1px 3px #2221; }
+.xhh-cover-card { display: flex; width: 100%; align-items: stretch; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid #e7e9e1; background: #fafbf9; border-radius: 6px; text-align: left; cursor: pointer; margin-bottom: 9px; }
+.xhh-cover-card > span:first-child { display: flex; min-width: 0; flex: 1; flex-direction: column; justify-content: space-between; padding: 4px; }
+.xhh-cover-card strong { font-size: 12px; line-height: 1.6; max-height: 38px; overflow: hidden; }
+.xhh-cover-card small { font-size: 11px; color: #999e93; margin-top: 10px; }
+.xhh-cover-card img, .xhh-cover-empty { width: 110px; height: 72px; object-fit: cover; border-radius: 3px; flex-shrink: 0; }
+.xhh-cover-empty { display: grid; place-items: center; background: #eff1eb; color: #a1a697; }
+.xhh-receipt { border-left: 2px solid #608369; background: #f5f8f3; padding: 13px; margin: 0 0 18px; }
+.xhh-receipt.attention { border-color: #c79441; background: #fdf9f1; }
+.xhh-receipt.neutral { border-color: #b4b9b1; background: #f6f7f5; }
+.xhh-status-note { font-size: 12px; color: #777c76; margin: -10px 0 18px; }
+.xhh-refill { margin-top: 9px; text-decoration: underline; text-underline-offset: 3px; }
+.xhh-receipt > div { display: grid; gap: 8px; }
+.xhh-receipt strong { font-size: 12px; }
+.xhh-receipt a { display: inline-flex; align-items: center; font-size: 12px; color: #48634b; }
+.xhh-receipt p { font-size: 11px; line-height: 1.7; margin: 7px 0; color: #707567; }
+.xhh-receipt details { margin-top: 11px; font-size: 11px; color: #838a7c; }
+.xhh-text-button { font-size: 11px; color: #66795a; background: transparent; border: 0; padding: 5px 0; cursor: pointer; }
+.draft-preview-toolbar { min-height: 42px; height: 42px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 17px; border-bottom: 1px solid #e0e3db; background: #fff; font-size: 12px; color: #797f72; }
+.draft-preview-toolbar small { font-size: 11px; color: #a0a59a; }
+.draft-page-refined.mode-split .draft-pane .rich-editor-canvas,
+.draft-page-refined.mode-split .preview-pane .rich-article-editor.is-preview .rich-editor-canvas { width: calc(100% - 40px); max-width: var(--draft-paper-width); min-height: calc(100dvh - 244px); margin: 24px auto 40px; padding: 32px; border: 1px solid #e6e7e2; border-radius: 3px; background: #fff; box-shadow: 0 2px 8px #242b2005; }
+.draft-page-refined.mode-split .preview-pane .preview-article-title { max-width: none; padding: 0; margin: 0; min-height: 40px; font-size: 26px; line-height: 1.5; background: none; }
+.draft-page-refined.mode-split .draft-paper-title { font-size: 26px; }
+.draft-page-refined.mode-split .preview-pane .rich-article-editor .tiptap { max-width: none; margin: 0; padding: 0; min-height: 420px; font-size: 16px; line-height: 1.95; background: transparent; border: 0; box-shadow: none; }
+.draft-page-refined.mode-split .preview-pane .rich-article-editor.is-preview { background: #f3f4f2; }
+.preview-paper-heading > span { display: none; }
+.draft-page-refined.mode-split .preview-paper-heading > span { display: block; }
+.draft-page-refined:not(.mode-split) .preview-paper-heading { border: 0; padding: 0; margin: 0; }
+
+.draft-page-refined.mode-split .preview-pane .rich-article-editor.is-preview .continuous-prose { max-width: none; margin: 0; padding: 0; min-height: 420px; font-size: 16px; line-height: 1.95; }
+.draft-page-refined.mode-split .preview-pane .continuous-prose > p:first-child { margin-top: 0; }
+.xhh-cover-rights { font-size: 12px; line-height: 1.6; color: var(--text-secondary, #6b6b6b); }

@@ -1,3 +1,4 @@
+import { uploadCoverInPage } from "./xiaoheihe-cover.js";
 import {
   createPublisherBridgeClient,
   planEditorTab,
@@ -279,6 +280,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.session.remove(`xCapture:${captureId}`)
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
+  if (message?.type === "AI_NEWS_UPLOAD_XIAOHEIHE_COVER") {
+    if (!sender.tab?.id || !/^https:\/\/(?:[^/]+\.)?xiaoheihe\.cn\//i.test(sender.url || "") || !/^data:image\//i.test(String(message.payload?.dataUrl || ""))) {
+      sendResponse({ ok: false, detail: "封面上传请求无效" }); return undefined;
+    }
+    chrome.scripting.executeScript({ target: { tabId: sender.tab.id }, world: "MAIN", func: uploadCoverInPage, args: [message.payload] })
+      .then(results => sendResponse(results[0]?.result || { ok: false, detail: "平台未返回封面结果" }))
+      .catch(error => sendResponse({ ok: false, detail: error instanceof Error ? error.message : String(error) }));
     return true;
   }
 

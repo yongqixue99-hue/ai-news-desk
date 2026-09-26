@@ -11,6 +11,7 @@ import { PageBoundary } from "./components/PageBoundary";
 import { TodayPage } from "./components/TodayPage";
 import { api, type MaterialMetadataInput, type ShellView } from "./api";
 import { resolveBootstrap, type BootstrapState } from "./bootstrap-state";
+import { readLastDraft, rememberLastDraft, resolveDraftId } from "./draft-library-view";
 import { useHashPageNavigation } from "./hooks/useHashPageNavigation";
 import type {
   ArticleDraft,
@@ -60,9 +61,11 @@ function App() {
   const [state, setState] = useState<WorkflowState>();
   const [editorialSystem, setEditorialSystem] = useState<EditorialSystemView>();
   const { page, navigate } = useHashPageNavigation();
+  const [schedulePlatform, setSchedulePlatform] = useState<"wechat" | "social" | "xiaoheihe">();
+  useEffect(() => { if (page !== "schedule") setSchedulePlatform(undefined); }, [page]);
   const [homeStoryId, setHomeStoryId] = useState<string>();
   const [activeRunId, setActiveRunId] = useState<string>();
-  const [activeDraftId, setActiveDraftId] = useState<string>();
+  const [activeDraftId, setActiveDraftId] = useState<string | undefined>(() => readLastDraft(() => window.localStorage));
   const [notice, setNotice] = useState<NoticeState>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [health, setHealth] = useState<HealthState>();
@@ -84,9 +87,13 @@ function App() {
       activeRunCount: next.runs.filter((run) => ["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status)).length,
     });
     setActiveRunId((current) => chooseWorkbenchRun(next.runs, current)?.id);
-    setActiveDraftId((current) => current ?? next.drafts[0]?.id);
+    setActiveDraftId((current) => resolveDraftId(next.drafts, current));
     return next;
   }, []);
+
+  useEffect(() => {
+    if (state) rememberLastDraft(() => window.localStorage, resolveDraftId(state.drafts, activeDraftId));
+  }, [activeDraftId, state?.drafts]);
 
   const refreshShell = useCallback(async () => {
     try {
@@ -1051,7 +1058,7 @@ function App() {
         message: extensionMode
           ? result.ok
             ? "已在常用 Chrome 打开小黑盒。系统只会填入，不会代你发布。"
-            : "已打开常用 Chrome；加载填入助手并刷新工作台后即可连接。"
+            : result.detail
           : result.ok
             ? "CDP 备用浏览器已启动。首次使用请在新窗口中登录小黑盒。"
             : result.detail,
@@ -1064,10 +1071,10 @@ function App() {
     }
   };
 
-  const fillDraft = async (draftId: string): Promise<PublisherResult | undefined> => {
+  const fillDraft = async (draftId: string, updatedAt?: string): Promise<PublisherResult | undefined> => {
     setActionBusy(true);
     try {
-      const result = await api.fillDraft(draftId);
+      const result = await api.fillDraft(draftId, updatedAt);
       setNotice({
         kind: result.ok ? "success" : "info",
         message: result.ok ? "标题和正文已填入小黑盒，请检查后手动发布。" : "已完成部分填入，请查看右侧结果。",
@@ -1076,7 +1083,7 @@ function App() {
       return result;
     } catch (error) {
       reportError(error);
-      return undefined;
+      throw error;
     } finally {
       setActionBusy(false);
     }
@@ -1084,7 +1091,7 @@ function App() {
 
   const syncWeChatDraft = async (
     draftId: string,
-    input: { author?: string; digest?: string; contentSourceUrl?: string },
+    input: { author?: string; digest?: string; contentSourceUrl?: string; coverPlacementId?: string; updatedAt?: string },
   ): Promise<WeChatDraftSyncReceipt | undefined> => {
     setActionBusy(true);
     try {
@@ -1094,8 +1101,8 @@ function App() {
         drafts: current.drafts.map((draft) => draft.id === draftId ? result.draft : draft),
       } : current);
       setNotice({
-        kind: "success",
-        message: result.receipt.operation === "created"
+        kind: result.receipt.verification === "verified" ? "success" : "info",
+        message: result.receipt.verification !== "verified" ? result.receipt.verificationDetail || "微信已接收，请打开草稿箱核对" : result.receipt.operation === "created"
           ? "文章已进入微信公众号草稿箱，请在公众平台预览并手动发布。"
           : result.receipt.operation === "updated"
             ? "公众号草稿已更新；不会重复创建，也不会自动发布。"
@@ -1104,7 +1111,7 @@ function App() {
       return result.receipt;
     } catch (error) {
       reportError(error);
-      return undefined;
+      throw error;
     } finally {
       setActionBusy(false);
     }
@@ -1396,6 +1403,27 @@ function App() {
             onGoToday={() => navigate("today")}
             onOpenWorkbench={() => navigate("workbench")}
             onSelectDraft={setActiveDraftId}
+            onCreateDraft={async () => {
+              const draft = await api.createBlankDraft();
+              setState(current => current ? { ...current, drafts: [draft, ...current.drafts] } : current);
+              setActiveDraftId(draft.id);
+            }}
+            onTrashDrafts={async selection => {
+              const { draftIds } = await api.trashDrafts(selection);
+              setState(current => current ? { ...current, drafts: current.drafts.filter(draft => !draftIds.includes(draft.id)) } : current);
+              setActiveDraftId(current => current && draftIds.includes(current) ? undefined : current);
+            }}
+            onRestoreTrashedDraft={async id => {
+              const draft = await api.restoreTrashedDraft(id);
+              setState(current => current ? { ...current, drafts: [draft, ...current.drafts.filter(item => item.id !== id)] } : current);
+              setActiveDraftId(draft.id);
+            }}
+            onRestoreTrashedDrafts={async selection => {
+              const restored = await api.restoreTrashedDrafts(selection);
+              const ids = new Set(restored.map(draft => draft.id));
+              setState(current => current ? { ...current, drafts: [...restored, ...current.drafts.filter(item => !ids.has(item.id))] } : current);
+              setActiveDraftId(restored[0]?.id);
+            }}
             onSave={saveDraft}
             onCompleteInline={state.aiSettings.completionProviderId
               && !(state.settings.spendingPolicy === "zero-cost" && state.aiSettings.completionProviderId === "gemini")
@@ -1412,7 +1440,7 @@ function App() {
             onRunArticleAgent={runArticleAgent}
             onAskArticleAgent={askArticleAgent}
             onLaunchPublisher={launchPublisher}
-            onOpenPublisherSettings={() => navigate("schedule")}
+            onOpenPublisherSettings={(platform = "wechat") => { setSchedulePlatform(platform); navigate("schedule"); }}
             onPublisherPreflight={publisherPreflight}
             onFill={fillDraft}
             onSyncWeChatDraft={syncWeChatDraft}
@@ -1536,6 +1564,7 @@ function App() {
       ) : null}
       {page === "schedule" ? (
         <SchedulePage
+          initialPlatform={schedulePlatform}
           settings={state.settings}
           runs={state.runs}
           health={health}

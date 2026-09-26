@@ -38,10 +38,12 @@ const detached = (command: string, args: string[]) => {
   child.unref();
 };
 
-export const openRegularChrome = async (url: string) => {
-  if (process.platform === "darwin") detached("open", ["-a", "Google Chrome", url]);
-  else detached(await findChromeExecutable(), [url]);
+export const openRegularChromeUrls = async (urls: string[]) => {
+  if (!urls.length) return;
+  if (process.platform === "darwin") detached("open", ["-a", "Google Chrome", ...urls]);
+  else detached(await findChromeExecutable(), urls);
 };
+export const openRegularChrome = (url: string) => openRegularChromeUrls([url]);
 
 export const openDebugChrome = async (
   url: string,

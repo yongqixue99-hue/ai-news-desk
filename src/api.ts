@@ -1,3 +1,4 @@
+import type { PrimaryDeliveryStatus, wechatPreflight } from "../server/primary-delivery.js";
 import type { AggregationView } from "../server/aggregation-desk.js";
 import type { DraftOverview } from "../server/draft-overview.js";
 import type { CommunityPlatform, TopicFeedView } from "../server/topic-feeds.js";
@@ -46,6 +47,7 @@ import type {
   WeChatConnectionResult,
   WeChatDraftSyncReceipt,
 } from "./types";
+import type { DraftLibrarySelection, DraftTrashSelection, TrashedDraftSummary } from "../server/draft-library.js";
 
 const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
   const response = await fetch(url, {
@@ -596,6 +598,11 @@ export const api = {
     body: JSON.stringify({ mode }),
   }),
   draft: (draftId: string) => request<ArticleDraft>(`/api/drafts/${encodeURIComponent(draftId)}`),
+  createBlankDraft: () => request<ArticleDraft>("/api/drafts", { method: "POST", body: "{}" }),
+  trashDrafts: (drafts: DraftLibrarySelection[]) => request<{ draftIds: string[] }>("/api/draft-trash", { method: "POST", body: JSON.stringify({ drafts }) }),
+  draftTrash: () => request<TrashedDraftSummary[]>("/api/draft-trash"),
+  restoreTrashedDraft: (draftId: string) => request<ArticleDraft>(`/api/draft-trash/${encodeURIComponent(draftId)}/restore`, { method: "POST", body: "{}" }),
+  restoreTrashedDrafts: (drafts: DraftTrashSelection[]) => request<ArticleDraft[]>("/api/draft-trash/restore", { method: "POST", body: JSON.stringify({ drafts }) }),
   confirmDraft: (draftId: string, updatedAt: string) => request<ArticleDraft>(`/api/drafts/${encodeURIComponent(draftId)}/confirm`, { method: "POST", body: JSON.stringify({ updatedAt }) }),
   saveDraft: (draftId: string, draft: Partial<ArticleDraft>, saveMode: DraftSaveMode = "manual") =>
     request<ArticleDraft>(`/api/drafts/${draftId}`, {
@@ -711,9 +718,11 @@ export const api = {
       method: "POST",
     body: "{}",
   }),
+  primaryDeliveryStatus: (draftId: string) => request<PrimaryDeliveryStatus & { xiaoheiheNextCompanion?: "Steam" | "数码硬件"; wechatPreflight: ReturnType<typeof wechatPreflight> }>(`/api/drafts/${draftId}/delivery-status`),
+  resolveWeChatAttempt: (draftId: string, attemptId: string) => request<{ ok: boolean }>(`/api/drafts/${draftId}/wechat-attempts/${attemptId}/resolve`, { method: "POST", body: JSON.stringify({ resolution: "not-received", confirmed: true }) }),
   syncWeChatDraft: (
     draftId: string,
-    input: { author?: string; digest?: string; contentSourceUrl?: string },
+    input: { author?: string; digest?: string; contentSourceUrl?: string; coverPlacementId?: string; updatedAt?: string },
   ) => request<{ receipt: WeChatDraftSyncReceipt; draft: ArticleDraft }>(
     `/api/drafts/${draftId}/wechat-sync`,
     { method: "POST", body: JSON.stringify(input) },
@@ -754,10 +763,10 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
-  fillDraft: (draftId: string) =>
+  fillDraft: (draftId: string, updatedAt?: string) =>
     request<PublisherResult>(`/api/drafts/${draftId}/fill`, {
       method: "POST",
-      body: "{}",
+      body: JSON.stringify({ updatedAt }),
     }),
   confirmPublished: (draftId: string, platform: "xiaoheihe" | "wechat" = "xiaoheihe") =>
     request<{ confirmation: PlatformPublicationConfirmation; recentTopics: string[]; recentCommunities: string[] }>(
@@ -767,6 +776,11 @@ export const api = {
 };
 
 export const socialDeliveryApi = {
+  openReceipt: (id: string, receiptId: string) => request(`/api/drafts/${encodeURIComponent(id)}/social-deliveries/${encodeURIComponent(receiptId)}/open`, { method: "POST", body: "{}" }),
+  open: (platforms: string[]) => request<{ detail: string }>("/api/delivery/social/open", { method: "POST", body: JSON.stringify({ platforms }) }),
+  batches: (id: string) => request<import("../server/social-delivery-types").SocialDeliveryBatch[]>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches`),
+  start: (id: string, input: { platforms: string[]; updatedAt: string; accounts: Record<string, { account: string; accountId: string }> }) => request<import("../server/social-delivery-types").SocialDeliveryBatch & { browserError?: string }>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches`, { method: "POST", body: JSON.stringify(input) }),
+  cancel: (id: string, batchId: string) => request<import("../server/social-delivery-types").SocialDeliveryBatch>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST", body: "{}" }),
   status: () => request<import("../server/social-delivery-types").SocialDeliveryStatus>("/api/delivery/social/status"),
   settings: (input: { enabled: boolean; extensionId: string; token?: string }) => request("/api/delivery/social/settings", { method: "PATCH", body: JSON.stringify(input) }),
   receipts: (id: string) => request<{ receipts: import("../server/social-delivery-types").SocialDeliveryReceipt[]; revisions: Record<string, string> }>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`),

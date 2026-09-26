@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createWeChatHttpGateway } from "./wechat-http.js";
+import { createWeChatHttpGateway, WeChatApiError } from "./wechat-http.js";
 
 test("the WeChat HTTP adapter obtains a stable token before reading the draft count", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -37,6 +37,19 @@ test("the WeChat HTTP adapter obtains a stable token before reading the draft co
   assert.equal(calls[1].url, "https://api.weixin.qq.com/cgi-bin/draft/count?access_token=stable-token");
   assert.equal(calls[1].init?.method, "GET");
   assert.equal(JSON.stringify({ count, url: calls[1].url }).includes("wechat-super-secret"), false);
+});
+
+test("an empty update response is not a successful delivery and HTTP 503 remains uncertain", async () => {
+  const article = { title: "标题", content: "<p>正文</p>", thumb_media_id: "cover", need_open_comment: 0 as const, only_fans_can_comment: 0 as const };
+  for (const response of [Response.json({}), Response.json({}, { status: 503 })]) {
+    const gateway = createWeChatHttpGateway({ appId: "wx", appSecret: "secret", fetcher: async url => String(url).includes("stable_token") ? Response.json({ access_token: "token" }) : response });
+    await assert.rejects(gateway.updateDraft("draft", article), error => !(error instanceof WeChatApiError) || error.definitive === false);
+  }
+});
+
+test("whitelist guidance exposes only the reported IP, never upstream credentials", async () => {
+  const gateway = createWeChatHttpGateway({ appId: "wx", appSecret: "secret", fetcher: async () => Response.json({ errcode: 40164, errmsg: "invalid ip 203.0.113.8, secret unsafe detail" }) });
+  await assert.rejects(gateway.countDrafts(), (error: Error) => /203\.0\.113\.8/u.test(error.message) && !/secret|unsafe/u.test(error.message));
 });
 
 test("the WeChat HTTP adapter reuses its token while uploading content and cover images", async () => {

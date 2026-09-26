@@ -310,6 +310,7 @@ export interface WeChatConnectionResult {
 }
 
 export interface Settings {
+  xiaoheiheNextCompanion?: "Steam" | "数码硬件";
   socialBridge?: import("./social-delivery-types.js").SocialBridgeSettings;
   homeLayout?: import("./home-layout.js").HomeLayout;
   windowHours: number;
@@ -403,6 +404,7 @@ export interface SourceImage {
     | "commentary-screenshot"
     | "editorial-screenshot"
     | "owned"
+    | "user-provided"
     | "licensed"
     | "check-required"
     | "expired";
@@ -882,6 +884,7 @@ export interface ImageMaterial {
   tags: string[];
   rights:
     | "owned"
+    | "user-provided"
     | "licensed"
     | "official"
     | "editorial-screenshot"
@@ -913,8 +916,33 @@ export interface DraftImagePlacement {
   caption: string;
 }
 
+export interface WeChatDraftMetadata {
+  author: string;
+  digest: string;
+  contentSourceUrl: string;
+  coverPlacementId?: string;
+}
+
+export interface WeChatSyncAttempt {
+  id: string;
+  appId: string;
+  startedAt: string;
+  revisionHash: string;
+  operation: "created" | "updated";
+  mediaId?: string;
+  status: "sending" | "unknown" | "failed" | "complete" | "not-received";
+  detail?: string;
+}
+
 export interface WeChatDraftSyncReceipt {
   schemaVersion: "wechat-draft-receipt/v1";
+  appId?: string;
+  verification?: "verified" | "pending";
+  verificationDetail?: string;
+  verifiedAt?: string;
+  remoteFingerprint?: string;
+  remoteContentFingerprint?: string;
+  sentDigest?: string;
   draftId: string;
   mediaId: string;
   operation: "created" | "updated" | "unchanged";
@@ -1011,8 +1039,16 @@ export interface DraftEditorialBaseline {
   confirmed?: { id: string; revisionId: string; contentHash: string; confirmedAt: string; snapshot: DraftRevisionSnapshot; learningEligible: boolean; reason?: string };
 }
 
+export interface XiaoheihePublishOptions {
+  companionCommunity?: "Steam" | "数码硬件";
+  creationPlan: "none" | "standard" | "hot";
+  coverPlacementId?: string;
+}
+
 export interface ArticleDraft {
+  xiaoheiheOptions?: XiaoheihePublishOptions;
   socialDeliveries?: import("./social-delivery-types.js").SocialDeliveryReceipt[];
+  socialDeliveryBatches?: import("./social-delivery-types.js").SocialDeliveryBatch[];
   sourceChangeReviews?: Array<{url: string; observedHash: string; packageHash?: string; documentHash: string; reason: string; reviewedAt: string}>;
   editorialBaseline?: DraftEditorialBaseline;
   revisionId?: string;
@@ -1090,6 +1126,8 @@ export interface ArticleDraft {
   publisherReceipt?: PublisherReceipt;
   /** Latest revision synced to the personal WeChat official-account draft box. */
   wechatDraft?: WeChatDraftSyncReceipt;
+  wechatMetadata?: WeChatDraftMetadata;
+  wechatSyncAttempts?: WeChatSyncAttempt[];
   /** Version-bound acknowledgement per publication platform. */
   publicationConfirmations?: Partial<Record<PublicationPlatform, PlatformPublicationConfirmation>>;
   /**
@@ -1122,6 +1160,8 @@ export interface DraftGenerationAttempt {
 export type DraftSaveMode = "auto" | "manual";
 
 export interface DraftRevisionSnapshot {
+  xiaoheiheOptions?: XiaoheihePublishOptions;
+  wechatMetadata?: WeChatDraftMetadata;
   sourceChangeReviews?: ArticleDraft["sourceChangeReviews"];
   contentFormat?: "article" | "image-post";
   imagePostImageIds?: string[];
@@ -1156,6 +1196,7 @@ export interface PublisherStep {
 }
 
 export interface PublisherResult {
+  localDraftUpdatedAt?: string;
   at: string;
   ok: boolean;
   /** Local publishable revision actually read by the platform adapter. */
@@ -1270,6 +1311,8 @@ export interface WorkflowState {
   candidateFeedback: CandidateFeedback[];
   runs: WorkflowRun[];
   drafts: ArticleDraft[];
+  /** Recoverable deletions. Kept outside the active catalog so stale saves and jobs cannot reopen them. */
+  draftTrash?: Array<{ draft: ArticleDraft; deletedAt: string }>;
   draftGenerationAttempts: DraftGenerationAttempt[];
   draftRevisions: DraftRevision[];
   articleAgentThreads: ArticleAgentThread[];

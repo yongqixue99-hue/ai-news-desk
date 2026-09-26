@@ -68,7 +68,7 @@ export const normalizeMaterialInput = (input: MaterialInput, fallbackTitle: stri
   attribution: safeText(input.attribution, "来源待补充", 160),
   sourceUrl: input.sourceUrl?.trim().slice(0, 1_000) || undefined,
   tags: uniqueText(input.tags).slice(0, 12),
-  rights: (["owned", "licensed", "official", "editorial-screenshot", "check-required", "expired"] as const).includes(input.rights as never)
+  rights: (["owned", "user-provided", "licensed", "official", "editorial-screenshot", "check-required", "expired"] as const).includes(input.rights as never)
     ? input.rights!
     : "check-required" as const,
   evidenceNote: safeText(input.evidenceNote, "", 500) || undefined,

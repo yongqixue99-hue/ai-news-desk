@@ -29,3 +29,14 @@ test("different delivery channels do not block each other", async () => {
   assert.equal(calls, 2);
 });
 
+test("a concurrent changed version never borrows another version's successful receipt", async () => {
+  const desk = createDeliveryDesk();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const first = desk.sync({ draftId: "draft", channel: "xiaoheihe", revision: "v1" }, async () => { await gate; return "v1 receipt"; });
+  assert.equal(desk.isBusy("draft", "xiaoheihe"), true);
+  await assert.rejects(desk.sync({ draftId: "draft", channel: "xiaoheihe", revision: "v2" }, async () => "must not run"), /另一个版本/);
+  release();
+  assert.equal(await first, "v1 receipt");
+  assert.equal(desk.isBusy("draft", "xiaoheihe"), false);
+});

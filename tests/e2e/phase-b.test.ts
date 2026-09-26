@@ -132,7 +132,7 @@ test("stage B editor saves, confirms, expires proposals and recovers without liv
     await page.goto(`${origin}/#drafts`, { waitUntil: "domcontentloaded" });
     const editor = page.getByRole("textbox", { name: "连续文章编辑器" });
     await editor.waitFor();
-    assert.equal(await page.getByRole("button", { name: "仅编辑", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await page.getByRole("button", { name: "编辑", exact: true }).getAttribute("aria-pressed"), "true");
     assert.equal(await page.getByRole("region", { name: "文章内容预览" }).count(), 0);
     const title = page.getByLabel("文章标题", { exact: true });
     await title.fill("人工修改后的确认标题");
@@ -151,9 +151,19 @@ test("stage B editor saves, confirms, expires proposals and recovers without liv
       assert.ok((await title.boundingBox())!.y >= 0, "title is not clipped above the screen");
       await page.screenshot({ path: path.join(artifacts, `editor-${width}.png`), fullPage: true });
     }
-    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const libraryButton = page.getByRole("button", { name: /^草稿库/u });
+    if (await libraryButton.getAttribute("aria-expanded") !== "true") await libraryButton.click();
+    const library = page.getByRole("complementary", { name: "草稿库", exact: true });
     const tools = page.getByRole("navigation", { name: "草稿辅助工具" });
-    await tools.getByRole("button", { name: "Agent", exact: true }).click();
+    const libraryBounds = (await library.boundingBox())!;
+    assert.ok(libraryBounds.y + libraryBounds.height <= (await tools.boundingBox())!.y + 1, "library must not cover the mobile tools");
+    await tools.getByRole("button", { name: "AI 助手", exact: true }).click();
+    await page.getByRole("tabpanel", { name: "AI 助手面板", exact: true }).waitFor();
+    assert.equal(await library.isVisible(), false);
+    await page.getByRole("button", { name: "关闭右侧面板", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await tools.getByRole("button", { name: "AI 助手", exact: true }).click();
     await page.getByRole("tab", { name: "优化文稿", exact: true }).click();
     await page.getByRole("button", { name: "检查并优化文稿", exact: true }).click();
     await page.getByRole("button", { name: "应用此项", exact: true }).waitFor();
@@ -176,6 +186,104 @@ test("stage B editor saves, confirms, expires proposals and recovers without liv
     await page.getByRole("heading", { name: "初稿 → 确认稿", exact: true }).waitFor();
     assert.ok(await page.locator(".confirmation-diff-lines .diff-added").count());
     await page.screenshot({ path: path.join(artifacts, "confirmation-diff.png"), fullPage: true });
+    // Library actions use the real API in this isolated workspace, including autosave and stale tabs.
+    await page.getByRole("button", { name: "新建草稿", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('[aria-label="文章标题"]')?.value === "");
+    await title.fill("手写新草稿");
+    await editor.fill("这是在空白草稿里手写的内容。");
+    // Delete immediately, before the debounced autosave: deletion must first preserve the edit.
+    await page.getByRole("button", { name: "删除当前草稿", exact: true }).click();
+    const deletion = page.getByRole("dialog", { name: "删除这篇草稿？" });
+    await deletion.getByRole("button", { name: "取消", exact: true }).click();
+    assert.equal(await title.inputValue(), "手写新草稿");
+    await page.getByRole("button", { name: "删除当前草稿", exact: true }).click();
+    await deletion.getByRole("button", { name: "确认删除", exact: true }).click();
+    await deletion.waitFor({ state: "hidden" });
+    const trash = await (await page.request.get(`${origin}/api/draft-trash`)).json();
+    assert.equal(trash.length, 1);
+    assert.equal(trash[0].title, "手写新草稿");
+    assert.equal((await page.request.patch(`${origin}/api/drafts/${trash[0].id}`, { data: { title: "迟到的自动保存", updatedAt: trash[0].updatedAt } })).status(), 404);
+    await page.getByRole("button", { name: "回收站", exact: true }).click();
+    await page.getByRole("button", { name: "恢复 手写新草稿", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('[aria-label="文章标题"]')?.value === "手写新草稿");
+    assert.ok((await editor.innerText()).includes("这是在空白草稿里手写的内容。"));
+    assert.ok((await title.boundingBox())!.y > (await page.getByRole("group", { name: "草稿管理" }).boundingBox())!.y, "restored title must be visible below library actions");
+    const stale = await page.request.patch(`${origin}/api/drafts/${trash[0].id}`, { data: { title: "恢复前的旧保存", updatedAt: trash[0].updatedAt } });
+    assert.equal(stale.ok(), false);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "清空草稿", exact: true }).click();
+    const clear = page.getByRole("dialog", { name: "清空 2 篇草稿？" });
+    await clear.getByRole("button", { name: "取消", exact: true }).click();
+    await page.getByRole("button", { name: "清空草稿", exact: true }).click();
+    await clear.getByRole("button", { name: "确认清空", exact: true }).click();
+    await page.getByRole("heading", { name: "还没有草稿", exact: true }).waitFor();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("heading", { name: "还没有草稿", exact: true }).waitFor();
+    const overview = await (await page.request.get(`${origin}/api/drafts/overview`)).json();
+    assert.equal(JSON.stringify(overview).includes("手写新草稿"), false);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      for (const label of ["新建草稿", "删除当前草稿", "清空草稿", "回收站"]) {
+        assert.equal(await page.getByRole("button", { name: label, exact: true }).isVisible(), true);
+      }
+      await page.screenshot({ path: path.join(artifacts, `library-empty-${width}.png`), fullPage: true });
+    }
+    await page.getByRole("button", { name: "回收站", exact: true }).click();
+    await page.getByRole("button", { name: "恢复 手写新草稿", exact: true }).click();
+    await editor.waitFor();
+    await page.screenshot({ path: path.join(artifacts, "library-restored-mobile.png"), fullPage: true });
+    // Focus mode works on a narrow screen and restores the regular management controls.
+    await page.getByRole("button", { name: "专注写作", exact: true }).click();
+    assert.equal(await page.getByRole("group", { name: "草稿管理" }).isVisible(), false);
+    assert.equal(await page.locator(".main-sidebar").isVisible(), false);
+    assert.equal(await page.getByRole("button", { name: "退出专注", exact: true }).isVisible(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: path.join(artifacts, "focus-mobile.png"), fullPage: true });
+    await page.keyboard.press("Escape");
+    assert.equal(await page.getByRole("group", { name: "草稿管理" }).isVisible(), true);
+    // The article's own images are first; changing image tabs preserves an unfinished URL.
+    await tools.getByRole("button", { name: "图片", exact: true }).click();
+    assert.equal(await page.getByRole("tab", { name: /^本稿配图/u }).getAttribute("aria-selected"), "true");
+    assert.equal(await page.getByRole("heading", { name: "通用素材库", exact: true }).isVisible(), false);
+    await page.getByRole("tab", { name: "添加图片", exact: true }).click();
+    await page.getByPlaceholder("图片 URL", { exact: true }).fill("https://example.com/unfinished.png");
+    await page.getByRole("tab", { name: "通用素材", exact: true }).click();
+    await page.getByRole("tab", { name: "添加图片", exact: true }).click();
+    assert.equal(await page.getByPlaceholder("图片 URL", { exact: true }).inputValue(), "https://example.com/unfinished.png");
+    await page.getByRole("button", { name: "关闭右侧面板", exact: true }).click();
+    // Bulk restore, body search and multi-select all use the isolated real API.
+    await page.getByRole("button", { name: "回收站", exact: true }).click();
+    await page.getByRole("button", { name: "恢复当前结果 (1)", exact: true }).click();
+    await page.getByRole("button", { name: "确认恢复", exact: true }).click();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    if (await libraryButton.getAttribute("aria-expanded") !== "true") await libraryButton.click();
+    await page.getByLabel("搜索草稿", { exact: true }).fill("空白草稿里手写");
+    assert.equal(await page.locator(".draft-list-item").count(), 1);
+    await page.getByRole("button", { name: "多选", exact: true }).click();
+    await page.getByRole("checkbox", { name: "全选当前结果", exact: true }).check();
+    assert.equal(await page.getByRole("button", { name: "删除选中 (1)", exact: true }).isEnabled(), true);
+    await page.getByLabel("搜索草稿", { exact: true }).fill("");
+    assert.equal(await page.getByRole("button", { name: "删除选中 (0)", exact: true }).isEnabled(), false);
+    await page.getByLabel("草稿排序", { exact: true }).selectOption("title");
+    await page.getByRole("button", { name: "取消多选", exact: true }).click();
+    await page.locator(".draft-list-item").filter({ hasText: "手写新草稿" }).click();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('[aria-label="文章标题"]')?.value === "手写新草稿");
+    await page.getByRole("button", { name: "多选", exact: true }).click();
+    await page.getByRole("checkbox", { name: "全选当前结果", exact: true }).check();
+    await page.getByRole("button", { name: "删除选中 (2)", exact: true }).click();
+    const batchDialog = page.getByRole("dialog", { name: "删除选中的 2 篇草稿？" });
+    assert.equal(await batchDialog.getByRole("listitem").count(), 2);
+    await batchDialog.getByRole("button", { name: "确认删除", exact: true }).click();
+    await page.getByRole("heading", { name: "还没有草稿", exact: true }).waitFor();
+    await page.getByRole("button", { name: "回收站", exact: true }).click();
+    await page.getByLabel("搜索回收站").fill("手写");
+    await page.getByRole("button", { name: "恢复当前结果 (1)", exact: true }).click();
+    await page.getByRole("button", { name: "确认恢复", exact: true }).click();
+    await editor.waitFor();
+    assert.equal((await (await page.request.get(`${origin}/api/draft-trash`)).json()).length, 1, "filtered restore leaves unrelated trash alone");
     assert.deepEqual(errors, []);
     await writeFile(path.join(artifacts, "checks.json"), JSON.stringify({ widths: [1440, 820, 390, 320], confirmed: confirmed.editorialBaseline?.confirmed, assisted: assisted.editorialBaseline?.confirmed, proposalCount, pageErrors: errors }, null, 2));
   } finally {

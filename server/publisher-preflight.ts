@@ -1,4 +1,5 @@
-import { imagePostCapacity, normalizePublisherTopics } from "./xiaoheihe-format.js";
+import type { XiaoheihePublishOptions } from "./types.js";
+import { imagePostCapacity, normalizePublisherTopics, xiaoheiheTitleLength, xiaoheiheTitleLimit } from "./xiaoheihe-format.js";
 import { randomUUID } from "node:crypto";
 
 export type PublisherAdapterMode = "chrome-extension" | "cdp";
@@ -12,7 +13,10 @@ export type PublisherCapabilityId =
   | "images"
   | "captions"
   | "community"
-  | "topics";
+  | "topics"
+  | "visibility"
+  | "creationPlan"
+  | "cover";
 
 export type PublisherCapabilityStatus = "pass" | "warning" | "blocked" | "unknown";
 
@@ -42,9 +46,13 @@ export interface PublisherPreflightImage {
   id: string;
   available: boolean;
   caption?: string;
+  captionRequired?: boolean;
 }
 
 export interface PublisherPreflightDraft {
+  xiaoheiheOptions?: XiaoheihePublishOptions;
+  coverAvailable?: boolean;
+  coverProblem?: string;
   id: string;
   contentFormat?: "article" | "image-post";
   title: string;
@@ -263,6 +271,9 @@ export const evaluatePublisherPreflight = (
   const protocolVersion = versionFromRuntime(input.runtime);
   const protocolRequired = input.runtime.mode === "chrome-extension";
   const bodyText = textFromHtml(input.draft.bodyHtml);
+  const title = input.draft.title.trim();
+  const titleLength = xiaoheiheTitleLength(title);
+  const titleTooLong = titleLength > xiaoheiheTitleLimit;
   const topics = normalizePublisherTopics(input.draft.topics);
   const capabilities: PublisherCapability[] = [
     {
@@ -338,19 +349,21 @@ export const evaluatePublisherPreflight = (
     {
       id: "title",
       label: "标题",
-      status: input.draft.title.trim() && input.draft.title.trim().length <= 30 ? "pass" : "blocked",
+      status: title && !titleTooLong ? "pass" : "blocked",
       required: true,
-      detail: !input.draft.title.trim()
+      detail: !title
         ? "标题为空"
-        : input.draft.title.trim().length > 30
-          ? `标题 ${input.draft.title.trim().length} 字，超过平台 30 字上限`
-          : `标题 ${input.draft.title.trim().length} 字`,
-      issueCode: !input.draft.title.trim()
+        : titleTooLong
+          ? `标题 ${titleLength} 字，超过平台 ${xiaoheiheTitleLimit} 字上限`
+          : `标题 ${titleLength} 字`,
+      issueCode: !title
         ? "PREFLIGHT_TITLE_MISSING"
-        : input.draft.title.trim().length > 30
+        : titleTooLong
           ? "PREFLIGHT_TITLE_TOO_LONG"
           : undefined,
-      action: "将标题调整到 1–30 字，并保留主要新闻点。",
+      action: !title ? "填写文章标题。" : titleTooLong
+        ? `按小黑盒计数调整到 ${xiaoheiheTitleLimit} 字以内，英文、数字和半角标点按半字计。`
+        : undefined,
     },
     {
       id: "body",
@@ -393,12 +406,14 @@ export const evaluatePublisherPreflight = (
     {
       id: "captions",
       label: "图注",
-      status: input.draft.images.every((image) => image.caption?.trim()) ? "pass" : "blocked",
-      required: input.draft.images.length > 0,
+      status: input.draft.images.every((image) => image.captionRequired === false || image.caption?.trim()) ? "pass" : "blocked",
+      required: input.draft.images.some(image => image.captionRequired !== false),
       detail: input.draft.images.length
-        ? `${input.draft.images.filter((image) => image.caption?.trim()).length}/${input.draft.images.length} 张有图注`
+        ? input.draft.images.every(image => image.captionRequired === false)
+          ? "用户提供的图片，图注选填"
+          : `${input.draft.images.filter((image) => image.caption?.trim()).length}/${input.draft.images.length} 张有图注`
         : "无图片，无需图注",
-      issueCode: input.draft.images.every((image) => image.caption?.trim())
+      issueCode: input.draft.images.every((image) => image.captionRequired === false || image.caption?.trim())
         ? undefined
         : "PREFLIGHT_CAPTIONS_MISSING",
       action: "为每张待上传图片填写可读图注，避免平台出现“请输入图片描述”。",
@@ -441,9 +456,19 @@ export const evaluatePublisherPreflight = (
     },
   ];
 
-  if (isImagePost && input.runtime.mode === "cdp") {
+  if (input.draft.xiaoheiheOptions) {
+    const plan = input.draft.xiaoheiheOptions.creationPlan;
+    capabilities.push(
+      { id: "visibility", label: "可见范围", status: "pass", required: true, detail: "所有人可见；填入时核验" },
+      { id: "creationPlan", label: "创作计划", status: "pass", required: true, detail: plan === "none" ? "不参与" : plan === "hot" ? "热点计划" : isImagePost ? "图文计划" : "文章计划" },
+      { id: "cover", label: "内容封面", status: plan === "none" || input.draft.coverAvailable ? "pass" : "blocked", required: true,
+        detail: plan === "none" ? "不参与创作计划，无需封面" : input.draft.coverAvailable ? "封面文件已核验" : input.draft.coverProblem || "请选择一张可用的创作计划封面",
+        issueCode: plan !== "none" && !input.draft.coverAvailable ? "PREFLIGHT_COVER_MISSING" : undefined, action: "在创作计划中选择或上传封面" },
+    );
+  }
+  if ((isImagePost || input.draft.xiaoheiheOptions) && input.runtime.mode === "cdp") {
     const protocol = capabilities.find(capability => capability.id === "protocol")!;
-    Object.assign(protocol, { label: "图文通道", status: "blocked", required: true, detail: "图文图集需要常用 Chrome 填入助手；CDP 备用通道仅支持文章", issueCode: "PREFLIGHT_IMAGE_POST_EXTENSION_REQUIRED", action: "切换到常用 Chrome 填入助手" });
+    Object.assign(protocol, { label: "填入通道", status: "blocked", required: true, detail: "社区、话题和创作计划需要常用 Chrome 填入助手", issueCode: "PREFLIGHT_IMAGE_POST_EXTENSION_REQUIRED", action: "切换到常用 Chrome 填入助手" });
   }
   const blocking: PublisherPreflightIssue[] = capabilities
     .filter((capability) => capability.status === "blocked")
@@ -476,7 +501,7 @@ export const evaluatePublisherPreflight = (
     draftId: input.draft.id,
     mode: input.runtime.mode,
     protocolVersion,
-    draftImageIds: input.draft.images.map((image) => image.id),
+    draftImageIds: [...new Set([...input.draft.images.map((image) => image.id), ...(input.draft.xiaoheiheOptions?.creationPlan !== "none" && input.draft.xiaoheiheOptions?.coverPlacementId ? [input.draft.xiaoheiheOptions.coverPlacementId] : [])])],
     expectedRevisionHash: input.expectedRevisionHash,
     minimumProtocolVersion,
     canQueueFill: queueBlocking.length === 0,
@@ -530,6 +555,9 @@ const reportStepFor = (steps: PublisherReportedStep[], id: PublisherCapabilityId
     captions: /图注|图片描述/,
     community: /分区|社区/,
     topics: /话题/,
+    visibility: /^可见范围$/,
+    creationPlan: /^创作计划$/,
+    cover: /^内容封面$/,
   };
   const pattern = patterns[id];
   return pattern ? steps.find((step) => pattern.test(step.name)) : undefined;
@@ -550,6 +578,9 @@ export const completePublisherAttempt = (
     "images",
     "community",
     "topics",
+    "visibility",
+    "creationPlan",
+    "cover",
   ];
   const editorWriteSucceeded = reportStepFor(report.steps, "title")?.ok === true
     && reportStepFor(report.steps, "body")?.ok === true

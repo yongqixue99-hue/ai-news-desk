@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useLayoutEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import type { CompletionAvailability } from "../../server/editorial-controls.js";
 import Image from "@tiptap/extension-image";
@@ -54,6 +54,7 @@ interface RichArticleEditorProps {
   onToggleCompletion?: (enabled: boolean) => Promise<void>;
   draftId?: string;
   title: string;
+  onTitleChange?: (title: string) => void;
   content: string;
   preview: boolean;
   theme: DraftLayoutTheme;
@@ -125,9 +126,29 @@ const visibleAttributionFor = (placement: DraftImagePlacement) => {
   return details.join("；");
 };
 
+function DraftTitleField({ title, onChange }: { title: string; onChange: (title: string) => void }) {
+  const titleField = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const field = titleField.current;
+    if (!field) return;
+    const fit = () => { field.style.height = "0px"; field.style.height = `${field.scrollHeight}px`; };
+    fit();
+    let width = field.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (field.clientWidth !== width) { width = field.clientWidth; fit(); }
+    });
+    observer.observe(field);
+    return () => observer.disconnect();
+  }, [title]);
+  return <div className="draft-paper-heading">
+    <span>文章标题</span>
+    <textarea ref={titleField} className="draft-paper-title" rows={2} aria-label="文章标题" placeholder="写下标题…" value={title} onChange={(event) => onChange(event.target.value.replace(/\n/g, " "))} />
+  </div>;
+}
+
 export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticleEditorProps>(
   function RichArticleEditor(
-    { draftId, title, content, preview, theme, onChange, onUploadFile, onImportUrl, onRequestCompletion, completion, completionEnabled = true, onToggleCompletion },
+    { draftId, title, onTitleChange, content, preview, theme, onChange, onUploadFile, onImportUrl, onRequestCompletion, completion, completionEnabled = true, onToggleCompletion },
     ref,
   ) {
     const fileInput = useRef<HTMLInputElement>(null);
@@ -657,7 +678,7 @@ export const RichArticleEditor = forwardRef<RichArticleEditorHandle, RichArticle
               />
             </BubbleMenu>
           ) : null}
-          {preview ? <h1 className="preview-article-title">{title}</h1> : null}
+          {preview ? <div className="draft-paper-heading preview-paper-heading"><span>文章标题</span><h1 className="preview-article-title">{title || "写下标题…"}</h1></div> : onTitleChange ? <DraftTitleField title={title} onChange={onTitleChange} /> : null}
           <EditorContent editor={editor} />
           {!preview && onRequestCompletion ? (
             <div className={`inline-completion-status is-${completionUi.status}`} role="status" aria-live="polite">

@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { inspectXiaoheiheCover } from "./xiaoheihe-cover.js";
+import { xiaoheiheSelection } from "./xiaoheihe-publishing.js";
+import { createHash, randomUUID } from "node:crypto";
 import { imagePostCapacity, imagePostEditorUrl, normalizePublisherTopics } from "./xiaoheihe-format.js";
 import path from "node:path";
 import {
@@ -22,13 +24,20 @@ import type {
 } from "./types.js";
 
 const extensionInstallPath = workspacePath("chrome-extension");
-export const MINIMUM_EXTENSION_VERSION = "0.1.23";
+export const MINIMUM_EXTENSION_VERSION = "0.1.24";
 const XIAOHEIHE_ARTICLE_EDITOR_URL = "https://www.xiaoheihe.cn/creator/editor/draft/article";
 
 export class UnsupportedExtensionVersionError extends Error {
   constructor(readonly version: string) {
     super(`填入助手版本 ${version || "unknown"} 过低，最低需要 ${MINIMUM_EXTENSION_VERSION}`);
     this.name = "UnsupportedExtensionVersionError";
+  }
+}
+
+export class ExtensionPublisherProtocolError extends Error {
+  constructor(readonly status: 401 | 403 | 409 | 410, message: string) {
+    super(message);
+    this.name = "ExtensionPublisherProtocolError";
   }
 }
 
@@ -45,7 +54,7 @@ const compareExtensionVersions = (left: string, right: string) => {
 // Chrome throttles timers in background tabs. Keep the helper connected across
 // that normal throttling interval while still expiring a genuinely closed tab.
 const connectedWindowMs = 45_000;
-const claimLeaseMs = 30_000;
+
 
 export interface ExtensionPublisherImage {
   id: string;
@@ -64,6 +73,8 @@ export interface ExtensionPublisherJob {
   title: string;
   bodyHtml: string;
   community: string;
+  communities?: string[];
+  publishing?: { contentFormat?: "article" | "image-post"; visibility: "public"; creationPlan: "none" | "standard" | "hot"; cover?: ExtensionPublisherImage };
   topics: string[];
   images: ExtensionPublisherImage[];
 }
@@ -93,8 +104,27 @@ interface ExtensionClient {
   seenAt: number;
 }
 
+interface AcceptedReport {
+  clientId: string;
+  fingerprint: string;
+  expiresAt: number;
+}
+
+const normalizeReport = (report: ExtensionPublisherReport): ExtensionPublisherReport => ({
+  pageUrl: typeof report.pageUrl === "string" ? report.pageUrl : undefined,
+  steps: Array.isArray(report.steps)
+    ? report.steps.map((step) => ({
+      name: String(step.name || "页面操作").slice(0, 40),
+      ok: Boolean(step.ok),
+      detail: String(step.detail || "").slice(0, 500),
+    }))
+    : [],
+});
+const reportFingerprint = (report: ExtensionPublisherReport) => createHash("sha256")
+  .update(JSON.stringify(report)).digest("hex");
+
 const assertToken = (actual: string | undefined, expected: string) => {
-  if (!actual || actual !== expected) throw new Error("填入助手配对信息无效，请刷新工作台后重试");
+  if (!actual || actual !== expected) throw new ExtensionPublisherProtocolError(401, "填入助手配对信息无效，请刷新工作台后重试");
 };
 
 /**
@@ -106,10 +136,11 @@ export class ExtensionPublisherBridge {
   readonly token = randomUUID();
   private client?: ExtensionClient;
   private jobs = new Map<string, PendingJob>();
+  private acceptedReports = new Map<string, AcceptedReport>();
 
   constructor(
     private readonly now: () => number = Date.now,
-    private readonly timeoutMs = 120_000,
+    private readonly timeoutMs = 240_000,
   ) {}
 
   bootstrap() {
@@ -163,8 +194,8 @@ export class ExtensionPublisherBridge {
     if (!this.client || this.client.id !== clientId) throw new Error("填入助手尚未完成握手");
     const now = this.now();
     for (const pending of this.jobs.values()) {
-      const leaseExpired = pending.claimedAt && now - pending.claimedAt > claimLeaseMs;
-      if (!pending.claimedBy || leaseExpired) {
+      // A timed-out write is ambiguous; never silently re-run it in another tab.
+      if (!pending.claimedBy) {
         pending.claimedBy = clientId;
         pending.claimedAt = now;
         return pending.job;
@@ -180,21 +211,31 @@ export class ExtensionPublisherBridge {
     report: ExtensionPublisherReport,
   ) {
     assertToken(token, this.token);
+    for (const [id, accepted] of this.acceptedReports) {
+      if (accepted.expiresAt <= this.now()) this.acceptedReports.delete(id);
+    }
     const pending = this.jobs.get(jobId);
-    if (!pending) throw new Error("发布任务已结束或不存在");
-    if (pending.claimedBy !== clientId) throw new Error("发布任务不属于当前填入助手");
+    const accepted = this.acceptedReports.get(jobId);
+    if (!pending && !accepted) throw new ExtensionPublisherProtocolError(410, "发布任务已结束或不存在");
+    if (accepted) {
+      if (accepted.clientId !== clientId) throw new ExtensionPublisherProtocolError(403, "发布任务不属于当前填入助手");
+      if (accepted.fingerprint !== reportFingerprint(normalizeReport(report))) {
+        throw new ExtensionPublisherProtocolError(409, "重传回执与已接收结果不一致");
+      }
+      return { ok: true };
+    }
+    if (!pending) throw new ExtensionPublisherProtocolError(410, "发布任务已结束或不存在");
+    if (pending.claimedBy !== clientId) throw new ExtensionPublisherProtocolError(403, "发布任务不属于当前填入助手");
+    const normalized = normalizeReport(report);
+    this.acceptedReports.set(jobId, {
+      clientId, fingerprint: reportFingerprint(normalized), expiresAt: this.now() + 5 * 60_000,
+    });
+    while (this.acceptedReports.size > 100) {
+      this.acceptedReports.delete(this.acceptedReports.keys().next().value!);
+    }
     clearTimeout(pending.timer);
     this.jobs.delete(jobId);
-    pending.resolve({
-      pageUrl: typeof report.pageUrl === "string" ? report.pageUrl : undefined,
-      steps: Array.isArray(report.steps)
-        ? report.steps.map((step) => ({
-          name: String(step.name || "页面操作").slice(0, 40),
-          ok: Boolean(step.ok),
-          detail: String(step.detail || "").slice(0, 500),
-        }))
-        : [],
-    });
+    pending.resolve(normalized);
     return { ok: true };
   }
 }
@@ -225,9 +266,7 @@ const jobImages = async (draft: ArticleDraft): Promise<ExtensionPublisherImage[]
       mimeType: inspected.contentType,
       dataUrl: `data:${inspected.contentType};base64,${inspected.bytes.toString("base64")}`,
       caption: captions.get(placement.id)
-        || placement.caption.trim()
-        || placement.image.caption.trim()
-        || "配图",
+        ?? (placement.caption.trim() || placement.image.caption.trim() || "配图"),
     });
   }
   if (results.length !== inserted.length) {
@@ -236,26 +275,45 @@ const jobImages = async (draft: ArticleDraft): Promise<ExtensionPublisherImage[]
   return results;
 };
 
-export const prepareJob = async (draft: ArticleDraft, editorUrl: string): Promise<ExtensionPublisherJob> => ({
-  id: `publish_${randomUUID()}`,
-  draftId: draft.id,
-  createdAt: new Date().toISOString(),
-  editorUrl: draft.contentFormat === "image-post" ? imagePostEditorUrl : XIAOHEIHE_ARTICLE_EDITOR_URL,
-  contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
-  title: draft.title,
-  bodyHtml: draft.contentFormat === "image-post"
-    ? publisherImagePostBodyHtml(draft)
-    : publisherBodyHtml(draft),
-  community: draft.community.trim(),
-  topics: normalizePublisherTopics(draft.topics),
-  images: await jobImages(draft),
-});
+export const prepareJob = async (draft: ArticleDraft, _editorUrl: string): Promise<ExtensionPublisherJob> => {
+  const selection = draft.xiaoheiheOptions ? xiaoheiheSelection(draft) : undefined;
+  const coverId = selection?.options.creationPlan !== "none" ? selection?.options.coverPlacementId : undefined;
+  let cover: ExtensionPublisherImage | undefined;
+  if (coverId) {
+    const placement = draft.images.find(image => image.id === coverId);
+    if (!placement) throw new Error("创作计划封面不存在，请重新选择");
+    const inspected = await inspectXiaoheiheCover(placement);
+    if (!inspected.available || !inspected.bytes || !inspected.contentType || !placement.image.fingerprint || inspected.fingerprint !== placement.image.fingerprint) throw new Error(inspected.reason || "创作计划封面文件校验失败，请重新上传");
+    cover = { id: placement.id, fileName: `${placement.id}-${path.basename(placement.image.localPath!)}`, mimeType: inspected.contentType,
+      dataUrl: `data:${inspected.contentType};base64,${inspected.bytes.toString("base64")}`, caption: placement.caption };
+  }
+  if (selection && selection.options.creationPlan !== "none" && !cover) throw new Error("参加创作计划需要选择封面");
+  return {
+    id: `publish_${randomUUID()}`, draftId: draft.id, createdAt: new Date().toISOString(),
+    editorUrl: draft.contentFormat === "image-post" ? imagePostEditorUrl : XIAOHEIHE_ARTICLE_EDITOR_URL,
+    contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
+    title: draft.title, bodyHtml: draft.contentFormat === "image-post" ? publisherImagePostBodyHtml(draft) : publisherBodyHtml(draft),
+    community: selection?.community ?? draft.community.trim(), communities: selection?.communities,
+    topics: selection?.topics ?? normalizePublisherTopics(draft.topics), images: await jobImages(draft),
+    publishing: selection ? { contentFormat: draft.contentFormat ?? "article", visibility: "public", creationPlan: selection.options.creationPlan, cover } : undefined,
+  };
+};
 
 export const extensionPublisherStatus = () => extensionPublisherBridge.status();
 
-export const openRegularChromePublisher = async (editorUrl: string) => {
-  await openRegularChrome(editorUrl);
-  return extensionPublisherStatus();
+export const openRegularChromePublisher = async (
+  _editorUrl: string,
+  dependencies: { open?: (url: string) => Promise<void>; status?: () => PublisherStatus } = {},
+) => {
+  const status = dependencies.status ?? extensionPublisherStatus;
+  const connected = status().ok;
+  // The installed helper pairs through its content script on the local workbench.
+  // Opening only Xiaoheihe never establishes that connection for the desktop app.
+  await (dependencies.open ?? openRegularChrome)(connected
+    ? XIAOHEIHE_ARTICLE_EDITOR_URL
+    : "http://127.0.0.1:4317/#drafts");
+  const result = status();
+  return !result.ok ? { ...result, detail: "已在常用 Chrome 打开连接页。等待助手连接后即可返回 App；若仍离线，请检查新闻台浏览器助手是否启用" } : result;
 };
 
 export const fillViaChromeExtension = async (
@@ -286,7 +344,7 @@ export const fillViaChromeExtension = async (
   const report = await (dependencies.submit
     ? dependencies.submit(job)
     : extensionPublisherBridge.submit(job));
-  const allStepsOk = ["标题", "正文", "配图", "分区", "话题"].every(
+  const allStepsOk = ["标题", "正文", "配图", "分区", "话题", ...(job.publishing ? ["可见范围", "创作计划", "内容封面"] : [])].every(
     (name) => report.steps.find((step) => step.name === name)?.ok === true,
   ) && report.steps.every((step) => step.ok);
   const result: PublisherResult = {
@@ -295,7 +353,7 @@ export const fillViaChromeExtension = async (
     revisionHash: expectedRevisionHash,
     pageUrl: report.pageUrl,
     community: draftSnapshot.community,
-    topics: [...draftSnapshot.topics],
+    topics: job.topics,
     steps: report.steps,
     warning: "内容通过常用 Chrome 填入；系统不会点击最终发布。请检查正文、图片、分区和话题。",
   };

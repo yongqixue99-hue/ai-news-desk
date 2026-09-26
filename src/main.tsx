@@ -8,6 +8,10 @@ import "./reader-design.css";
 import "./strategy-design.css";
 import "./swiss-design.css";
 import "./components/source-radar.css";
+import "./settings-design.css";
+import "./draft-design.css";
+import "./xiaoheihe-delivery.css";
+import "./components/primary-delivery.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
