@@ -1,3 +1,4 @@
+import { deadlineSignal, withAbort } from './abort.js';
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -174,6 +175,7 @@ const moduleFallbackForClientShell = async (
   moduleUrls: string[],
   pageUrl: URL,
   imageLimit: number,
+  signal?: AbortSignal,
 ) => {
   const images: string[] = [];
   const blocks: NonNullable<ExtractedPage["blocks"]> = [];
@@ -183,7 +185,7 @@ const moduleFallbackForClientShell = async (
   for (const moduleUrl of moduleUrls.slice(0, 3)) {
     try {
       const response = await fetchRemote(moduleUrl, {
-        signal: AbortSignal.timeout(10_000),
+        signal: deadlineSignal(10_000, signal),
         headers: {
           "user-agent":
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 AI-News-Desk/0.1",
@@ -205,6 +207,7 @@ const moduleFallbackForClientShell = async (
       textTruncated ||= article.textTruncated ?? false;
       if (images.length >= imageLimit && blocks.length >= 3 && title) break;
     } catch {
+      signal?.throwIfAborted();
       // Module probing is a best-effort fallback. A failed asset must not make
       // an otherwise readable article fail extraction.
     }
@@ -269,9 +272,9 @@ export const extractArticleImageCandidates = (html: string, pageUrl: string): Ar
   return images;
 };
 
-export const fetchArticleDocument = (url: URL, options: { fetcher?: typeof fetchRemote; language?: string } = {}) =>
+export const fetchArticleDocument = (url: URL, options: { fetcher?: typeof fetchRemote; language?: string; signal?: AbortSignal } = {}) =>
   (options.fetcher ?? fetchRemote)(url, {
-    signal: AbortSignal.timeout(18_000),
+    signal: deadlineSignal(18_000, options.signal),
     headers: {
       "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
       accept: "text/html,application/xhtml+xml",
@@ -280,6 +283,7 @@ export const fetchArticleDocument = (url: URL, options: { fetcher?: typeof fetch
   });
 
 export type ExtractPageOptions = {
+  signal?: AbortSignal;
   /** Test seam only; production callers use the fail-closed URL validator. */
   validateUrl?: (rawUrl: string | URL) => Promise<URL>;
   /** Test seam only; production callers use the fixed official Qwen index. */
@@ -291,30 +295,32 @@ export const extractPage = async (
   imageLimit = 8,
   options: ExtractPageOptions = {},
 ): Promise<ExtractedPage> => {
-  const requestedUrl = await (options.validateUrl ?? validateRemoteUrl)(rawUrl);
-  const qwenArticle = await (options.readQwenArticle ?? readQwenArticleSource)(requestedUrl.toString());
+  const signal = deadlineSignal(30_000, options.signal);
+  const requestedUrl = await withAbort(() => options.validateUrl ? options.validateUrl(rawUrl) : validateRemoteUrl(rawUrl, {signal}), signal);
+  const qwenArticle = await withAbort(() => options.readQwenArticle ? options.readQwenArticle(requestedUrl.toString()) : readQwenArticleSource(requestedUrl.toString(), {signal}), signal);
   if (qwenArticle) {
     const articleUrl = new URL(qwenArticle.canonicalUrl);
-    const page = await extractPageContent(qwenArticle.html, articleUrl, articleUrl, imageLimit);
+    const page = await withAbort(() => extractPageContent(qwenArticle.html, articleUrl, articleUrl, imageLimit, signal), signal);
     return { ...page, url: qwenArticle.canonicalUrl, canonicalUrl: qwenArticle.canonicalUrl,
       title: qwenArticle.title, author: qwenArticle.author, publishedAt: qwenArticle.publishedAt };
   }
   const fetchUrl = new URL(requestedUrl);
   const geminiUpdate = fetchUrl.origin === "https://ai.google.dev" && /^\/gemini-api\/docs\/changelog\/?$/u.test(fetchUrl.pathname);
   if (geminiUpdate) fetchUrl.searchParams.set("hl", "en");
-  const response = await fetchArticleDocument(fetchUrl, { language: geminiUpdate ? "en-US,en;q=0.9" : undefined });
+  const response = await withAbort(() => fetchArticleDocument(fetchUrl, { signal, language: geminiUpdate ? "en-US,en;q=0.9" : undefined }), signal);
   if (!response.ok) throw new Error(`页面读取失败：HTTP ${response.status}`);
   const finalUrl = new URL(response.url || requestedUrl.toString());
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("html") && !contentType.includes("xml")) {
     throw new Error(`不支持的页面类型：${contentType || "unknown"}`);
   }
-  const html = (await readResponseBuffer(response, 4_000_000)).toString("utf8");
-  return extractPageContent(html, finalUrl, requestedUrl, imageLimit);
+  const html = (await readResponseBuffer(response, 4_000_000, signal)).toString("utf8");
+  return withAbort(() => extractPageContent(html, finalUrl, requestedUrl, imageLimit, signal), signal);
 };
 
 /** Parse a fetched page; official history pages must resolve to one dated event. */
-export const extractPageContent = async (content: string, finalUrl: URL, requestedUrl = finalUrl, imageLimit = 8): Promise<ExtractedPage> => {
+export const extractPageContent = async (content: string, finalUrl: URL, requestedUrl = finalUrl, imageLimit = 8, signal?: AbortSignal): Promise<ExtractedPage> => {
+  signal?.throwIfAborted();
   if (hasOfficialUpdateAnchor(requestedUrl)
     && (requestedUrl.origin !== finalUrl.origin || requestedUrl.pathname.replace(/\/$/u, "") !== finalUrl.pathname.replace(/\/$/u, ""))) {
     throw new Error("官方更新永久链接重定向到其他页面，无法确认事件正文");
@@ -363,7 +369,7 @@ export const extractPageContent = async (content: string, finalUrl: URL, request
   imageCandidates.push(...articleImages);
 
   if (moduleUrls.length && (articleImageCount === 0 || blocks.length === 0 || text.length < 80 || !title)) {
-    const moduleFallback = await moduleFallbackForClientShell(moduleUrls, finalUrl, imageLimit);
+    const moduleFallback = await moduleFallbackForClientShell(moduleUrls, finalUrl, imageLimit, signal);
     title ||= moduleFallback.title || "";
     if (text.length < 80 && moduleFallback.blocks.length) {
       blocks = moduleFallback.blocks;

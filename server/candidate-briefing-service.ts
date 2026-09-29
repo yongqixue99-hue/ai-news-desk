@@ -77,6 +77,7 @@ const apiSystemPrompt = `你是为个人科技公众号工作的中文编辑。�
 你的读者懂一些 AI 和科技，但没读过英文原文。写法要像编辑把刚读完的新闻讲给同事听，不能像报告、问答表或模型总结。
 对每个候选返回事实层和编辑速读层。事实层供系统核验，编辑速读层直接展示给用户。
 保留公司名、产品名、数字、日期、比较关系和不确定性；不得补充输入中没有的事实。
+来源账号或网站名称不等于事件主体，不能因此添加正文中没有的公司。How/Guide/Review 等教程、指南和测评必须保留文章类型，不得改写成新品发布；不能补出“首次、唯一”等原文未支持的范围。
 不要使用“重磅”“震撼”“引领未来”“值得关注”“现有证据显示”“当前输入”“根据原标题”“本文将”“让我们”。面向用户的字段里不要提“输入、证据文本、任务、字段”；用“目前只读到标题／来源摘要”“仍需核对原文”等自然表达说明读取边界。
 没有读到某项信息，不等于原文没有写，也不等于官方尚未公布。只有原文明确说该信息未公布，才能这样描述；即使标记为正文，也可能只是提取片段，不能据其缺项推断整篇原文的缺项。这一规则适用于全部字段。
 不要使用“不是 A 而是 B”“真正”“其实”“本质上”“核心在于”“关键在于”“更重要的是”等伪洞察句式。不要用连续四句“媒体称／报道援引／公司表示／文中提到”填表。
@@ -185,12 +186,18 @@ export const generateCandidateBriefings = async (
         codexTimeoutMs: 240_000,
         signal: options.signal,
       });
+      const groundingIssues: string[] = [];
       items = parseCandidateBriefings(observed.output, batch, {
         generatedAt: observed.meta.completedAt,
         providerId: provider.id,
+        onGroundingIssue: (id, message) => groundingIssues.push(`${id}：${message}`),
       });
+      if (groundingIssues.length) {
+        failure = groundingIssues.join('；');
+        trace = appendAiError(trace, {error: new Error(failure)});
+      }
       trace = completeAiRunTrace(trace, {
-        status: "succeeded",
+        status: items.length ? "succeeded" : "failed",
         completedAt: observed.meta.completedAt,
         exitCode: observed.meta.exitCode,
         httpStatus: observed.meta.httpStatus,

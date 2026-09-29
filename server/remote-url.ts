@@ -1,5 +1,8 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { deadlineSignal, withAbort } from './abort.js';
+
+const responseSignals = new WeakMap<Response, AbortSignal>();
 
 const blockedHostnames = new Set(["localhost", "localhost.localdomain", "0.0.0.0", "::", "::1"]);
 const redirectStatuses = new Set([301, 302, 303, 307, 308]);
@@ -55,18 +58,18 @@ interface DnsJsonResponse {
   Answer?: Array<{ type?: number; data?: string }>;
 }
 
-const publicAddressesFromDoh = async (hostname: string) => {
+const publicAddressesFromDoh = async (hostname: string, signal: AbortSignal) => {
   const queries = await Promise.allSettled(["A", "AAAA"].map(async (type) => {
     const endpoint = new URL("https://cloudflare-dns.com/dns-query");
     endpoint.searchParams.set("name", hostname);
     endpoint.searchParams.set("type", type);
-    const response = await fetch(endpoint, {
+    const response = await withAbort(() => fetch(endpoint, {
       redirect: "error",
-      signal: AbortSignal.timeout(5_000),
+      signal,
       headers: { accept: "application/dns-json" },
-    });
+    }), signal);
     if (!response.ok) throw new Error(`DoH HTTP ${response.status}`);
-    const payload = await response.json() as DnsJsonResponse;
+    const payload = await withAbort(() => response.json(), signal) as DnsJsonResponse;
     return (payload.Answer ?? [])
       .filter((answer) => answer.type === 1 || answer.type === 28)
       .map((answer) => answer.data?.trim() ?? "")
@@ -75,7 +78,12 @@ const publicAddressesFromDoh = async (hostname: string) => {
   return [...new Set(queries.flatMap((query) => query.status === "fulfilled" ? query.value : []))];
 };
 
-export const validateRemoteUrl = async (rawUrl: string | URL) => {
+export const validateRemoteUrl = async (rawUrl: string | URL, options: {
+  signal?: AbortSignal;
+  resolve?: (hostname: string) => Promise<Array<{address: string; family: number}>>;
+} = {}) => {
+  const signal = deadlineSignal(20_000, options.signal);
+  signal.throwIfAborted();
   const url = rawUrl instanceof URL ? new URL(rawUrl) : new URL(rawUrl);
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error("只允许读取 HTTP/HTTPS 地址");
   if (url.username || url.password) throw new Error("远程地址不能包含用户名或密码");
@@ -91,12 +99,14 @@ export const validateRemoteUrl = async (rawUrl: string | URL) => {
 
   let addresses: Array<{ address: string; family: number }>;
   try {
-    addresses = await lookup(hostname, { all: true, verbatim: true });
+    addresses = await withAbort(() => options.resolve ? options.resolve(hostname) : lookup(hostname, { all: true, verbatim: true }), signal);
   } catch {
+    signal.throwIfAborted();
     throw new Error(`无法解析远程地址：${hostname}`);
   }
   if (addresses.length && addresses.every((entry) => isProxyFakeIpv4(entry.address))) {
-    const verifiedAddresses = await publicAddressesFromDoh(hostname).catch(() => []);
+    const verifiedAddresses = await publicAddressesFromDoh(hostname, deadlineSignal(5_000, signal)).catch(() => []);
+    signal.throwIfAborted();
     if (verifiedAddresses.length && verifiedAddresses.every((address) => !isDisallowedRemoteAddress(address))) {
       return url;
     }
@@ -108,35 +118,42 @@ export const validateRemoteUrl = async (rawUrl: string | URL) => {
 };
 
 export const fetchRemote = async (rawUrl: string | URL, init: RequestInit = {}, maxRedirects = 5) => {
-  let current = await validateRemoteUrl(rawUrl);
+  const signal = deadlineSignal(20_000, init.signal);
+  let current = await validateRemoteUrl(rawUrl, {signal});
   for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
-    const response = await fetch(current, { ...init, redirect: "manual" });
+    const response = await withAbort(() => fetch(current, { ...init, signal, redirect: "manual" }), signal);
+    responseSignals.set(response, signal);
     if (!redirectStatuses.has(response.status)) return response;
     const location = response.headers.get("location");
     if (!location) return response;
+    void response.body?.cancel().catch(() => undefined);
     if (redirects === maxRedirects) throw new Error("远程地址重定向次数过多");
-    await response.body?.cancel().catch(() => undefined);
-    current = await validateRemoteUrl(new URL(location, current));
+    current = await validateRemoteUrl(new URL(location, current), {signal});
   }
   throw new Error("远程地址重定向失败");
 };
 
-export const readResponseBuffer = async (response: Response, maximumBytes: number) => {
+export const readResponseBuffer = async (response: Response, maximumBytes: number, signal = responseSignals.get(response)) => {
   const declaredLength = Number(response.headers.get("content-length") || 0);
-  if (declaredLength > maximumBytes) throw new Error("远程响应超过允许大小");
+  if (declaredLength > maximumBytes) {
+    void response.body?.cancel().catch(() => undefined);
+    throw new Error("远程响应超过允许大小");
+  }
   if (!response.body) return Buffer.alloc(0);
   const reader = response.body.getReader();
   const chunks: Buffer[] = [];
   let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maximumBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new Error("远程响应超过允许大小");
+  try {
+    while (true) {
+      const { done, value } = await withAbort(() => reader.read(), signal);
+      if (done) break;
+      total += value.byteLength;
+      if (total > maximumBytes) throw new Error("远程响应超过允许大小");
+      chunks.push(Buffer.from(value));
     }
-    chunks.push(Buffer.from(value));
-  }
+  } catch (error) {
+    void reader.cancel().catch(() => undefined);
+    throw error;
+  } finally { reader.releaseLock(); }
   return Buffer.concat(chunks, total);
 };

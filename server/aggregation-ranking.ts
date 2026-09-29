@@ -64,7 +64,7 @@ export function rankAggregations(entries: AggregationEntry[], now: number) {
       score:representative.ranking.score-representative.ranking.heat+hottest.ranking.heat,heat:hottest.ranking.heat,
       reasons:[...representative.ranking.reasons.filter(r=>r!=='热度未知'),...hottest.ranking.reasons.filter(r=>r.startsWith('AIHOT 热点榜'))],
     }:representative.ranking;
-    return {...representative, ranking, selected: group.some(e => e.selected),
+    return {...representative, ranking, event: representative.event || group.find(e=>e.event)?.event, selected: group.some(e => e.selected),
       platforms: [...new Map(group.flatMap(e => e.platforms).map(p => [p.id, p])).values()],
       related: group.filter(e => e !== representative).map(e => ({id:e.id,title:e.title,url:e.url,platform:e.platforms[0]!.name})),
     };

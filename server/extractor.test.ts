@@ -280,3 +280,19 @@ test("animated heading letters cannot consume the article illustration budget", 
   assert.ok(page.images.some((image) => /poster-example/u.test(image.url)));
   assert.ok(page.images.some((image) => /announcement/u.test(image.url)));
 });
+test('article extraction cancels a stalled preflight without entering another reader', async () => {
+  const controller = new AbortController();
+  let reads = 0;
+  const pending = extractPage('https://publisher.example/article', 8, {
+    signal: controller.signal,
+    validateUrl: async () => new Promise<URL>(() => {}),
+    readQwenArticle: async () => { reads++; return undefined; },
+  });
+  controller.abort(new Error('stop this extraction'));
+  let timer: ReturnType<typeof setTimeout>;
+  try {
+    const result = await Promise.race([pending.then(() => 'completed', (e: Error) => e.message), new Promise(r => { timer = setTimeout(() => r('hung'), 300); })]);
+    assert.equal(result, 'stop this extraction');
+    assert.equal(reads, 0);
+  } finally { clearTimeout(timer!); }
+});

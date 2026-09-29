@@ -1,3 +1,4 @@
+import { deadlineSignal } from './abort.js';
 import { aggregationSnapshot } from "./aggregation-desk.js";
 import { candidatePool } from "./candidate-pool.js";
 import { captureRecommendationSnapshot } from "./discovery-trace.js";
@@ -163,6 +164,7 @@ export const horizonSourceKindsFor = (sources: SourceConfig[]) => [...new Set(
 )];
 
 const probeImages = async (runId: string, signal?: AbortSignal) => {
+  const stageSignal = deadlineSignal(60_000, signal);
   const extractedSourceText = new Map<string, string>();
   const state = await updateState((current) => current);
   const run = state.runs.find((entry) => entry.id === runId);
@@ -170,15 +172,16 @@ const probeImages = async (runId: string, signal?: AbortSignal) => {
   const topCandidates = run.candidates.slice(0, 18);
   let cursor = 0;
   const worker = async () => {
-    while (!signal?.aborted && cursor < topCandidates.length) {
+    while (!stageSignal.aborted && cursor < topCandidates.length) {
       const candidate = topCandidates[cursor++];
       try {
-        const page = await extractPage(candidate.canonicalUrl || candidate.url, 8);
+        const page = await extractPage(candidate.canonicalUrl || candidate.url, 8, {signal: stageSignal});
+        stageSignal.throwIfAborted();
         if (page.text.trim()) extractedSourceText.set(candidate.id, page.text.slice(0, 2_400));
         await updateState((current) => {
-          const target = current.runs
-            .find((entry) => entry.id === runId)
-            ?.candidates.find((entry) => entry.id === candidate.id);
+          const targetRun = current.runs.find((entry) => entry.id === runId);
+          if (!targetRun || !canApplyCollectionResult(targetRun, stageSignal)) return;
+          const target = targetRun.candidates.find((entry) => entry.id === candidate.id);
           if (!target) return;
           target.canonicalUrl = page.canonicalUrl;
           target.images = mergeCandidateProbeImages(target.images, page.images);
@@ -186,16 +189,18 @@ const probeImages = async (runId: string, signal?: AbortSignal) => {
           if (!target.excerpt && page.text) target.excerpt = page.text.slice(0, 360);
         });
       } catch {
+        if (stageSignal.aborted) return;
         await updateState((current) => {
-          const target = current.runs
-            .find((entry) => entry.id === runId)
-            ?.candidates.find((entry) => entry.id === candidate.id);
+          const targetRun = current.runs.find((entry) => entry.id === runId);
+          if (!targetRun || !canApplyCollectionResult(targetRun, stageSignal)) return;
+          const target = targetRun.candidates.find((entry) => entry.id === candidate.id);
           if (target) target.imageCount = target.images.length;
         });
       }
     }
   };
   await Promise.all([worker(), worker(), worker()]);
+  if (stageSignal.aborted && !signal?.aborted) await appendLog(runId, '提取来源原图', '部分来源读取较慢，已保留候选和已读取的图片；其余内容可在选题后补齐。', 'warning');
   return extractedSourceText;
 };
 
@@ -512,7 +517,7 @@ export const executeCollection = async (runId: string) => {
     const filters = { dateFrom: run.dateFrom, dateTo: run.dateTo, keywords: run.keywords };
     const sourceDesk = createSourceDesk({
       collectStructured: (structuredSources, request) =>
-        collectPortableStructuredSources(structuredSources, request, { signal: controller.signal }),
+        collectPortableStructuredSources(structuredSources, request, { signal: request.signal }),
       collectXOfficial: (xSources, options) => collectXOfficialSources(xSources, {
         client: createXApiClient({ getBearerToken: getXBearerToken }),
         signal: options.signal,

@@ -83,7 +83,7 @@ test("aggregation browsing is read-only, retains filtered summaries and works on
  sourceResults:[{sourceId:'smol-ainews',sourceName:'AINews',status:'healthy',healthImpact:'success',rawCount:1,candidateCount:0,detail:''}]}];
 
  const news=(source:string,title:string,url:string,rank:number)=>({id:title,source_type:'rss' as const,title,url,content:`${source} original summary`,published_at:now,fetched_at:now,metadata:{source_id:source,aggregation_order:rank,...(source==='aihot-news'?{aggregation_channel:'hot',aggregation_rank:rank}:{aggregation_channel:'feed'})}});
- state.runs[0]!.aggregationItems!.push(news('aihot-news','报名：重磅模型发布活动','https://example.com/promo',1),news('aihot-news','Jev 发布新决策模型','https://example.com/release',2),news('alphasignal','AlphaSignal original model release','https://example.com/release',1));
+ state.runs[0]!.aggregationItems!.push(news('aihot-news','报名：重磅模型发布活动','https://example.com/promo',1),{...news('aihot-news','Jev 发布新决策模型','https://example.com/release',2),metadata:{source_id:'aihot-news',aggregation_channel:'hot',aggregation_rank:2,aggregation_order:2,aggregation_event:{digest:'Jev 的推理工具已开放试用，可用同一套接口比较不同模型的输出。'.repeat(10),latest:'新增批处理接口和按量计费说明。',sourceCount:3,reportCount:2,updatedAt:now,reports:[{title:'官方接口说明',url:'https://example.com/docs',source:'Jev'},{title:'开发者试用记录',url:'https://example.com/review',source:'开发者日志'}]}}},news('alphasignal','AlphaSignal original model release','https://example.com/release',1));
  state.runs[0]!.sourceResults!.push(...['aihot-news','alphasignal'].map(sourceId=>({sourceId,sourceName:sourceId,status:'healthy' as const,healthImpact:'success' as const,rawCount:2,candidateCount:0,detail:''})));
  await writeFile(path.join(root,'state.json'),JSON.stringify(state));
  const port=await freePort(),origin=`http://127.0.0.1:${port}`;let output='';
@@ -121,6 +121,29 @@ test("aggregation browsing is read-only, retains filtered summaries and works on
  assert.equal(await page.getByRole('heading',{name:'报名：重磅模型发布活动'}).count(),0);await capture('roundup');
  await page.getByRole('button',{name:'AIHOT 已停用'}).click();await page.getByRole('heading',{name:'报名：重磅模型发布活动'}).waitFor();
  assert.equal(await page.locator('.aggregation-row h2').first().innerText(),'报名：重磅模型发布活动');await capture('platform');
+ await page.getByText('AIHOT 事件摘要',{exact:true}).waitFor();
+ await page.getByText('新增批处理接口和按量计费说明。',{exact:false}).waitFor();
+ const eventRow=page.locator('.aggregation-row').filter({has:page.getByRole('heading',{name:'Jev 发布新决策模型',exact:true})});
+ assert.equal(await eventRow.locator('details').getAttribute('open'),null);
+ assert.equal(await eventRow.locator('.aggregation-summary.is-collapsed').count(),1);
+ await eventRow.getByRole('button',{name:'展开完整摘要'}).click();
+ assert.equal(await eventRow.locator('.aggregation-summary.is-collapsed').count(),0);
+ await eventRow.locator('summary').click();await page.getByRole('link',{name:'官方接口说明',exact:true}).waitFor();
+ await page.getByLabel('筛选聚合资讯').fill('批处理');
+ assert.equal(await page.locator('.aggregation-row').count(),1,'search includes latest developments');
+ await page.evaluate(()=>window.scrollTo(0,350));
+ await page.waitForTimeout(80);
+ const previousTop=await eventRow.evaluate(el=>el.getBoundingClientRect().top);
+ await page.evaluate(()=>{location.hash='sources';});await page.getByRole('heading',{name:'新闻源',exact:true}).waitFor();
+ await page.evaluate(()=>{location.hash='aggregations';});await page.getByRole('heading',{name:'Jev 发布新决策模型',exact:true}).waitFor();
+ assert.equal(await page.getByLabel('筛选聚合资讯').inputValue(),'批处理');
+ assert.equal(await page.getByRole('button',{name:'AIHOT 已停用'}).getAttribute('aria-pressed'),'true');
+ await page.waitForFunction((top)=>{const row=document.querySelector('[data-aggregation-id]');return row&&Math.abs(row.getBoundingClientRect().top-top)<3;},previousTop);
+ assert.notEqual(await eventRow.locator('details').getAttribute('open'),null,'expanded sources survive navigation');
+ assert.equal(await eventRow.getByRole('button',{name:'收起摘要'}).count(),1,'expanded digest survives navigation');
+ await capture('event-reading');
+ await page.getByLabel('筛选聚合资讯').fill('');
+
  await page.getByRole('button',{name:'AlphaSignal 已停用'}).click();await page.getByRole('heading',{name:'AlphaSignal original model release'}).waitFor();
  assert.equal(await page.getByRole('heading',{name:'Jev 发布新决策模型'}).count(),0);
  await page.getByRole('button',{name:'全部平台'}).click();await page.getByRole('button',{name:'日报合集',exact:true}).click();await page.getByRole('heading',{name:'A new decision model'}).waitFor();

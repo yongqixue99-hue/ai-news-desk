@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { RawHorizonItem } from './types.js';
+import { readAggregationEvent } from './aggregation-event.js';
 
 export const aihotHotUrl = 'https://aihot.news/api/v1/hot-topics';
 export const aihotSelectedUrl = 'https://aihot.news/api/v1/items?mode=selected&window=7d&limit=100';
@@ -40,6 +41,9 @@ export function parseAihotRanking(content: string, url: string, fetchedAt: strin
 export function parseAihotStoryRelations(content: string, hot: RawHorizonItem): RawHorizonItem[] {
   const data=record(JSON.parse(content)), story=record(data.story);
   if(data.schemaVersion!==1 || !Array.isArray(story.reports)) throw new Error('AIHOT 事件成员结构发生变化');
-  const urls=story.reports.slice(0,100).map((v:unknown)=>str(record(record(v).links).original,2000)).filter(Boolean);
-  return [{...hot,metadata:{...hot.metadata,aggregation_related_urls:urls}}];
+  const event = readAggregationEvent({digest:story.digest, latest:story.latest, updatedAt:story.digestUpdatedAt,
+    sourceCount:story.sourceCount, reportCount:story.reportCount,
+    reports:story.reports.map((v:unknown) => {const r=record(v); return {title:r.title,source:record(r.source).name,url:record(r.links).original};}),
+  });
+  return [{...hot,metadata:{...hot.metadata,aggregation_related_urls:event?.reports.map(r=>r.url)||[],aggregation_event:event}}];
 }

@@ -5,17 +5,21 @@ import type {
   CandidateCommunityInsight,
 } from "./types.js";
 import { assessWritingQuality } from "./writing-quality.js";
+import { assertBriefingGrounded } from './briefing-grounding.js';
 
 export interface CandidateBriefingEvidenceInput {
   candidateId: string;
   basis: CandidateBriefingBasis;
   text: string;
+  sourceTitle?: string;
+  sourceText?: string;
   community?: boolean;
 }
 
 export interface CandidateBriefingParseOptions {
   generatedAt: string;
   providerId: string;
+  onGroundingIssue?: (candidateId: string, message: string) => void;
 }
 
 export interface ParsedCandidateBriefing {
@@ -64,6 +68,8 @@ export const buildCandidateBriefingEvidence = (
     candidateId: candidate.id,
     basis,
     community,
+    sourceTitle: candidate.title,
+    sourceText: sourceText.slice(0, community ? 4_800 : 2_400),
     text: [
       `内容类型：${community ? "社区讨论线索" : "新闻或官方来源"}`,
       `原标题：${candidate.title}`,
@@ -183,11 +189,12 @@ export const parseCandidateBriefings = (
   if (payload.items.length !== expected.size) throw new Error("中文摘要结果数量与候选数量不一致");
 
   const byId = new Map<string, ParsedCandidateBriefing>();
+  const rejected = new Set<string>();
   for (const item of payload.items) {
     const candidateId = typeof item.candidateId === "string" ? item.candidateId.trim() : "";
     const evidence = expected.get(candidateId);
     if (!evidence) throw new Error(`中文摘要返回了未知候选：${candidateId || "空 ID"}`);
-    if (byId.has(candidateId)) throw new Error(`中文摘要重复返回候选：${candidateId}`);
+    if (byId.has(candidateId) || rejected.has(candidateId)) throw new Error(`中文摘要重复返回候选：${candidateId}`);
     const communitySummaryZh = optionalChineseText(item.communitySummaryZh, "社区摘要", 220);
     const focusZh = communityFocus(item.communityFocusZh);
     const disagreementZh = optionalChineseText(item.communityDisagreementZh, "社区分歧", 160);
@@ -196,11 +203,25 @@ export const parseCandidateBriefings = (
     }
     const titleZh = cleanText(item.titleZh, "中文标题", 80);
     const explanation = explanationFrom(item, titleZh, evidence.basis);
+    const summaryZh = cleanText(item.summaryZh, "中文摘要", 220);
+    if (evidence.sourceTitle !== undefined) {
+      try {
+        assertBriefingGrounded(evidence.sourceTitle, evidence.sourceText || '', titleZh,
+          [titleZh, summaryZh, explanation?.whatHappenedZh, explanation?.readerBriefZh,
+            ...(explanation?.keyPointsZh || []), explanation?.whyItMattersZh, explanation?.affectedZh,
+            explanation?.editorNoteZh, ...(explanation?.unknownsZh || [])].filter(Boolean).join('\n'));
+      } catch (error) {
+        if (!options.onGroundingIssue) throw error;
+        options.onGroundingIssue(candidateId, error instanceof Error ? error.message : String(error));
+        rejected.add(candidateId);
+        continue;
+      }
+    }
     byId.set(candidateId, {
       candidateId,
       briefing: {
         titleZh,
-        summaryZh: cleanText(item.summaryZh, "中文摘要", 220),
+        summaryZh,
         basis: evidence.basis,
         generatedAt: options.generatedAt,
         providerId: options.providerId,
@@ -219,7 +240,7 @@ export const parseCandidateBriefings = (
     });
   }
 
-  return evidenceInputs.map((input) => {
+  return evidenceInputs.filter(input => !rejected.has(input.candidateId)).map((input) => {
     const briefing = byId.get(input.candidateId);
     if (!briefing) throw new Error(`中文摘要漏掉候选：${input.candidateId}`);
     return briefing;
