@@ -22,6 +22,7 @@ import { defaultHomeLayout, type HomeLayout } from "../../server/home-layout.js"
 import { TopicRadar } from "./TopicRadar";
 import { KnowledgeShelf } from "./KnowledgeShelf";
 import { beginStarterDraft } from "../starter-draft";
+import { createCoalescedRefresh, type CoalescedRefresh } from "../coalesced-refresh";
 import type {
   AppPage,
   AssignmentMode,
@@ -39,6 +40,7 @@ const relativeTime = (value: string) => {
 };
 
 const terminalJobStatuses = new Set<ProductJob["status"]>(["complete", "failed", "cancelled"]);
+const readTodaySnapshot = () => Promise.allSettled([api.today(), api.draftOverview()]);
 
 const packageIdFromJob = (job: ProductJob) => {
   if (!job.result || typeof job.result !== "object") return undefined;
@@ -210,7 +212,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
   const [drafts, setDrafts] = useState<DraftOverview>();
   const [draftError, setDraftError] = useState<string>();
   const [openingDraftId, setOpeningDraftId] = useState<string>();
-  const loadRequestRef = useRef(0);
+  const todayRefreshRef = useRef<CoalescedRefresh | undefined>(undefined);
   const [detail, setDetail] = useState<StoryDetailResult>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -228,11 +230,9 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
     storyId: string;
   }>());
 
-  const loadToday = useCallback(async (quiet = false) => {
-    const requestId = ++loadRequestRef.current;
-    if (!quiet) setLoading(true);
-    const [recommendations, overview] = await Promise.allSettled([api.today(), api.draftOverview()]);
-    if (requestId !== loadRequestRef.current) return;
+  const loadToday = useCallback((quiet = false) => todayRefreshRef.current?.request(quiet) ?? Promise.resolve(), []);
+
+  const applyTodaySnapshot = useCallback(([recommendations, overview]: Awaited<ReturnType<typeof readTodaySnapshot>>, quiet: boolean) => {
     if (recommendations.status === "fulfilled") {
       const next = recommendations.value;
       const current = todayRef.current;
@@ -247,8 +247,9 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
           const fresh = next.radar?.find(item => item.id === row.id);
           return fresh ? { ...row, selected: fresh.selected, story: fresh.story } : row;
         });
+        todayRef.current = stable;
         setToday(stable);
-      } else { setToday(next); setIncomingToday(undefined); }
+      } else { todayRef.current = next; setToday(next); setIncomingToday(undefined); }
       setError(undefined);
     } else {
       setError(recommendations.reason instanceof Error ? recommendations.reason.message : String(recommendations.reason));
@@ -257,10 +258,16 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       setDrafts(overview.value);
       setDraftError(undefined);
     } else setDraftError("最近草稿读取失败");
-    setLoading(false);
   }, []);
 
   useEffect(() => {
+    const refresh = createCoalescedRefresh({
+      read: readTodaySnapshot,
+      apply: applyTodaySnapshot,
+      onStart: (quiet) => { if (!quiet) setLoading(true); },
+      onSettled: (quiet) => { if (!quiet) setLoading(false); },
+    });
+    todayRefreshRef.current = refresh;
     void loadToday();
     const events = new EventSource("/api/events");
     events.addEventListener("workflow", () => void loadToday(true));
@@ -275,11 +282,12 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       }
     });
     return () => {
-      loadRequestRef.current += 1;
+      refresh.dispose();
+      if (todayRefreshRef.current === refresh) todayRefreshRef.current = undefined;
       explanationRequestRef.current += 1;
       events.close();
     };
-  }, [loadToday]);
+  }, [applyTodaySnapshot, loadToday]);
 
   useEffect(() => {
     activeStoryJobRef.current = activeStoryJob;
@@ -652,21 +660,20 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
   };
 
   return (
-    <div className="page today-page">
-      <div className="today-edition"><span><i aria-hidden="true" />个人科技编辑室</span><span>AI NEWS DESK <span aria-hidden="true">/</span> 每日选题</span></div>
+    <div className="page today-page editorial-today">
       <header className="today-header">
         <div>
+          <div className="today-edition"><span><i aria-hidden="true" />每日选题</span><time className="today-date">{new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Hong_Kong", month: "long", day: "numeric", weekday: "long" }).format(new Date())}</time></div>
           <h1>今日编辑台</h1>
-          <p>发现值得写的事，把好文章留给读者。</p>
         </div>
         <div className="today-header-actions">
-          <span className="today-date">{new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Hong_Kong", month: "long", day: "numeric", weekday: "long" }).format(new Date())}</span>
           <div>{today ? <span className="today-updated"><Clock3 size={13} />{today.collection ? `最近读取：${relativeTime(today.collection.collectedAt)}` : "尚无采集记录"}</span> : null}
           <button type="button" className="text-button today-refresh" title="重新整理已有事件；搜索才会读取外部新闻源" disabled={loading} onClick={() => void loadToday()}><RefreshCw className={loading ? "spin" : ""} size={14} />重新整理</button></div>
         </div>
       </header>
 
-      <details className="today-search-disclosure"><summary>补搜新闻线索 <span>没找到想写的事件时，联网搜索近 7 天</span></summary>
+      <div className="today-reading-tools">
+      <details className="today-search-disclosure"><summary><Search size={14} aria-hidden="true" />补搜新闻线索 <span>近 7 天</span></summary>
       <form className="today-news-search" onSubmit={submitSearch}>
         <div className="today-news-search-field">
           <Search size={19} aria-hidden="true" />
@@ -687,7 +694,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       </form></details>
 
       {today?.collection ? <aside className="today-collection-status" aria-label="最近一轮采集">
-        <span>最近一轮 · {today.collection.sourceCount} 个来源 · {today.collection.rawCount} 条原始信息 → {today.collection.candidateCount} 条候选</span>
+        <span>{today.collection.sourceCount} 个来源 · {today.collection.rawCount} 条信息 · {today.collection.candidateCount} 条候选</span>
         {today.collection.failedSourceCount || today.collection.partialSourceCount ? <button type="button" className="text-button" onClick={() => onNavigate("sources")}>
           {[
             today.collection.failedSourceCount ? `${today.collection.failedSourceCount} 个来源读取失败` : "",
@@ -695,9 +702,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
           ].filter(Boolean).join("，")} · 查看原因
         </button> : null}
       </aside> : null}
-
-
-
+      </div>
       {error ? (
         <div className="today-error" role="alert"><AlertTriangle size={18} /><div><strong>{today ? "刷新失败，保留上次内容" : "今日推荐读取失败"}</strong><p>{today ? "已有列表和选题仍可查看。可以重试读取。" : "本地列表暂不可用，可以重试。"}</p><details><summary>具体原因</summary>{error}</details></div><button type="button" onClick={() => void loadToday()}>重试</button></div>
       ) : null}
@@ -707,7 +712,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
       {openingStory && !detail ? <p className="reader-task" role="status">正在读取已有材料…</p> : null}
       {openError ? <div className="today-error" role="alert"><div><strong>阅读器暂未打开</strong><p>列表和选题仍然保留，请重新点击该条目重试。</p><details><summary>具体原因</summary>{openError}</details></div></div> : null}
       {incomingToday ? <div className="news-update" role="status"><span>有更新的内容，当前列表保持原顺序。</span><button className="text-button" disabled={Boolean(detail)} onClick={() => { setToday(incomingToday); setIncomingToday(undefined); }}>显示更新</button></div> : null}
-      <div className="today-editorial-grid">
+      {today ? <div className="today-editorial-grid">
         <div className="today-reading-column">
           <TopicCategoryTabs value={activeColumn.id} columns={layout.columns} onChange={setCategory} onCustomize={() => void customize()} />
           {activeColumn.source === "news" ? <div role="tabpanel" id={`topic-panel-${activeColumn.id}`} aria-labelledby={`topic-tab-${activeColumn.id}`} tabIndex={0}>
@@ -719,17 +724,16 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
               <label>时间<select aria-label="新闻时间" value={listTime} onChange={e => setListTime(e.target.value)}><option value="all">当前范围</option><option value="48">近 48 小时</option><option value="168">近 7 天</option></select></label>
               </div></details>
             </div>
-            <div className="news-scope"><span>{activeColumn.keyword ? `近 7 天已采集新闻 · 关键词「${activeColumn.keyword}」` : showRadar ? "汇总精选 · 重要性、时效与已知热点 · 最多 8 条" : "已有推荐 · 新闻 48 小时 / 发布 7 天 / 实践 30 天"}</span><span>{showRadar ? radarRows.length : visibleNews.length} 条</span></div>
             <section className="today-section today-must-read">
-              <div className="today-section-heading"><div><h2>{activeColumn.keyword ? activeColumn.label : "今日选题"}</h2></div><span className="desk-section-caption">先核对，再决定写什么</span></div>
+              <div className="today-section-heading today-list-heading"><div><div className="today-list-title"><h2>{activeColumn.keyword ? activeColumn.label : "今日选题"}</h2><small>{showRadar ? radarRows.length : visibleNews.length} 条</small></div><p className="news-scope">{activeColumn.keyword ? `近 7 天已采集新闻 · 关键词「${activeColumn.keyword}」` : showRadar ? "按重要性、时效与已知热点精选，最多 8 条" : "新闻 48 小时 · 发布 7 天 · 实践 30 天"}</p></div></div>
               {keywordLoading ? <p role="status">正在读取已保存内容…</p> : keywordError ? <p role="alert">{keywordError}</p> : showRadar && radarRows.length ? <TopicRadar rows={radarRows} busy={busy} onOpen={openStory} onQueue={queueStory} onRetain={retainRadar} /> : !showRadar && visibleNews.length ? <div className="today-featured-list">{visibleNews.map((story, index) => <StoryRow key={story.id} story={story} featured={index === 0} busy={busy} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />)}</div>
                 : <div className="today-empty"><Eye size={24} /><div><strong>{listQuery || listView !== "all" || listTime !== "all" ? "当前筛选没有结果" : today?.collection ? "本轮没有符合条件的推荐" : "还没有读取新闻"}</strong><p>{activeColumn.keyword ? "已采集新闻中暂无匹配内容。可用上方搜索补充线索。" : "可以调整筛选，或去工作台读取来源。没有合格选题时保留空位。"}</p></div><button className="secondary-button" onClick={() => { if (listQuery || listView !== "all" || listTime !== "all") { setListQuery(""); setListView("all"); setListTime("all"); } else onNavigate("workbench"); }}>{listQuery || listView !== "all" || listTime !== "all" ? "清除筛选" : "打开新闻工作台"}</button></div>}
             </section>
           </div> : <TopicCategoryPanel key={activeColumn.id} columnId={activeColumn.id} keyword={activeColumn.keyword} platform={activeColumn.source} onOpenStory={openStory}
             onChanged={() => void loadToday(true)} onNavigate={onNavigate} onNotice={onNotice} />}
         </div>
-        {today ? <TodayWorkspaceRail showDrafts={layout.showDrafts} today={today} drafts={drafts} draftError={draftError} openingDraftId={openingDraftId} onRetry={() => void loadToday(true)} onNavigate={onNavigate} onOpenDraft={(draftId) => void resumeDraft(draftId)} onOpenStory={openStory} /> : <aside className="today-workspace-rail"><button type="button" className="text-button" onClick={() => onNavigate("drafts")}>打开我的稿件 <ArrowRight size={15} /></button></aside>}
-      </div>
+        <TodayWorkspaceRail showDrafts={layout.showDrafts} today={today} drafts={drafts} draftError={draftError} openingDraftId={openingDraftId} onRetry={() => void loadToday(true)} onNavigate={onNavigate} onOpenDraft={(draftId) => void resumeDraft(draftId)} onOpenStory={openStory} />
+      </div> : null}
       {today ? <>
         {activeColumn.source === "news" && !activeColumn.keyword ? <details className="desk-disclosure radar-knowledge"><summary>官方技术资料 <span>{today.knowledge?.length ?? 0} 篇 · 按需查阅</span></summary><KnowledgeShelf stories={today.knowledge ?? []} onOpen={openStory} /></details> : null}
           <div className="desk-operational-details">

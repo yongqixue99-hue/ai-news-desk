@@ -22,7 +22,7 @@ const usefulOrInteresting = /\b(?:show hn:|set up|guide to|integrating|formalizi
 /** A transparent triage heuristic, not a prediction of views or a factual score. */
 export const normalizeEditorialText = (text: string) => text.normalize("NFKC").replace(/[‐‑‒–—−]/gu, "-");
 
-export const editorialExclusionFor = (input: string) => {
+const classifyEditorialExclusion = (input: string) => {
   const title = normalizeEditorialText(input);
   if (promotion.test(title)) return "promotion";
   if (digest.test(title) || roundup.test(title)) return "digest";
@@ -30,6 +30,19 @@ export const editorialExclusionFor = (input: string) => {
   if (minor.test(title) && !/\b(?:security|vulnerability|cve-\d{4}-\d{4,}|zero-day)\b|漏洞|安全/iu.test(title)) return "minor";
   if (speculation.test(title) || speculativeLeak(title)) return "rumor";
   return undefined;
+};
+
+// Story matching compares the same titles many times. Rules are immutable for
+// this module lifetime; retain their result, including an unclassified title.
+const exclusionCacheLimit = 5_000;
+const exclusionCache = new Map<string, ReturnType<typeof classifyEditorialExclusion>>();
+
+export const editorialExclusionFor = (input: string) => {
+  if (exclusionCache.has(input)) return exclusionCache.get(input);
+  const result = classifyEditorialExclusion(input);
+  if (exclusionCache.size >= exclusionCacheLimit) exclusionCache.delete(exclusionCache.keys().next().value!);
+  exclusionCache.set(input, result);
+  return result;
 };
 
 export const mayShareEditorialEvent = (left: string, right: string) => editorialExclusionFor(left) === editorialExclusionFor(right);

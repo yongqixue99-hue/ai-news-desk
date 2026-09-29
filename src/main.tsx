@@ -12,6 +12,9 @@ import "./settings-design.css";
 import "./draft-design.css";
 import "./xiaoheihe-delivery.css";
 import "./components/primary-delivery.css";
+import "./components/editorial-layout.css";
+import "./components/reading-pages.css";
+import "./workspace-design.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -469,8 +469,10 @@ test("production routes, strategy controls, completion, draft resumption and mob
     await reader.getByRole("button", { name: "关闭事件详情", exact: true }).click();
     const nav = page.getByRole("navigation", { name: "主导航", exact: true });
     assert.equal(await nav.getByRole("button").count(), 5);
+    assert.deepEqual(await nav.getByRole("button").evaluateAll(buttons => buttons.map(button => button.getAttribute("aria-label"))), ["今日", "新闻工作台", "社区广场", "草稿", "更多功能"]);
     for (const label of ["今日", "新闻工作台", "社区广场", "草稿", "更多"]) {
-      assert.equal(await nav.getByText(label, { exact: true }).isVisible(), true, `${label} is visible on mobile`);
+      const button = nav.getByRole("button", { name: label === "更多" ? "更多功能" : label, exact: true });
+      assert.equal(await button.innerText(), label, `${label} is visible on mobile`);
     }
     const more = nav.getByRole("button", { name: "更多功能", exact: true });
     await more.click();
@@ -478,10 +480,45 @@ test("production routes, strategy controls, completion, draft resumption and mob
     assert.equal(await more.evaluate((button) => button === document.activeElement), true);
     assert.equal(await more.getAttribute("aria-expanded"), "false");
     await more.click();
+    await page.locator("#mobile-more-panel .mobile-more-notifications").click();
+    await page.getByRole("button", { name: "关闭通知中心", exact: true }).click();
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "更多功能");
+    // Closing the notification dialog always restores a visible trigger after a resize.
+    await more.click();
+    await page.locator("#mobile-more-panel .mobile-more-notifications").click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole("button", { name: "关闭通知中心", exact: true }).click();
+    await page.waitForFunction(() => document.activeElement?.classList.contains("notification-nav-item"));
+    await page.locator(".notification-nav-item").click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "关闭通知中心", exact: true }).click();
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "更多功能");
+    await more.click();
     await page.locator("#mobile-more-panel").getByRole("button", { name: "运行记录", exact: true }).click();
     assert.equal(new URL(page.url()).hash, "#runs");
+    await page.waitForFunction(() => document.activeElement?.id === "main-content");
     await page.goBack();
     await page.getByRole("heading", { name: "今日编辑台", exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    // Daily navigation stays direct; less-used configuration shares one accessible popover.
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const settings = page.getByRole("button", { name: "设置与工具", exact: true });
+    await settings.click();
+    await page.locator("#sidebar-tools-panel").getByRole("button", { name: "新闻源", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    assert.equal(await settings.evaluate(button => button === document.activeElement), true);
+    assert.equal(await settings.getAttribute("aria-expanded"), "false");
+    await settings.click();
+    await page.locator("#sidebar-tools-panel").getByRole("button", { name: "AI 设置", exact: true }).click();
+    await page.getByRole("heading", { name: "AI 设置", exact: true }).waitFor();
+    assert.equal(await page.locator("#sidebar-tools-panel").count(), 0);
+    await page.waitForFunction(() => document.activeElement?.id === "main-content");
+    await page.getByRole("button", { name: "收起侧栏", exact: true }).click();
+    assert.equal(await page.locator(".nav-item-drafts .nav-short").isVisible(), true);
+    await settings.click();
+    await page.locator("#sidebar-tools-panel").getByRole("button", { name: "新闻源", exact: true }).click();
+    await page.getByRole("heading", { name: "新闻源", exact: true }).waitFor();
+    await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(pageErrors, []);
   } finally {

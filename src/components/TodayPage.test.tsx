@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TodayPage } from "./TodayPage.js";
 
-test("Today keeps seven-day factual news search available in an optional disclosure", () => {
+test("Today keeps factual news search available while its first load shows only a skeleton", () => {
   const markup = renderToStaticMarkup(createElement(TodayPage, {
     onNavigate: () => undefined,
     onNotice: () => undefined,
@@ -15,7 +15,10 @@ test("Today keeps seven-day factual news search available in an optional disclos
   assert.match(markup, /搜索模型、公司或事件，例如 GPT-6 Astra/u);
   assert.match(markup, /搜索最近 7 天/u);
   assert.match(markup, /X 和社区帖子不参与这次事实搜索/u);
-  assert.match(markup, /aria-label="选题分类"/u);
-  for (const label of ["AI 新闻", "知乎", "Hacker News", "V2EX", "GitHub"]) assert.ok(markup.includes(label));
-  assert.match(markup, /id="topic-tab-news" aria-selected="true"/u);
+  assert.match(markup, /class="today-search-disclosure"/u);
+  assert.match(markup, /class="page-loading" role="status"/u);
+  assert.match(markup, /正在整理今天的选题与草稿/u);
+  assert.doesNotMatch(markup, /class="today-editorial-grid"/u);
+  assert.doesNotMatch(markup, /class="today-empty"/u);
+  assert.doesNotMatch(markup, /还没有读取新闻|本轮没有符合条件的推荐|>0 条</u);
 });

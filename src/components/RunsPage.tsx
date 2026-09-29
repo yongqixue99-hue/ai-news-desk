@@ -2,7 +2,7 @@ import { SourceChangeImpactPanel } from "./SourceChangeImpactPanel";
 import { sourceHealthLayers } from "../../server/source-health.js";
 import { DiscoveryTracePanel } from "./DiscoveryTracePanel";
 import { useMemo, useState } from "react";
-import { AlertCircle, ArrowLeft, Ban, CheckCircle2, ChevronDown, Clock3, ExternalLink, Filter, LoaderCircle, RotateCcw, TriangleAlert } from "lucide-react";
+import { AlertCircle, ArrowLeft, Ban, CheckCircle2, ChevronDown, ExternalLink, Filter, LoaderCircle, RotateCcw, TriangleAlert } from "lucide-react";
 import type { AiRunTrace, WorkflowRun } from "../types";
 
 const formatDateTime = (iso: string) =>
@@ -17,6 +17,16 @@ const formatDateTime = (iso: string) =>
 
 const displayRunStage = (stage: string) => stage.replace("生成中文速读", "生成中文摘要");
 const routeHost = (value: string) => { try { return new URL(value).hostname; } catch { return "来源地址"; } };
+const activeStatuses = new Set(["queued", "collecting", "scoring", "extracting", "generating"]);
+export const runOriginLabel = (run: Pick<WorkflowRun, "origin" | "scheduled">) => {
+  if (run.origin === "link-intake") return "链接导入";
+  if (run.origin === "screenshot-intake") return "截图导入";
+  if (run.origin === "evidence-supplement") return "补充证据";
+  return run.scheduled ? "定时采集" : "手动采集";
+};
+const runStatusLabel = (run: WorkflowRun, empty: boolean) => run.status === "queued" ? "等待中"
+  : activeStatuses.has(run.status) ? "运行中"
+    : run.status === "failed" ? "失败" : run.status === "cancelled" ? "已取消" : empty ? "无候选" : "已完成";
 
 export function RunsPage({
   runs,
@@ -32,52 +42,51 @@ export function RunsPage({
   aiRunTraces: AiRunTrace[];
 }) {
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "success" | "failed">("all");
-  const [originFilter, setOriginFilter] = useState<"all" | "collection" | "intake" | "scheduled">("all");
+  const [originFilter, setOriginFilter] = useState<"all" | "collection" | "intake" | "scheduled" | "evidence">("all");
   const [expandedRunId, setExpandedRunId] = useState<string>();
   const filteredRuns = useMemo(() => runs.filter((run) => {
-    const active = ["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status);
+    const active = activeStatuses.has(run.status);
     const statusMatches = statusFilter === "all"
       || (statusFilter === "active" && active)
       || (statusFilter === "success" && ["ready", "complete"].includes(run.status))
       || (statusFilter === "failed" && ["failed", "cancelled"].includes(run.status));
     const originMatches = originFilter === "all"
       || (originFilter === "scheduled" && run.scheduled)
-      || (originFilter === "intake" && Boolean(run.origin))
-      || (originFilter === "collection" && !run.scheduled && !run.origin);
+      || (originFilter === "intake" && (run.origin === "link-intake" || run.origin === "screenshot-intake"))
+      || (originFilter === "evidence" && run.origin === "evidence-supplement")
+      || (originFilter === "collection" && !run.scheduled && (!run.origin || run.origin === "collection"));
     return statusMatches && originMatches;
   }), [originFilter, runs, statusFilter]);
   return (
     <div className="page settings-page runs-page">
-      <header className="page-header"><div><h1>运行记录</h1><p>每次采集、成稿和错误都有可追溯记录。</p></div><button className="secondary-button" onClick={onOpenSchedule}><ArrowLeft size={16} />返回定时任务</button></header>
-      <DiscoveryTracePanel />
-      <SourceChangeImpactPanel />
+      <header className="page-header"><div><h1>运行记录</h1><p>查看采集结果，处理未完成的任务。</p></div><button className="secondary-button" onClick={onOpenSchedule}><ArrowLeft size={16} />自动化设置</button></header>
       <div className="run-history-filters" aria-label="筛选运行记录">
         <span><Filter size={14} />筛选</span>
         <select aria-label="按状态筛选" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">全部状态</option><option value="active">运行中</option><option value="success">已完成</option><option value="failed">失败／取消</option></select>
-        <select aria-label="按触发方式筛选" value={originFilter} onChange={(event) => setOriginFilter(event.target.value as typeof originFilter)}><option value="all">全部方式</option><option value="collection">手动采集</option><option value="intake">截图／链接</option><option value="scheduled">定时心跳</option></select>
+        <select aria-label="按触发方式筛选" value={originFilter} onChange={(event) => setOriginFilter(event.target.value as typeof originFilter)}><option value="all">全部方式</option><option value="collection">手动采集</option><option value="intake">截图／链接</option><option value="scheduled">定时采集</option><option value="evidence">补充证据</option></select>
         <small>显示 {filteredRuns.length} / {runs.length}</small>
       </div>
       <div className="run-history-table">
-        <div className="run-history-head"><span>状态</span><span>运行时间</span><span>触发方式</span><span>搜索范围</span><span>原始条目</span><span>候选／成稿</span><span>最后阶段</span><span /></div>
+        <div className="run-history-head"><span>状态</span><span>运行时间</span><span>触发方式</span><span>搜索范围</span><span>原始条目</span><span>候选／成稿</span><span>最后阶段</span><span>操作</span></div>
         {!filteredRuns.length ? <div className="run-history-empty">没有符合筛选条件的运行记录。</div> : filteredRuns.map((run) => {
           const draftCount = run.candidates.filter((candidate) => candidate.status === "drafted").length;
-          const active = ["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status);
+          const active = activeStatuses.has(run.status);
           const empty = !active && !["failed", "cancelled"].includes(run.status) && run.candidates.length === 0;
           const retryable = run.status === "failed" || run.status === "cancelled" || empty;
           return (
             <div className="run-history-entry" key={run.id}>
             <div className={empty ? "run-history-row empty" : "run-history-row"}>
-              <span className={`run-status-icon ${empty ? "empty" : run.status}`}>{active ? <LoaderCircle className="spin" size={17} /> : run.status === "failed" ? <AlertCircle size={17} /> : run.status === "cancelled" ? <Ban size={17} /> : empty ? <TriangleAlert size={17} /> : <CheckCircle2 size={17} />}</span>
-              <div><strong>{formatDateTime(run.createdAt)}</strong><small>{run.id}</small></div>
-              <span>{run.scheduled ? "定时心跳" : "手动"}</span>
-              <span title={run.keywords ? `关键词：${run.keywords}` : undefined}>{run.dateFrom && run.dateTo ? `${run.dateFrom.slice(5)} 至 ${run.dateTo.slice(5)}` : `${run.windowHours} 小时`}</span>
-              <span>{run.rawCount}</span>
-              <span>{run.candidates.length} / {draftCount}</span>
-              <span>{run.error ?? (empty ? "本轮没有符合条件的候选" : displayRunStage(run.stage))}</span>
+              <span className={`run-status-icon ${empty ? "empty" : run.status}`}>{active ? <LoaderCircle className="spin" size={16} /> : run.status === "failed" ? <AlertCircle size={16} /> : run.status === "cancelled" ? <Ban size={16} /> : empty ? <TriangleAlert size={16} /> : <CheckCircle2 size={16} />}<span>{runStatusLabel(run, empty)}</span></span>
+              <div className="run-history-time"><strong>{formatDateTime(run.createdAt)}</strong></div>
+              <span className="run-history-origin" data-label="方式">{runOriginLabel(run)}</span>
+              <span className="run-history-range" data-label="范围" title={run.keywords ? `关键词：${run.keywords}` : undefined}>{run.dateFrom && run.dateTo ? `${run.dateFrom.slice(5)} 至 ${run.dateTo.slice(5)}` : `${run.windowHours} 小时`}</span>
+              <span className="run-history-raw" data-label="原始">{run.rawCount}</span>
+              <span className="run-history-counts" data-label="候选／成稿">{run.candidates.length} / {draftCount}</span>
+              <span className="run-history-stage">{run.error ?? (empty ? "本轮没有符合条件的候选" : displayRunStage(run.stage))}</span>
               <div className="run-history-actions">
-                {retryable ? <button className="icon-link retry" onClick={() => onRetry(run.id)} title="按原配置重试"><RotateCcw size={16} /></button> : null}
-                <button className="icon-link" onClick={() => onOpenRun(run.id)} title="打开本次候选"><ExternalLink size={16} /></button>
-                <button className="icon-link" aria-expanded={expandedRunId === run.id} onClick={() => setExpandedRunId((current) => current === run.id ? undefined : run.id)} title="查看运行详情"><ChevronDown size={16} /></button>
+                {retryable ? <button className="icon-link retry" onClick={() => onRetry(run.id)} title="按原配置重试" aria-label={`按原配置重试 ${formatDateTime(run.createdAt)}`}><RotateCcw size={16} /></button> : null}
+                <button className="icon-link" onClick={() => onOpenRun(run.id)} title="打开本次候选" aria-label={`打开本次候选 ${formatDateTime(run.createdAt)}`}><ExternalLink size={16} /></button>
+                <button className="icon-link" aria-label={`查看运行详情 ${formatDateTime(run.createdAt)}`} aria-controls={`run-detail-${run.id}`} aria-expanded={expandedRunId === run.id} onClick={() => setExpandedRunId((current) => current === run.id ? undefined : run.id)} title="查看运行详情"><ChevronDown size={16} /></button>
               </div>
             </div>
             {expandedRunId === run.id ? (() => {
@@ -85,7 +94,8 @@ export function RunsPage({
                 || run.briefingTraceIds?.includes(trace.id)
                 || trace.subjectId && run.candidates.some((candidate) => candidate.id === trace.subjectId));
               const failedSources = (run.sourceResults ?? []).filter((source) => source.status !== "healthy");
-              return <div className="run-detail-panel">
+              return <div className="run-detail-panel" id={`run-detail-${run.id}`}>
+                <div><strong>本次运行</strong><span>{runOriginLabel(run)} · {formatDateTime(run.createdAt)}</span><small>运行 ID：{run.id}</small>{run.keywords ? <small>关键词：{run.keywords}</small> : null}</div>
                 <div><strong>来源分层</strong>{(run.sourceResults ?? []).map(source => {
                   const layers = sourceHealthLayers(source, run.candidates.filter(candidate => candidate.sourceName === source.sourceName));
                   const connection = { ok: "读取成功", failed: "读取失败", unknown: "未确认" }[layers.connection];
@@ -110,6 +120,11 @@ export function RunsPage({
           );
         })}
       </div>
+      <section className="run-diagnostic-tools" aria-label="诊断工具">
+        <h2>诊断工具</h2>
+        <DiscoveryTracePanel />
+        <SourceChangeImpactPanel />
+      </section>
     </div>
   );
 }
