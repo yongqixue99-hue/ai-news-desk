@@ -28,6 +28,9 @@ export interface SocialDeliveryBatch {
   id: string; createdAt: string; expiresAt: string; targets: SocialDeliveryTarget[];
 }
 export const socialTargetActive = (target: SocialDeliveryTarget) => ["queued", "waiting-connection", "waiting-login", "sending"].includes(target.status);
+export const retryableSocialPlatforms = (batch: SocialDeliveryBatch | undefined): SocialPlatform[] =>
+  batch?.targets.filter(target => ["blocked", "cancelled"].includes(target.status)
+    && socialPlatforms.some(platform => platform.id === target.platform && platform.enabled)).map(target => target.platform) ?? [];
 export const socialTitleProblem = (platform: SocialPlatform, title: string) => {
   const rule = socialPlatforms.find(item => item.id === platform)!;
   const length = Array.from(title.trim()).length;

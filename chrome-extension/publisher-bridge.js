@@ -28,6 +28,10 @@ export function planEditorTab(tabs, editorUrl) {
   return { type: "activate", tabId: tab.id, windowId: tab.windowId };
 }
 
+// Waiting is safe only before any field has been changed.
+export const waitingForEditorLogin = (result) => Array.isArray(result?.steps)
+  && result.steps.length === 1 && result.steps[0].name === "登录" && result.steps[0].ok === false;
+
 export function startPublisherBridgePolling(
   run,
   schedule = (callback, milliseconds) => globalThis.setInterval(callback, milliseconds),
@@ -43,10 +47,31 @@ export function createPublisherBridgeClient({
   fetcher = fetch,
   runJob,
   now = Date.now,
+  pendingReports,
 }) {
   let pairingToken = "";
   let busy = false;
   let pendingReport;
+  let restored = false;
+
+  const clearPending = async () => {
+    await pendingReports?.clear();
+    pendingReport = undefined;
+  };
+
+  const restorePending = async () => {
+    if (restored) return;
+    const saved = await pendingReports?.load();
+    if (saved) {
+      let payload;
+      try { payload = JSON.parse(saved.body); } catch { /* Invalid local checkpoint. */ }
+      if (typeof saved.jobId === "string" && saved.jobId.length <= 120
+        && Number.isFinite(saved.createdAt) && typeof saved.body === "string" && saved.body.length <= 60_000
+        && payload?.clientId === clientId && Array.isArray(payload?.steps)) pendingReport = saved;
+      else await pendingReports?.clear();
+    }
+    restored = true;
+  };
 
   const request = (path, options = {}) => fetcher(`${origin}${path}`, options);
   const authorizedOptions = (token, options = {}) => ({
@@ -74,15 +99,18 @@ export function createPublisherBridgeClient({
 
   const reportPending = async (token) => {
     if (now() - pendingReport.createdAt > 240_000) {
-      pendingReport = undefined;
+      await clearPending();
       throw new Error("填入结果未获工作台确认；请先检查已打开的小黑盒草稿，不要重复填入");
     }
+    // Persist before sending: MV3 may suspend/restart its service worker after
+    // the platform accepted the article but before our server acknowledged it.
+    await pendingReports?.save(pendingReport);
     const response = await request(
       `/api/publisher/extension/jobs/${encodeURIComponent(pendingReport.jobId)}/result`,
       authorizedOptions(token, { method: "POST", body: pendingReport.body }),
     );
     if (response.status === 410) {
-      pendingReport = undefined;
+      await clearPending();
       throw new Error("工作台任务已结束，填入结果未确认；请检查已打开的小黑盒草稿，不要重复填入");
     }
     if (!response.ok) {
@@ -91,7 +119,7 @@ export function createPublisherBridgeClient({
     }
     const acknowledgement = await response.json().catch(() => undefined);
     if (acknowledgement?.ok !== true) return { status: "disconnected" };
-    pendingReport = undefined;
+    await clearPending();
     return { status: "completed" };
   };
 
@@ -99,6 +127,7 @@ export function createPublisherBridgeClient({
     if (busy) return { status: "busy" };
     busy = true;
     try {
+      await restorePending();
       const token = await ensurePairingToken();
       const heartbeat = await request(
         "/api/publisher/extension/heartbeat",

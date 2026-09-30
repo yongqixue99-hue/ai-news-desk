@@ -2,6 +2,7 @@ import { waitForProductJob, deferredJobMessage } from "../product-job-wait";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  ArrowLeft,
   ChevronDown,
   Clock3,
   Flame,
@@ -31,13 +32,15 @@ import type {
   WorkflowRun,
 } from "../types";
 import { EditorialReadingPane } from "./EditorialReadingPane";
+import type { CommunityView } from "../../server/community-view";
 
 type CommunitySortMode = "recommended" | "hot" | "latest";
 
 interface CommunityWorkspaceProps {
-  runs: WorkflowRun[];
+  runs?: WorkflowRun[];
+  feed?: CommunityView["feed"];
   sources: SourceConfig[];
-  settings: Settings;
+  settings: Pick<Settings, "personalizationEnabled">;
   onFeedback: (
     runId: string,
     candidateId: string,
@@ -73,6 +76,7 @@ const sortEntries = (items: CommunityFeedEntry[], mode: CommunitySortMode) => [.
 });
 
 type BriefingState = "idle" | "loading" | "complete" | "error";
+const noRuns: WorkflowRun[] = [];
 export const communityBriefingLabel = (state: BriefingState, total: number, missing: number) => {
   if (!total) return "等待首批社区信号";
   if (!missing) return "中文速览已准备";
@@ -82,7 +86,8 @@ export const communityBriefingLabel = (state: BriefingState, total: number, miss
 };
 
 export function CommunityWorkspace({
-  runs,
+  runs = noRuns,
+  feed: suppliedFeed,
   sources,
   settings,
   onFeedback,
@@ -103,12 +108,22 @@ export function CommunityWorkspace({
   const attemptedBriefings = useRef(new Set<string>());
   const readingRequest = useRef(0);
   const readerAnchor = useRef<HTMLDivElement>(null);
+  const listAnchor = useRef<HTMLElement>(null);
+  const returnPosition = useRef({ windowY: 0, mainY: 0 });
+  const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches);
+  const [readerOpen, setReaderOpen] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const changed = () => setCompact(media.matches);
+    changed(); media.addEventListener("change", changed);
+    return () => media.removeEventListener("change", changed);
+  }, []);
 
-  const feed = useMemo(() => composeCommunityFeed(runs, {
+  const feed = useMemo(() => suppliedFeed ?? composeCommunityFeed(runs, {
     expiryHours: 7 * 24,
     limit: 120,
     personalizationEnabled: settings.personalizationEnabled,
-  }), [runs, settings.personalizationEnabled]);
+  }), [runs, settings.personalizationEnabled, suppliedFeed]);
   const availableTopics = useMemo(() => collectionTopics.flatMap((item) => {
     const count = feed.items.filter((entry) => candidateMatchesTopic(entry.candidate, item.id)).length;
     return count ? [{ ...item, count }] : [];
@@ -196,10 +211,10 @@ export function CommunityWorkspace({
   }, []);
 
   useEffect(() => {
-    if (!selectedEntry) return;
+    if (!selectedEntry || (compact && !readerOpen)) return;
     setDetail(undefined);
     void loadReadingCard(selectedEntry);
-  }, [loadReadingCard, selectedEntry]);
+  }, [loadReadingCard, selectedEntry, compact, readerOpen]);
 
   const updateFeedback = async (entry: CommunityFeedEntry, kind: "interested" | "not_interested" | "restore") => {
     setFeedbackBusy(entry.candidate.id);
@@ -222,14 +237,23 @@ export function CommunityWorkspace({
   };
 
   const selectSignal = (entry: CommunityFeedEntry) => {
+    returnPosition.current = { windowY: window.scrollY, mainY: listAnchor.current?.closest("main")?.scrollTop ?? 0 };
     setSelectedEntry(entry);
-    if (window.matchMedia("(max-width: 820px)").matches) {
-      window.setTimeout(() => readerAnchor.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
-    }
+    setReaderOpen(true);
+    if (compact) requestAnimationFrame(() => readerAnchor.current?.scrollIntoView({ block: "start" }));
+  };
+  const returnToList = () => {
+    setReaderOpen(false);
+    requestAnimationFrame(() => {
+      const main = listAnchor.current?.closest("main");
+      if (main) main.scrollTop = returnPosition.current.mainY;
+      window.scrollTo(0, returnPosition.current.windowY);
+      listAnchor.current?.querySelector<HTMLElement>('[aria-pressed="true"].community-signal-main')?.focus({ preventScroll: true });
+    });
   };
 
   return (
-    <div className="page community-square-page community-workspace-page">
+    <div className={`page community-square-page community-workspace-page ${readerOpen ? "community-reading" : "community-browsing"}`}>
       <header className="community-square-header">
         <div>
           <h1>社区广场</h1>
@@ -271,8 +295,8 @@ export function CommunityWorkspace({
       </div>
 
       <div className="community-editorial-workspace">
-        <section className="community-signal-list" aria-label="社区候选">
-          <header><div><span>候选</span><strong>{filteredItems.length} 条</strong></div><small>选择后在右侧判断，不跳转原站</small></header>
+        <section ref={listAnchor} className="community-signal-list" aria-label="社区候选">
+          <header><div><span>候选</span><strong>{filteredItems.length} 条</strong></div><small>{compact ? "选择后查看原始来源" : "选择后在右侧判断，不跳转原站"}</small></header>
           {visibleItems.length ? visibleItems.map((entry, index) => {
             const selected = selectedEntry && entryKey(selectedEntry) === entryKey(entry);
             const image = entry.candidate.images.find((candidateImage) => candidateImage.publicPath) ?? entry.candidate.images[0];
@@ -299,6 +323,7 @@ export function CommunityWorkspace({
         </section>
 
         <div className="community-reader-slot" ref={readerAnchor}>
+          <button className="community-return" onClick={returnToList}><ArrowLeft size={16} />返回热点列表</button>
           <EditorialReadingPane
             detail={detail}
             loading={readingLoading}

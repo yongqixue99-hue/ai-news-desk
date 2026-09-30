@@ -8,11 +8,11 @@ import { captureRenderedPageImages } from "./page-screenshot.js";
 import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
 import { eligibleEditorialImage, isPlaceholderEditorialCaption, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import { searchLicensedEditorialImages } from "./online-image-search.js";
-import { readState, updateState, workflowMediaRoot } from "./storage.js";
-import { storyById } from "./story-desk.js";
+import { readStateProjection, updateState, workflowMediaRoot } from "./storage.js";
+import { collectStoryImages, storyById } from "./story-desk.js";
 import { selectStoryArticleSources } from "./story-article-sources.js";
 import type { StorySignalView } from "./product-types.js";
-import type { ExtractedPage, ImageCollectionReport, SourceImage, SourceRole } from "./types.js";
+import type { ExtractedPage, ImageCollectionReport, SourceImage, SourceRole, WorkflowState } from "./types.js";
 
 export interface VisualAssetCounts {
   discoveredImageCount: number;
@@ -414,39 +414,58 @@ export const runVisualHydration = async (
   );
 };
 
-const candidateForSignal = (state: Awaited<ReturnType<typeof readState>>, signal: StorySignalView) =>
+const candidateForSignal = (state: Readonly<WorkflowState>, signal: StorySignalView) =>
   state.runs.find((run) => run.id === signal.runId)
     ?.candidates.find((candidate) => candidate.id === signal.candidateId);
 
-const persistImagesForStory = async (
-  storyId: string,
-  fallbackSignal: StorySignalView,
-  images: SourceImage[],
-) => updateState((state) => {
-  const currentStory = storyById(state, storyId);
-  if (!currentStory) return;
-  for (const image of images) {
-    let matched = false;
-    for (const signal of currentStory.signals) {
-      const candidate = candidateForSignal(state, signal);
-      if (!candidate || !candidate.images.some((entry) => sameImage(entry, image))) continue;
-      candidate.images = mergeVisualImages(candidate.images, [image]);
-      candidate.imageCount = candidate.images.length;
-      matched = true;
+/** A hydration job holds its Story membership while localizing images. Source
+ * extraction can change canonical URLs, so that step explicitly rebuilds it.
+ * Image reads remain fresh, using exactly StoryDesk's ordering and eligibility. */
+export const createVisualHydrationStorage = (storyId: string, dependencies: {
+  project: typeof readStateProjection;
+  update: typeof updateState;
+  findStory?: (state: Readonly<WorkflowState>, id: string) => VisualStorySnapshot | undefined;
+}) => {
+  let currentStory: VisualStorySnapshot | undefined;
+  let resolved = false;
+  const getStory = async () => {
+    if (!resolved) {
+      currentStory = await dependencies.project(state => {
+        const story = (dependencies.findStory ?? storyById)(state, storyId);
+        return story ? { id: story.id, title: story.title, originalTitle: story.originalTitle, summary: story.summary, images: story.images, signals: story.signals } : undefined;
+      });
+      resolved = true;
     }
-    if (matched) continue;
-    const fallback = candidateForSignal(state, fallbackSignal);
-    if (!fallback) continue;
-    fallback.images = mergeVisualImages(fallback.images, [image]);
-    fallback.imageCount = fallback.images.length;
-  }
-});
-
-const productionDependencies = (storyId: string): VisualHydrationDependencies => ({
-  getStory: async () => storyById(await readState(), storyId),
-  extract: extractPage,
-  persistExtraction: async (signal, page) => {
-    await updateState((state) => {
+    const membership = currentStory;
+    if (!membership) return undefined;
+    return dependencies.project(state => {
+      const candidates = membership.signals.flatMap(signal => { const candidate = candidateForSignal(state, signal); return candidate ? [candidate] : []; });
+      return candidates.length ? { ...membership, images: collectStoryImages(candidates) } : undefined;
+    });
+  };
+  const persistImages = async (fallbackSignal: StorySignalView, images: SourceImage[]) => {
+    const story = await getStory();
+    if (!story) return;
+    await dependencies.update(state => {
+      for (const image of images) {
+        let matched = false;
+        for (const signal of story.signals) {
+          const candidate = candidateForSignal(state, signal);
+          if (!candidate || !candidate.images.some((entry) => sameImage(entry, image))) continue;
+          candidate.images = mergeVisualImages(candidate.images, [image]);
+          candidate.imageCount = candidate.images.length;
+          matched = true;
+        }
+        if (matched) continue;
+        const fallback = candidateForSignal(state, fallbackSignal);
+        if (!fallback) continue;
+        fallback.images = mergeVisualImages(fallback.images, [image]);
+        fallback.imageCount = fallback.images.length;
+      }
+    });
+  };
+  const persistExtraction = async (signal: StorySignalView, page: ExtractedPage) => {
+    await dependencies.update(state => {
       const candidate = candidateForSignal(state, signal);
       if (!candidate) return;
       candidate.canonicalUrl = page.canonicalUrl;
@@ -454,8 +473,14 @@ const productionDependencies = (storyId: string): VisualHydrationDependencies =>
       candidate.imageCount = candidate.images.length;
       if (!candidate.excerpt.trim() && page.text.trim()) candidate.excerpt = page.text.trim().slice(0, 600);
     });
-  },
-  persistImages: (signal, images) => persistImagesForStory(storyId, signal, images),
+    resolved = false;
+  };
+  return { getStory, persistImages, persistExtraction };
+};
+
+const productionDependencies = (storyId: string): VisualHydrationDependencies => ({
+  ...createVisualHydrationStorage(storyId, { project: readStateProjection, update: updateState }),
+  extract: extractPage,
   localize: downloadSourceImage,
   capture: captureRenderedPageImages,
   searchOnline: (story, requestedLimit, priority) => searchLicensedEditorialImages(story, requestedLimit, { priority }),

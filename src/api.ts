@@ -1,4 +1,5 @@
 import type { PrimaryDeliveryStatus, wechatPreflight } from "../server/primary-delivery.js";
+import type { CommunityView } from "../server/community-view.js";
 import type { AggregationView } from "../server/aggregation-desk.js";
 import type { DraftOverview } from "../server/draft-overview.js";
 import type { CommunityPlatform, TopicFeedView } from "../server/topic-feeds.js";
@@ -310,6 +311,7 @@ export interface ProductJob {
 
 export const api = {
   bootstrap: () => request<WorkflowState>("/api/bootstrap"),
+  community: () => request<CommunityView>("/api/community"),
   shell: () => request<ShellView>("/api/shell"),
   today: () => request<TodayView>("/api/today?readOnly=1"),
   homeNews: (keyword: string) => request<StoryView[]>(`/api/home-news?keyword=${encodeURIComponent(keyword)}`),

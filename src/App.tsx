@@ -1,6 +1,7 @@
 import { waitForProductJob, deferredJobMessage } from "./product-job-wait";
 import { chooseWorkbenchRun } from "./workbench-run";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createCoalescedRefresh } from "./coalesced-refresh";
 import { completionAvailability } from "../server/editorial-controls.js";
 import { AppShell } from "./components/AppShell";
 import { BootstrapStatusPage } from "./components/BootstrapStatusPage";
@@ -32,7 +33,6 @@ import type {
   ImageMaterial,
   EvidenceReviewSelection,
   EditorialProfile,
-  EditorialIntent,
   EditorialSuggestionStatus,
   EditorialSystemView,
   IntakeReviewRecord,
@@ -49,7 +49,7 @@ const DraftWorkspace = lazy(() =>
   import("./components/DraftWorkspace").then((module) => ({ default: module.DraftWorkspace })),
 );
 const Workbench = lazy(() => import("./components/Workbench").then((module) => ({ default: module.Workbench })));
-const CommunityWorkspace = lazy(() => import("./components/CommunityWorkspace").then((module) => ({ default: module.CommunityWorkspace })));
+const CommunityPage = lazy(() => import("./components/CommunityPage").then((module) => ({ default: module.CommunityPage })));
 const AggregationsPage = lazy(() => import("./components/AggregationsPage").then(module => ({default: module.AggregationsPage})));
 const SourcesPage = lazy(() => import("./components/SourcesPage").then((module) => ({ default: module.SourcesPage })));
 const EditorialSystemPage = lazy(() => import("./components/EditorialSystemPage").then((module) => ({ default: module.EditorialSystemPage })));
@@ -74,22 +74,31 @@ function App() {
   const [externalIntakeReview, setExternalIntakeReview] = useState<IntakeReviewRecord>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>({ status: "idle" });
 
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const refreshQueue = useMemo(() => createCoalescedRefresh({
+    read: async () => {
+      if (!alive.current) throw new Error("页面已关闭");
+      return Promise.all([api.bootstrap(), api.editorialSystem()]);
+    },
+    apply: ([next, nextEditorialSystem]) => {
+      if (!alive.current) return;
+      setState(next);
+      setEditorialSystem(nextEditorialSystem);
+      setShell({
+        notifications: next.notifications ?? [],
+        notificationsMuted: next.settings.notificationsMuted,
+        activeRunCount: next.runs.filter((run) => ["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status)).length,
+      });
+      setActiveRunId((current) => chooseWorkbenchRun(next.runs, current)?.id);
+      setActiveDraftId((current) => resolveDraftId(next.drafts, current));
+    },
+  }), []);
   const refresh = useCallback(async () => {
-    const [next, nextEditorialSystem] = await Promise.all([
-      api.bootstrap(),
-      api.editorialSystem(),
-    ]);
-    setState(next);
-    setEditorialSystem(nextEditorialSystem);
-    setShell({
-      notifications: next.notifications ?? [],
-      notificationsMuted: next.settings.notificationsMuted,
-      activeRunCount: next.runs.filter((run) => ["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status)).length,
-    });
-    setActiveRunId((current) => chooseWorkbenchRun(next.runs, current)?.id);
-    setActiveDraftId((current) => resolveDraftId(next.drafts, current));
-    return next;
-  }, []);
+    const next = await refreshQueue.requestValue();
+    if (!next) throw new Error("页面已关闭");
+    return next[0];
+  }, [refreshQueue]);
 
   useEffect(() => {
     if (state) rememberLastDraft(() => window.localStorage, resolveDraftId(state.drafts, activeDraftId));
@@ -160,7 +169,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (page === "today" || (state && editorialSystem)) return;
+    if (["today", "aggregations", "community"].includes(page) || (state && editorialSystem)) return;
     if (bootstrapState.status === "loading" || bootstrapState.status === "error") return;
     void bootstrap();
   }, [bootstrap, bootstrapState.status, editorialSystem, page, state]);
@@ -185,24 +194,9 @@ function App() {
 
   useEffect(() => {
     if (!hasActiveWork) return;
-    const timer = window.setInterval(() => void refresh(), 2_500);
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refresh().catch(() => undefined); }, 2_500);
     return () => window.clearInterval(timer);
   }, [hasActiveWork, refresh]);
-
-  useEffect(() => {
-    if (page !== "community") return;
-    const refreshVisibleCommunity = () => {
-      if (document.visibilityState === "visible") void refresh();
-    };
-    const timer = window.setInterval(refreshVisibleCommunity, 60_000);
-    window.addEventListener("focus", refreshVisibleCommunity);
-    document.addEventListener("visibilitychange", refreshVisibleCommunity);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", refreshVisibleCommunity);
-      document.removeEventListener("visibilitychange", refreshVisibleCommunity);
-    };
-  }, [page, refresh]);
 
   useEffect(() => {
     if (!pendingQuickDraft || !state) return;
@@ -301,7 +295,7 @@ function App() {
     }
   };
 
-  if ((!state || !editorialSystem) && page === "today") {
+  if ((!state || !editorialSystem) && ["today", "aggregations", "community"].includes(page)) {
     return (
       <AppShell
         page={page}
@@ -316,14 +310,17 @@ function App() {
         <Notice notice={notice} onClose={() => setNotice(null)} />
         <ProductJobCenter onOpenDraft={openDraftById} onOpenStory={(storyId) => { setHomeStoryId(storyId); navigate("today"); }} />
         <PageBoundary key={page}>
-        <TodayPage
+        <Suspense fallback={<PageLoading />}>
+        {page === "today" ? <TodayPage
           onNavigate={navigate}
           onNotice={(kind, message) => setNotice({ kind, message })}
           onOpenDraft={openDraftById}
           onSearch={searchNews}
           requestedStoryId={homeStoryId}
           onRequestedStoryHandled={() => setHomeStoryId(undefined)}
-        />
+        /> : page === "aggregations" ? <AggregationsPage onNavigate={navigate} onNotice={(kind, message) => setNotice({ kind, message })} />
+          : <CommunityPage onOpenDraft={openDraftById} onNotice={(kind, message) => setNotice({ kind, message })} />}
+        </Suspense>
         </PageBoundary>
       </AppShell>
     );
@@ -703,98 +700,12 @@ function App() {
     }
   };
 
-  const createEditorialDraftForSignal = async (
-    runId: string,
-    candidateId: string,
-    intent: EditorialIntent,
-  ) => {
-    setActionBusy(true);
-    try {
-      const queued = await api.createEditorialDraft(runId, candidateId, intent);
-      let draftId = queued.draft?.id;
-      let imageCount = queued.draft?.images.filter((image) => image.afterParagraph >= 0).length ?? 0;
-      let job = queued.job;
-      const waited = await waitForProductJob(job, { read: api.productJob });
-      job = waited.job;
-      if (waited.deferred) { setNotice({ kind: "success", message: deferredJobMessage(job) }); return; }
-      if (job.result && typeof job.result === "object") {
-        const result = job.result as { draftId?: string; imageCount?: number };
-        draftId = result.draftId ?? draftId; imageCount = result.imageCount ?? imageCount;
-      }
-      if (!draftId || job.status !== "complete") {
-        throw new Error(job.error || "成稿任务没有完成，请在任务进度中查看原因。");
-      }
-      await refresh();
-      setActiveDraftId(draftId);
-      navigate("drafts");
-      setNotice({
-        kind: "success",
-        message: intent === "news"
-          ? `新闻稿已生成：事实来自原始页面，社区评论没有替代新闻主干；带入 ${imageCount} 张来源图片。`
-          : intent === "source"
-            ? `原文整理稿已生成：尽量保留原材料结构，并带入 ${imageCount} 张来源图片。`
-            : `社区观察稿已生成：只使用达到采样门槛的讨论，并带入 ${imageCount} 张来源图片。`,
-      });
-    } catch (error) {
-      reportError(error);
-      throw error;
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
   const createCommunityCandidateDraft = async (
     candidateId: string,
     mode: "article" | "source" | "translation" | "curation",
   ) => {
     if (!activeRun) return;
     return createCommunityDraftForRun(activeRun.id, candidateId, mode);
-  };
-
-  const setCommunityCandidateFeedback = async (
-    runId: string,
-    candidateId: string,
-    kind: Extract<CandidateFeedbackKind, "interested" | "not_interested">,
-  ) => {
-    try {
-      const result = await api.setCandidateFeedback(runId, candidateId, kind);
-      setState((current) => current ? {
-        ...current,
-        runs: current.runs.map((run) => run.id === result.run.id ? result.run : run),
-        candidateFeedback: kind === "not_interested"
-          ? [...current.candidateFeedback.filter((item) => item.candidateId !== candidateId), result.feedback]
-          : [...current.candidateFeedback.filter((item) => item.candidateId !== candidateId), result.feedback],
-      } : current);
-    } catch (error) {
-      reportError(error);
-      throw error;
-    }
-  };
-
-  const restoreCommunityCandidateFeedback = async (runId: string, candidateId: string) => {
-    try {
-      const result = await api.restoreCandidateFeedback(runId, candidateId);
-      setState((current) => current ? {
-        ...current,
-        runs: current.runs.map((run) => run.id === result.run.id ? result.run : run),
-        candidateFeedback: current.candidateFeedback.filter((item) => item.candidateId !== candidateId),
-      } : current);
-    } catch (error) {
-      reportError(error);
-      throw error;
-    }
-  };
-
-  const autoBriefCommunityCandidates = async (
-    requests: Array<{ runId: string; candidateIds: string[] }>,
-  ) => {
-    const results = await Promise.all(requests.slice(0, 3).map((request) =>
-      api.briefCandidates(request.runId, request.candidateIds)));
-    const updatedRuns = new Map(results.map((result) => [result.run.id, result.run]));
-    setState((current) => current ? {
-      ...current,
-      runs: current.runs.map((run) => updatedRuns.get(run.id) ?? run),
-    } : current);
   };
 
   const saveDraft = async (
@@ -1374,15 +1285,7 @@ function App() {
         />
       ) : null}
       {page === "community" ? (
-        <CommunityWorkspace
-          runs={state.runs}
-          sources={state.sources}
-          settings={state.settings}
-          onFeedback={setCommunityCandidateFeedback}
-          onRestoreFeedback={restoreCommunityCandidateFeedback}
-          onCreateDraft={createEditorialDraftForSignal}
-          onAutoBrief={autoBriefCommunityCandidates}
-        />
+        <CommunityPage onOpenDraft={openDraftById} onNotice={(kind, message) => setNotice({ kind, message })} />
       ) : null}
       {page === "drafts" ? (
         <Suspense fallback={<PageLoading label="正在打开文章编辑器…" />}>

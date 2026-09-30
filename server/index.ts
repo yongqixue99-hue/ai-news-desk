@@ -7,6 +7,7 @@ import { WeChatApiError } from "./wechat-http.js";
 import { normalizeWeChatMetadata, wechatMetadataFor } from "./wechat-metadata.js";
 import { registerDraftLibraryRoutes } from "./draft-library-routes.js";
 import { registerSocialDeliveryRoutes, startSocialBridge } from "./social-delivery-routes.js";
+import { registerCommunityRoutes } from "./community-routes.js";
 import { buildAggregationView, retainAggregationEntry } from "./aggregation-desk.js";
 import { aggregationSourceIds } from "./aggregation-catalog.js";
 import { writingPreferencePlan } from "./writing-preference-retrieval.js";
@@ -428,6 +429,7 @@ const publisherPreflightFor = async (
 };
 
 registerSocialDeliveryRoutes(app);
+registerCommunityRoutes(app);
 registerDraftLibraryRoutes(app);
 
 app.get(

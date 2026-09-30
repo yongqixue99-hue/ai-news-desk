@@ -1,5 +1,6 @@
-export interface CoalescedRefresh {
+export interface CoalescedRefresh<T = unknown> {
   request: (quiet?: boolean) => Promise<void>;
+  requestValue: (quiet?: boolean) => Promise<T | undefined>;
   dispose: () => void;
 }
 
@@ -10,33 +11,33 @@ interface RefreshCallbacks<T> {
   onSettled?: (quiet: boolean) => void;
 }
 
-interface RefreshBatch {
+interface RefreshBatch<T> {
   quiet: boolean;
-  promise: Promise<void>;
-  resolve: () => void;
+  promise: Promise<T | undefined>;
+  resolve: (value?: T) => void;
   reject: (error: unknown) => void;
 }
 
-function batchFor(quiet: boolean): RefreshBatch {
-  let resolve!: () => void;
+function batchFor<T>(quiet: boolean): RefreshBatch<T> {
+  let resolve!: (value?: T) => void;
   let reject!: (error: unknown) => void;
-  const promise = new Promise<void>((ok, fail) => { resolve = ok; reject = fail; });
+  const promise = new Promise<T | undefined>((ok, fail) => { resolve = ok; reject = fail; });
   return { quiet, promise, resolve, reject };
 }
 
 /** One read in flight and one trailing read. Explicit refreshes keep their display mode. */
-export function createCoalescedRefresh<T>(callbacks: RefreshCallbacks<T>): CoalescedRefresh {
+export function createCoalescedRefresh<T>(callbacks: RefreshCallbacks<T>): CoalescedRefresh<T> {
   let disposed = false;
-  let active: RefreshBatch | undefined;
-  let pending: RefreshBatch | undefined;
+  let active: RefreshBatch<T> | undefined;
+  let pending: RefreshBatch<T> | undefined;
 
-  const run = async (batch: RefreshBatch) => {
+  const run = async (batch: RefreshBatch<T>) => {
     active = batch;
     try {
       callbacks.onStart?.(batch.quiet);
       const value = await callbacks.read();
       if (!disposed) callbacks.apply(value, batch.quiet);
-      batch.resolve();
+      batch.resolve(value);
     } catch (error) {
       batch.reject(error);
     } finally {
@@ -48,18 +49,20 @@ export function createCoalescedRefresh<T>(callbacks: RefreshCallbacks<T>): Coale
     }
   };
 
+  const requestValue = (quiet = false): Promise<T | undefined> => {
+    if (disposed) return Promise.resolve(undefined);
+    if (active) {
+      pending ??= batchFor<T>(quiet);
+      pending.quiet &&= quiet;
+      return pending.promise;
+    }
+    const batch = batchFor<T>(quiet);
+    void run(batch);
+    return batch.promise;
+  };
   return {
-    request(quiet = false) {
-      if (disposed) return Promise.resolve();
-      if (active) {
-        pending ??= batchFor(quiet);
-        pending.quiet &&= quiet;
-        return pending.promise;
-      }
-      const batch = batchFor(quiet);
-      void run(batch);
-      return batch.promise;
-    },
+    request: (quiet = false) => requestValue(quiet).then(() => undefined),
+    requestValue,
     dispose() {
       disposed = true;
       // A route change must not keep callers waiting for a slow response.

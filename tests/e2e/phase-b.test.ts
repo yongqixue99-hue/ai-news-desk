@@ -160,6 +160,7 @@ test("stage B editor saves, confirms, expires proposals and recovers without liv
     assert.ok(libraryBounds.y + libraryBounds.height <= (await tools.boundingBox())!.y + 1, "library must not cover the mobile tools");
     await tools.getByRole("button", { name: "AI 助手", exact: true }).click();
     await page.getByRole("tabpanel", { name: "AI 助手面板", exact: true }).waitFor();
+    await library.waitFor({ state: "hidden" });
     assert.equal(await library.isVisible(), false);
     await page.getByRole("button", { name: "关闭右侧面板", exact: true }).click();
     await page.setViewportSize({ width: 1440, height: 1000 });

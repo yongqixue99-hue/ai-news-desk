@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import path from "node:path";
+import { createBlankDraftInState } from "./draft-library.js";
+import { createDefaultState } from "./defaults.js";
 import {
   ExtensionPublisherBridge,
   MINIMUM_EXTENSION_VERSION,
@@ -9,6 +11,18 @@ import {
   openRegularChromePublisher,
   type ExtensionPublisherJob,
 } from "./publisher-extension.js";
+
+test("updating a previously filled article reuses its exact editor URL", async () => {
+  const draft = createBlankDraftInState(createDefaultState());
+  draft.fillResult = { at: new Date().toISOString(), ok: false,
+    pageUrl: "https://www.xiaoheihe.cn/creator/editor/draft/article/local_123",
+    steps: [{ name: "标题", ok: true, detail: "accepted" }, { name: "正文", ok: true, detail: "accepted" }, { name: "话题", ok: false, detail: "missing" }] };
+  assert.equal((await prepareJob(draft, "unused")).editorUrl, draft.fillResult.pageUrl);
+  for (const url of ["https://evil.test/creator/editor/draft/article/local_123", "https://www.xiaoheihe.cn/creator/content", "https://user@www.xiaoheihe.cn/creator/editor/draft/article/local_123", "https://www.xiaoheihe.cn/creator/editor/draft/article/local_123?other=1"]) {
+    draft.fillResult.pageUrl = url;
+    assert.equal((await prepareJob(draft, "unused")).editorUrl, "https://www.xiaoheihe.cn/creator/editor/draft/article");
+  }
+});
 
 test("the disconnected Chrome launcher opens the local pairing page before the platform editor", async () => {
   const opened: string[] = [];

@@ -36,6 +36,7 @@ export function XiaoheiheDeliveryPanel({ draft, nextCompanion, busy, connected, 
   const receiptUrl = result?.pageUrl && /^https:\/\/(www\.)?xiaoheihe\.cn\//u.test(result.pageUrl) ? result.pageUrl : "https://www.xiaoheihe.cn/creator/content";
   const current = status === "current" && result?.ok;
   const failedSteps = status === "failed" && !result?.ok ? result?.steps.filter(step => !step.ok) ?? [] : [];
+  const completedSteps = result?.steps.filter(step => step.ok).length ?? 0;
   const repeatedStepError = failedSteps.length > 0 && error === failedSteps.map(step => `${step.name}：${step.detail}`).join("；");
   const sendLabel = status === "changed" ? "更新到小黑盒" : status === "failed" ? "重试填入" : "送到小黑盒";
   const receiptLabel = status === "checking" ? "正在核对交付记录"
@@ -53,9 +54,9 @@ export function XiaoheiheDeliveryPanel({ draft, nextCompanion, busy, connected, 
     {error && !repeatedStepError ? <p className="delivery-error" role="alert">{error}</p> : null}
     {result ? <div className={`xhh-receipt ${current ? "ready" : status === "changed" || status === "failed" ? "attention" : "neutral"}`}>
       <div role="status"><strong>{receiptLabel}</strong>{current ? null : <a href={receiptUrl} target="_blank" rel="noreferrer">查看上次填入页面 <ArrowUpRight size={14} /></a>}</div>
-      {failedSteps.length ? <div role="alert">{failedSteps.map(step => <p key={step.name}>{step.name}：{step.detail}</p>)}</div> : null}
+      {failedSteps.length ? <div role="alert"><p>{failedSteps[0].name}：{failedSteps[0].detail}</p>{failedSteps.length > 1 ? <small>另有 {failedSteps.length - 1} 项，展开明细查看</small> : null}</div> : null}
       {current ? <button className="xhh-text-button xhh-refill" disabled={disabled} onClick={onSend}>重新填入</button> : null}
-      <details><summary>填入明细</summary>{result.steps.map(step => <p key={step.name}>{step.ok ? "✓" : "!"} {step.name} · {step.detail}</p>)}{current ? <button className="xhh-text-button" disabled={publicationRemembered || busy} onClick={onConfirmPublished}>{publicationRemembered ? "已记录发布" : "我已在小黑盒发布，记录本次交付"}</button> : null}</details>
+      <details><summary>填入明细 · 已完成 {completedSteps}/{result.steps.length} 项</summary>{result.steps.map(step => <p key={step.name}>{step.ok ? "✓" : "!"} {step.name} · {step.detail}</p>)}{current ? <button className="xhh-text-button" disabled={publicationRemembered || busy} onClick={onConfirmPublished}>{publicationRemembered ? "已记录发布" : "我已在小黑盒发布，记录本次交付"}</button> : null}</details>
     </div> : status === "checking" || status === "unknown" ? <p className="xhh-status-note" role="status">{receiptLabel}</p> : null}
     <div className="xhh-settings" inert={disabled}>
       <details className="xhh-disclosure"><summary><span><strong>社区与话题</strong><small>{selection.communities.join(" · ")} · {selection.topics.length} 个话题</small></span><ChevronDown size={15} /></summary>

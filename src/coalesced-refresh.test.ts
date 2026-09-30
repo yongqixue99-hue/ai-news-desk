@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCoalescedRefresh } from "./coalesced-refresh.js";
 
+test("a mutation refresh receives the trailing snapshot, not the older in-flight state", async () => {
+  const first = deferred<string>();
+  const second = deferred<string>();
+  let reads = 0;
+  const loader = createCoalescedRefresh({ read: () => ++reads === 1 ? first.promise : second.promise, apply: () => undefined });
+  const initial = loader.requestValue();
+  const changed = loader.requestValue();
+  first.resolve("before-save");
+  assert.equal(await initial, "before-save");
+  second.resolve("after-save");
+  assert.equal(await changed, "after-save");
+  assert.equal(reads, 2);
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;

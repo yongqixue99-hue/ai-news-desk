@@ -44,6 +44,8 @@ export function RunsPage({
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "success" | "failed">("all");
   const [originFilter, setOriginFilter] = useState<"all" | "collection" | "intake" | "scheduled" | "evidence">("all");
   const [expandedRunId, setExpandedRunId] = useState<string>();
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const filteredRuns = useMemo(() => runs.filter((run) => {
     const active = activeStatuses.has(run.status);
     const statusMatches = statusFilter === "all"
@@ -62,13 +64,13 @@ export function RunsPage({
       <header className="page-header"><div><h1>运行记录</h1><p>查看采集结果，处理未完成的任务。</p></div><button className="secondary-button" onClick={onOpenSchedule}><ArrowLeft size={16} />自动化设置</button></header>
       <div className="run-history-filters" aria-label="筛选运行记录">
         <span><Filter size={14} />筛选</span>
-        <select aria-label="按状态筛选" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">全部状态</option><option value="active">运行中</option><option value="success">已完成</option><option value="failed">失败／取消</option></select>
-        <select aria-label="按触发方式筛选" value={originFilter} onChange={(event) => setOriginFilter(event.target.value as typeof originFilter)}><option value="all">全部方式</option><option value="collection">手动采集</option><option value="intake">截图／链接</option><option value="scheduled">定时采集</option><option value="evidence">补充证据</option></select>
-        <small>显示 {filteredRuns.length} / {runs.length}</small>
+        <select aria-label="按状态筛选" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as typeof statusFilter); setVisibleCount(20); }}><option value="all">全部状态</option><option value="active">运行中</option><option value="success">已完成</option><option value="failed">失败／取消</option></select>
+        <select aria-label="按触发方式筛选" value={originFilter} onChange={(event) => { setOriginFilter(event.target.value as typeof originFilter); setVisibleCount(20); }}><option value="all">全部方式</option><option value="collection">手动采集</option><option value="intake">截图／链接</option><option value="scheduled">定时采集</option><option value="evidence">补充证据</option></select>
+        <small>匹配 {filteredRuns.length} / {runs.length} 条</small>
       </div>
       <div className="run-history-table">
         <div className="run-history-head"><span>状态</span><span>运行时间</span><span>触发方式</span><span>搜索范围</span><span>原始条目</span><span>候选／成稿</span><span>最后阶段</span><span>操作</span></div>
-        {!filteredRuns.length ? <div className="run-history-empty">没有符合筛选条件的运行记录。</div> : filteredRuns.map((run) => {
+        {!filteredRuns.length ? <div className="run-history-empty">没有符合筛选条件的运行记录。</div> : filteredRuns.slice(0, visibleCount).map((run) => {
           const draftCount = run.candidates.filter((candidate) => candidate.status === "drafted").length;
           const active = activeStatuses.has(run.status);
           const empty = !active && !["failed", "cancelled"].includes(run.status) && run.candidates.length === 0;
@@ -120,11 +122,10 @@ export function RunsPage({
           );
         })}
       </div>
-      <section className="run-diagnostic-tools" aria-label="诊断工具">
-        <h2>诊断工具</h2>
-        <DiscoveryTracePanel />
-        <SourceChangeImpactPanel />
-      </section>
+      {visibleCount < filteredRuns.length ? <div className="run-history-more"><span>已显示 {visibleCount} / {filteredRuns.length} 条</span><button className="secondary-button" onClick={() => setVisibleCount(count => count + 20)}>再看 {Math.min(20, filteredRuns.length - visibleCount)} 条</button></div> : null}
+      <details className="run-diagnostic-tools" onToggle={event => setDiagnosticsOpen(event.currentTarget.open)}><summary>诊断工具</summary>
+        {diagnosticsOpen ? <><DiscoveryTracePanel /><SourceChangeImpactPanel /></> : null}
+      </details>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createPublisherBridgeClient,
   planEditorTab,
+  waitingForEditorLogin,
   startPublisherBridgePolling,
   XIAOHEIHE_PAGE_SCRIPTS,
 } from "./publisher-bridge.js";
@@ -14,6 +15,59 @@ const receiptJob = {
   title: "测试", bodyHtml: "<p>正文</p>", community: "盒友杂谈", topics: ["AI"], images: [],
 } satisfies ExtensionPublisherJob;
 const receipt = { pageUrl: `${receiptJob.editorUrl}/local-result`, steps: [{ name: "标题", ok: true, detail: "已填入" }] };
+
+test("a restarted extension worker restores an unacknowledged report without refilling", async () => {
+  let stored: unknown;
+  let runs = 0;
+  let reports = 0;
+  let claims = 0;
+  const pendingReports = {
+    load: async () => stored,
+    save: async (value: unknown) => { stored = structuredClone(value); },
+    clear: async () => { stored = undefined; },
+  };
+  const options = {
+    origin: "http://127.0.0.1:4317", clientId: "extension-id", version: MINIMUM_EXTENSION_VERSION,
+    pendingReports,
+    fetcher: async (input: unknown) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/bootstrap")) return Response.json({ token: "paired" });
+      if (path.endsWith("/heartbeat")) return Response.json({ ok: true });
+      if (path.endsWith("/jobs/next")) { claims++; return Response.json(receiptJob); }
+      if (++reports === 1) throw new Error("response lost");
+      return Response.json({ ok: true });
+    },
+    runJob: async () => { runs++; return receipt; },
+  };
+  await createPublisherBridgeClient(options).tick().catch(() => undefined);
+  assert.ok(stored, "receipt survives the service worker lifetime");
+  assert.deepEqual(await createPublisherBridgeClient(options).tick(), { status: "completed" });
+  assert.equal(runs, 1);
+  assert.equal(claims, 1);
+  assert.equal(stored, undefined, "acknowledged receipt is cleared");
+});
+
+test("automatic login continuation cannot rerun partial writes", () => {
+  assert.equal(waitingForEditorLogin({ steps: [{ name: "登录", ok: false }] }), true);
+  for (const steps of [[], [{ name: "登录", ok: true }], [{ name: "标题", ok: true }, { name: "登录", ok: false }], [{ name: "配图", ok: false }]]) {
+    assert.equal(waitingForEditorLogin({ steps }), false);
+  }
+});
+
+test("an expired persisted report is cleared without replaying the platform job", async () => {
+  let stored: unknown = { jobId: "old", body: JSON.stringify({ clientId: "extension-id", steps: [] }), createdAt: 1 };
+  let runs = 0;
+  const client = createPublisherBridgeClient({
+    origin: "http://127.0.0.1:4317", clientId: "extension-id", version: MINIMUM_EXTENSION_VERSION,
+    now: () => 300_000,
+    pendingReports: { load: async () => stored, save: async () => undefined, clear: async () => { stored = undefined; } },
+    fetcher: async (input: unknown) => new URL(String(input)).pathname.endsWith("bootstrap") ? Response.json({ token: "pair" }) : Response.json({ ok: true }),
+    runJob: async () => { runs++; return receipt; },
+  });
+  await assert.rejects(client.tick(), /不要重复填入/);
+  assert.equal(stored, undefined);
+  assert.equal(runs, 0);
+});
 
 for (const failure of ["network", "http", "negative-ack", "invalid-json"] as const) {
   test(`a ${failure} receipt failure retries the report without running the platform job again`, async () => {

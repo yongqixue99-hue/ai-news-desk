@@ -227,14 +227,22 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: 1000 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      if (width === 1440) assert.ok((await page.locator('#app-sidebar').boundingBox())!.width <= 240, 'desktop rail is immediately stable after mobile resize');
       await page.screenshot({ path: path.join(shots, `multi-delivery-${width}.png`) });
     }
     // Isolate browser launching and remote transport. Server queue behavior has unit coverage.
     let batch: unknown;
+    let retry = false;
+    let retryRequests = 0;
+    let saveRequests = 0;
+    page.on('request', request => { if (request.method() === 'PATCH' && request.url().endsWith('/api/drafts/delivery-ui')) saveRequests++; });
     await page.route('**/api/drafts/delivery-ui/social-delivery-batches', async route => {
       if (route.request().method() === 'POST') {
-        const input = route.request().postDataJSON(); assert.deepEqual(input.platforms, ['zhihu', 'toutiao']); assert.ok(input.updatedAt);
-        batch = { id: 'wait-test', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now()+600000).toISOString(), targets: [{ platform: 'zhihu', revisionHash: 'test', status: 'waiting-connection', detail: '等待同步助手连接；网站已登录则无需重登' }, { platform: 'toutiao', revisionHash: 'test', status: 'blocked', detail: '头条自动存稿尚未接通' }] };
+        const input = route.request().postDataJSON(); assert.deepEqual(input.platforms, retry ? ['zhihu'] : ['zhihu', 'toutiao']); assert.ok(input.updatedAt);
+        if (retry) retryRequests++;
+        batch = retry
+          ? { id: 'retry-test', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now()+600000).toISOString(), targets: [{ platform: 'zhihu', revisionHash: 'test', status: 'reported', detail: '隔离测试：失败平台重试完成' }] }
+          : { id: 'wait-test', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now()+600000).toISOString(), targets: [{ platform: 'zhihu', revisionHash: 'test', status: 'waiting-connection', detail: '等待同步助手连接；网站已登录则无需重登' }, { platform: 'toutiao', revisionHash: 'test', status: 'blocked', detail: '头条自动存稿尚未接通' }] };
         await route.fulfill({json:batch});
       } else await route.fulfill({json:batch ? [batch] : []});
     });
@@ -246,11 +254,26 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await primaryTabs.getByRole('tab', {name:/多平台/}).click();
     await panel.getByRole('status').getByText(/等待同步助手连接/).waitFor();
     await page.route('**/social-delivery-batches/wait-test/cancel', async route => {
-      batch = { id:'wait-test', createdAt:new Date().toISOString(), expiresAt:new Date().toISOString(), targets:[{platform:'zhihu',revisionHash:'test',status:'cancelled',detail:'已取消等待，未发送存稿请求'}] };
+      batch = { id:'wait-test', createdAt:new Date().toISOString(), expiresAt:new Date().toISOString(), targets:[{platform:'zhihu',revisionHash:'test',status:'cancelled',detail:'已取消等待，未发送存稿请求'}, {platform:'baijiahao',revisionHash:'test',status:'reported',detail:'隔离测试：百家号已返回草稿回执'}, {platform:'toutiao',revisionHash:'test',status:'blocked',detail:'头条自动存稿尚未接通'}] };
       await route.fulfill({json:batch});
     });
     await panel.getByRole('button', {name:'取消等待'}).click();
     await panel.getByRole('status').getByText(/已取消等待/).waitFor();
+    retry = true;
+    await panel.getByRole('button', {name:'重试未完成的平台（1）',exact:true}).click();
+    await panel.getByRole('status').getByText('隔离测试：失败平台重试完成', {exact:true}).waitFor();
+    assert.equal(retryRequests, 1, 'one retry sends only the failed supported platform');
+    assert.equal(saveRequests, 0, 'unchanged delivery does not create another manual draft version');
+    await panel.getByRole('checkbox', {name:/知乎/}).uncheck();
+    const openOnly = panel.getByRole('button', {name:'打开今日头条编辑页',exact:true});
+    await openOnly.waitFor();
+    assert.equal(await openOnly.isEnabled(), true, 'entry-only selection is an available action');
+    await page.route('**/api/delivery/social/open', async route => {
+      assert.deepEqual(route.request().postDataJSON().platforms, ['toutiao']);
+      await route.fulfill({json:{detail:'隔离测试：已打开头条入口'}});
+    });
+    await openOnly.click();
+    await panel.getByText('隔离测试：已打开头条入口', {exact:true}).waitFor();
     await panel.getByRole('link', { name: '连接设置', exact: true }).click();
     await page.getByRole('heading', { name: '连接多平台同步助手', exact: true }).waitFor();
     assert.equal(await page.getByRole('tab', { name: '平台连接', exact: true }).getAttribute('aria-selected'), 'true');

@@ -1,7 +1,7 @@
 /* Application navigation: frequent reading/writing, occasional tools. */
-.workspace-shell { font-family: var(--desk-sans); }
+.app-shell.workspace-shell { font-family: var(--desk-sans); transition: none; }
 .workspace-shell .nav-short { display: none; }
-.workspace-shell .main-sidebar { background: #fafafa; border-color: #e8e8e8; }
+.workspace-shell .main-sidebar { background: #fafafa; border-color: #e8e8e8; transition: none; }
 .workspace-shell .sidebar-brand-row { min-height: 48px; margin-bottom: 28px; }
 .workspace-shell .brand-copy { font-size: 16px; }
 .workspace-shell .brand-copy small { font-size: 9px; letter-spacing: 1px; }
@@ -67,10 +67,6 @@
   .workspace-shell .mobile-more-menu .mobile-more-notifications { border-top: 1px solid var(--line-soft); border-radius: 0; margin-top: 4px; }
   .workspace-shell .mobile-more-nav > .nav-item { position: relative; }
   .mobile-more-indicator { position: absolute; top: 7px; left: calc(50% + 8px); width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .workspace-shell, .workspace-shell .main-sidebar { transition: none; }
 }
 
 .app-shell.workspace-shell:has(.draft-focus-mode) { grid-template-columns: minmax(0, 1fr); }

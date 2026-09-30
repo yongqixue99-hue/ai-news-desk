@@ -275,6 +275,18 @@ const jobImages = async (draft: ArticleDraft): Promise<ExtensionPublisherImage[]
   return results;
 };
 
+const previousArticleEditor = (draft: ArticleDraft) => {
+  const previous = draft.fillResult;
+  if (!previous || !["标题", "正文"].every(name => previous.steps.some(step => step.name === name && step.ok))) return undefined;
+  try {
+    const url = new URL(previous.pageUrl || "");
+    if (url.protocol === "https:" && ["www.xiaoheihe.cn", "xiaoheihe.cn"].includes(url.hostname)
+      && !url.username && !url.password && !url.port && !url.search && !url.hash
+      && /^\/creator\/editor\/draft\/article\/[A-Za-z0-9_-]+\/?$/u.test(url.pathname)) return url.href;
+  } catch { /* An unverified page is never a draft update target. */ }
+  return undefined;
+};
+
 export const prepareJob = async (draft: ArticleDraft, _editorUrl: string): Promise<ExtensionPublisherJob> => {
   const selection = draft.xiaoheiheOptions ? xiaoheiheSelection(draft) : undefined;
   const coverId = selection?.options.creationPlan !== "none" ? selection?.options.coverPlacementId : undefined;
@@ -290,7 +302,7 @@ export const prepareJob = async (draft: ArticleDraft, _editorUrl: string): Promi
   if (selection && selection.options.creationPlan !== "none" && !cover) throw new Error("参加创作计划需要选择封面");
   return {
     id: `publish_${randomUUID()}`, draftId: draft.id, createdAt: new Date().toISOString(),
-    editorUrl: draft.contentFormat === "image-post" ? imagePostEditorUrl : XIAOHEIHE_ARTICLE_EDITOR_URL,
+    editorUrl: draft.contentFormat === "image-post" ? imagePostEditorUrl : previousArticleEditor(draft) ?? XIAOHEIHE_ARTICLE_EDITOR_URL,
     contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
     title: draft.title, bodyHtml: draft.contentFormat === "image-post" ? publisherImagePostBodyHtml(draft) : publisherBodyHtml(draft),
     community: selection?.community ?? draft.community.trim(), communities: selection?.communities,

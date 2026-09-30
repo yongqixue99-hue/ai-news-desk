@@ -178,7 +178,7 @@ async function ensureEditor() {
 
   const bodyText = document.body?.innerText || "";
   if (/扫码登录|账号登录|登录后发布|立即登录/.test(bodyText) || /login|signin/i.test(location.href)) {
-    return { issue: { name: "登录", ok: false, detail: "请先在这个常用 Chrome 中登录小黑盒，再重新点击填入" } };
+    return { issue: { name: "登录", ok: false, detail: "请在当前 Chrome 登录小黑盒；登录后会自动继续填入" } };
   }
 
   const writeArticle = textMatch(/^(写文章|发布文章)$/);
@@ -202,7 +202,7 @@ async function ensureEditor() {
 async function ensureImagePostEditor() {
   const bodyText = document.body?.innerText || "";
   if (/扫码登录|账号登录|登录后发布|立即登录/.test(bodyText) || /login|signin/i.test(location.href)) {
-    return { issue: { name: "登录", ok: false, detail: "请先在这个常用 Chrome 中登录小黑盒，再重新点击填入" } };
+    return { issue: { name: "登录", ok: false, detail: "请在当前 Chrome 登录小黑盒；登录后会自动继续填入" } };
   }
 
   const findFields = () => {

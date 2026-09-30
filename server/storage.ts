@@ -22,9 +22,9 @@ const ensureDirectories = async () => {
   await mkdir(workflowMaterialsRoot, { recursive: true });
 };
 
-export const readState = async (): Promise<WorkflowState> => {
+const cachedState = async (): Promise<WorkflowState> => {
   await ensureDirectories();
-  if (stateCache) return structuredClone(stateCache);
+  if (stateCache) return stateCache;
   const state = upgradeState((await localDatabase()).readState<WorkflowState>());
   state.draftGenerationAttempts ??= [];
   state.draftRevisions ??= [];
@@ -33,8 +33,15 @@ export const readState = async (): Promise<WorkflowState> => {
     state.settings.xiaoheiheEditorUrl = "https://xiaoheihe.cn/community/user/post_list";
   }
   stateCache = structuredClone(state);
-  return structuredClone(stateCache);
+  return stateCache;
 };
+
+export const readState = async (): Promise<WorkflowState> => structuredClone(await cachedState());
+
+/** Pure synchronous selectors clone only the result, never the whole archive.
+ * Selectors must not mutate the cached state. Results cannot alias storage. */
+export const readStateProjection = async <T>(select: (state: Readonly<WorkflowState>) => T): Promise<T> =>
+  structuredClone(select(await cachedState()));
 
 const localDatabase = async () => {
   databasePromise ??= LocalDatabase.open({
