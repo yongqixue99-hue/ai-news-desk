@@ -1,0 +1,122 @@
+[
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/bootstrap",
+    "bytes": 424,
+    "sha256": "29b1c25db8bb8777380d22ffd114e5037b187dc71b288bb85bc9766d5c0d33b7"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/shell",
+    "bytes": 402,
+    "sha256": "caeebc9dab248e07c2c76ccacfc189a8764e40e90af8cd447466f66eeb8eade8"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/runs/:runId/diagnostics",
+    "bytes": 330,
+    "sha256": "694000a2ab401c003e5825db1a9e74a08c4b1a7b1f3ef7685cb496c9a76bfc78"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/product/jobs/:jobId/retry",
+    "bytes": 896,
+    "sha256": "f969f3b5668338a81544364c81abbd7b2526d87985ed4f877350ea19bad66a7b"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/product/jobs",
+    "bytes": 232,
+    "sha256": "e341667efd2c8455618943e944b18a7215c987543253ebfb94e5962ad16290f7"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/product/jobs/:jobId",
+    "bytes": 299,
+    "sha256": "ba46d1f377ad054c5d7de4609039259115de467cc695458ecfe779ef08f719e0"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/events",
+    "bytes": 1667,
+    "sha256": "f93a30df6af8a40280b951a81fc3d506de1aefb7b3a9de67e12c7df5290e88da"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/desktop/status",
+    "bytes": 162,
+    "sha256": "77e68448ce57284437c69996f56c04a155077bdd80b6f5afe018ce22e336f333"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/health",
+    "bytes": 345,
+    "sha256": "3d2e3398400cb501a0bc58a881c649c63db23c3ffe75336ff4e96adfee40ea22"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/runs/collect",
+    "bytes": 1888,
+    "sha256": "1486035a374d1b8befe9dd548a09c55b5fdd223ef7f61b71070b8784c07fc426"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/runs/:runId/cancel",
+    "bytes": 550,
+    "sha256": "4eb5cd18ba52d6c96574ed12916f5483d9dd8c6acbb5815ee26a547b5550c688"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/runs/:runId/retry",
+    "bytes": 340,
+    "sha256": "ea8da37bbbf0a077a2b5903f54a31b24f52a92714429844138cb5771470d0f63"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/runs/:runId/briefings",
+    "bytes": 908,
+    "sha256": "f2fd67f281695c0edb405bf386420730370e5cf0a18292626b2d76c07ef69305"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/runs/:runId/candidates/:candidateId",
+    "bytes": 573,
+    "sha256": "a901e884754f92140d00f0ce0e894cddc2d712c3d3f8c7a374d4b8548098cdf6"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "delete",
+    "path": "/api/runs/:runId/candidates",
+    "bytes": 1533,
+    "sha256": "41b230a1516d2bb3a6d097814646d2c9ee988491f36c24102dd8421aa19d5f52"
+  }
+]
