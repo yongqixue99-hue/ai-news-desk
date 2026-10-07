@@ -13,7 +13,7 @@
 | learning | 已合并 | [#41](https://github.com/yongqixue99-hue/ai-news-desk/pull/41) | 18 | 79607→68690 | 原文18/18完全一致；单测1386、编辑22/22、构建、E2E13全过 |
 | workflow | 已合并 | [#42](https://github.com/yongqixue99-hue/ai-news-desk/pull/42) | 15 | 68690→58729 | 原文15/15完全一致；单测1388、编辑22/22、构建、E2E13全过 |
 | data | 已合并 | [#43](https://github.com/yongqixue99-hue/ai-news-desk/pull/43) | 6 | 58729→53381 | 原文6/6完全一致；单测1390、编辑22/22、构建、E2E13全过 |
-| settings | 进行中 | 待建PR | 8 | 53381→42337 | 原文8/8完全一致；单测1392、编辑22/22、构建、E2E13全过 |
+| settings | 进行中 | [#44](https://github.com/yongqixue99-hue/ai-news-desk/pull/44) | 8 | 53381→42337 | 原文8/8完全一致；单测1392、编辑22/22、构建、E2E13全过 |
 | media | 未开始 | — | 9 | — | — |
 
 公共HTTP辅助函数的原文移到http-route-support.ts；入口保留中间件、服务创建、持久任务与启动顺序。测试用内存状态和随机本机临时端口，不读取真实数据库、不调用平台或模型。
