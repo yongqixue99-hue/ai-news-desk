@@ -1,3 +1,4 @@
+import { artifactFromRun, type RunArtifactReader } from "./run-artifacts.js";
 import { hasOfficialUpdateAnchor } from "./official-update-url.js";
 import { draftDocumentBlocks as documentBlocks, retainedDraftBlocks as retainedBlocks, summarizeReworkObservations } from "./draft-rework.js";
 import type { WorkflowEventRecord } from "./local-database.js";
@@ -21,12 +22,12 @@ const delays = (values: number[]) => ({ samples: values.length, medianMs: median
   p95Ms: values.length ? [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]! : null });
 
 /** Pure projection of recorded outcomes: no fetching, model calls, learning or score updates. */
-export const buildWorkflowPerformance = (state: Readonly<WorkflowState>, options: { now?: string; days?: number; benchmarkUrls?: string[]; rework?: { events: WorkflowEventRecord[]; total: number; truncated: boolean } } = {}) => {
+export const buildWorkflowPerformance = (state: Readonly<WorkflowState>, options: { readArtifact?: RunArtifactReader; now?: string; days?: number; benchmarkUrls?: string[]; rework?: { events: WorkflowEventRecord[]; total: number; truncated: boolean } } = {}) => {
   const now = options.now ?? new Date().toISOString();
   const days = Math.max(1, Math.min(365, options.days ?? 30));
   const since = new Date(Date.parse(now) - days * 86_400_000).toISOString();
   const inWindow = (at: string | undefined) => Boolean(at && Date.parse(at) >= Date.parse(since) && Date.parse(at) <= Date.parse(now));
-  const runs = state.runs.filter(run => (!run.origin || run.origin === "collection") && inWindow(run.collectedAt ?? run.createdAt))
+  const runs = state.runs.map(run => ({ ...run, discoveryTrace: artifactFromRun(run, "discoveryTrace", options.readArtifact) })).filter(run => (!run.origin || run.origin === "collection") && inWindow(run.collectedAt ?? run.createdAt))
     .sort((a, b) => Date.parse(a.collectedAt ?? a.createdAt) - Date.parse(b.collectedAt ?? b.createdAt));
   const sources = new Map<string, { sourceId: string; name: string; attempts: number; failedAttempts: number; partialAttempts: number;
     rawCount: number; candidateCount: number; failedRoutes: number; traceRows: number; duplicateRows: number; latency: number[] }>();

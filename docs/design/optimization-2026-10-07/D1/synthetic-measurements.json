@@ -1,0 +1,35 @@
+{
+  "synthetic": true,
+  "runs": 4,
+  "beforeBytes": 386957,
+  "afterBytes": 2291,
+  "artifactRows": [
+    {
+      "kind": "aggregationItems",
+      "count": 4
+    },
+    {
+      "kind": "discoveryTrace",
+      "count": 4
+    },
+    {
+      "kind": "evidenceCandidates",
+      "count": 4
+    }
+  ],
+  "checkpoints": 1,
+  "views": [
+    {
+      "width": 1440,
+      "overflow": 0,
+      "errors": 0,
+      "externalRequests": 0
+    },
+    {
+      "width": 390,
+      "overflow": 0,
+      "errors": 0,
+      "externalRequests": 0
+    }
+  ]
+}

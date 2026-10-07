@@ -73,7 +73,7 @@ app.post(
     }
     if (type === "interested" || type === "not_interested") {
       await runtime.updateState((state) => {
-        const story = storyById(state, storyId);
+        const story = storyById(state, storyId, undefined, runtime.readArtifact);
         if (!story) return;
         const primary = story.signals.find((signal) => !signal.isCommunity) ?? story.signals[0];
         if (primary) {
@@ -107,11 +107,11 @@ app.delete(
   asyncRoute(async (request, response) => {
     const storyId = routeParam(request.params.storyId);
     const restored = await runtime.updateState((state) => {
-      const story = storyById(state, storyId);
+      const story = storyById(state, storyId, undefined, runtime.readArtifact);
       if (!story) return undefined;
       for (const signal of story.signals) restoreCandidateFeedback(state, signal.candidateId);
       reapplyPersonalizationToRuns(state);
-      return storyById(state, storyId);
+      return storyById(state, storyId, undefined, runtime.readArtifact);
     });
     if (!restored) {
       response.status(404).json({ error: "Story 不存在" });
@@ -343,7 +343,7 @@ app.get("/api/workflow/performance", asyncRoute(async (request, response) => {
   const urls = typeof request.query.url === "string" ? [request.query.url] : Array.isArray(request.query.url) ? request.query.url.filter((value): value is string => typeof value === "string") : [];
   const now = new Date().toISOString();
   const rework = readReworkObservations(await runtime.getLocalDatabase(), { days, now });
-  response.json(await runtime.readStateProjection(state => buildWorkflowPerformance(state, { days, now, benchmarkUrls: urls, rework })));
+  response.json(await runtime.readStateProjection(state => buildWorkflowPerformance(state, { days, now, benchmarkUrls: urls, rework, readArtifact: runtime.readArtifact })));
 }));
 }
 

@@ -101,7 +101,7 @@ app.post(
     }
     const mode = requestedMode as Exclude<AssignmentMode, "watch" | "skip"> | undefined;
     const force = request.body?.force === true;
-    await runtime.updateState((state) => retainStoryForWriting(state, storyId));
+    await runtime.updateState((state) => retainStoryForWriting(state, storyId, runtime.readArtifact));
     const database = await runtime.getLocalDatabase();
     const assetRevision = createHash("sha256")
       .update(JSON.stringify(story.images.map((image) => [

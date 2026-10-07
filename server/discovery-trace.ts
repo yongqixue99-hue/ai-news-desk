@@ -1,3 +1,4 @@
+import { artifactFromRun, type RunArtifactReader } from "./run-artifacts.js";
 import { hasOfficialUpdateAnchor } from "./official-update-url.js";
 import { buildStories, buildTodayView } from "./story-desk.js";
 import type { WorkflowState } from "./types.js";
@@ -15,22 +16,22 @@ export const discoveryStageLabels: Record<string, string> = {
   "duplicate-url": "相同原文链接已去重", "score-or-topic": "未达到选题评分或主题门槛", "merged-event": "按标题合并至另一候选，可核对是否误合并",
   "candidate-limit": "已采到，超出本轮候选上限", candidate: "已进入候选", unknown: "历史路径未记录",
 };
-export const captureRecommendationSnapshot = (state: WorkflowState, computedAt: string) => {
-  const today = buildTodayView(state, computedAt);
+export const captureRecommendationSnapshot = (state: WorkflowState, computedAt: string, readArtifact?: RunArtifactReader) => {
+  const today = buildTodayView(state, computedAt, readArtifact);
   return { computedAt, stories: [...today.mustReads, ...today.secondary, ...(today.interesting ?? [])].map(story => ({ storyId: story.id, signals: story.signals.map(({ runId, candidateId, url }) => ({ runId, candidateId, url })) })) };
 };
 /** Read-only, never fetches the submitted URL or invokes a model. */
-export const traceDiscoveryUrl = (state: WorkflowState, url: string, now = new Date().toISOString()) => {
+export const traceDiscoveryUrl = (state: WorkflowState, url: string, now = new Date().toISOString(), readArtifact?: RunArtifactReader) => {
   const key = keyFor(url);
   const same = (other: string) => { try { return keyFor(other) === key; } catch { return false; } };
   const observations = state.runs.flatMap(run => {
-    const saved = (run.discoveryTrace ?? []).filter(entry => same(entry.url));
+    const saved = (artifactFromRun(run, "discoveryTrace", readArtifact) ?? []).filter(entry => same(entry.url));
     const entries = saved.length ? saved : run.candidates.filter(candidate => same(candidate.url) || same(candidate.canonicalUrl || candidate.url)).map(candidate => ({ rawId: candidate.rawId, url: candidate.url, title: candidate.title, publishedAt: candidate.publicationDateKnown === false ? undefined : candidate.publishedAt, observedAt: candidate.fetchedAt, dateBasis: candidate.publicationEvidence?.basis, stage: "candidate", candidateId: candidate.id }));
     return entries.map(entry => ({ ...entry, runId: run.id, runAt: run.collectedAt ?? run.createdAt, label: discoveryStageLabels[entry.stage] ?? entry.stage }));
   }).sort((a,b) => Date.parse(a.runAt) - Date.parse(b.runAt));
-  const story = buildStories(state, now).find(story => story.signals.some(signal => same(signal.url))
+  const story = buildStories(state, now, readArtifact).find(story => story.signals.some(signal => same(signal.url))
     || observations.some(entry => story.signals.some(signal => signal.runId === entry.runId && signal.candidateId === entry.candidateId)));
-  const today = buildTodayView(state, now);
+  const today = buildTodayView(state, now, readArtifact);
   const visible = [...today.mustReads, ...today.secondary, ...(today.interesting ?? [])].some(item => item.id === story?.id);
   const displayReason = !story ? observations.length ? "尚未形成可展示事件" : "本地记录中未找到该链接；旧运行未保存逐条路径，不能断言从未采到"
     : visible ? "已进入当前推荐" : !story.assignment.canDraft ? `材料不足：${story.assignment.reason}`
