@@ -271,6 +271,7 @@ import { registerWorkflowHttpRoutes1, registerWorkflowHttpRoutes2, registerWorkf
 import { registerDataHttpRoutes1 } from "./data-http-routes.js";
 import { registerSettingsHttpRoutes1, registerSettingsHttpRoutes2, registerSettingsHttpRoutes3 } from "./settings-http-routes.js";
 import { registerMediaHttpRoutes1, registerMediaHttpRoutes2, registerMediaHttpRoutes3, registerMediaHttpRoutes4 } from "./media-http-routes.js";
+import { registerAggregationTitleTranslationRoutes } from "./title-translation-http-routes.js";
 
 const app = express();
 const zhihuHotlist = createZhihuHotlist({
@@ -364,6 +365,7 @@ registerWorkflowHttpRoutes2(app, httpRouteRuntime);
 registerSourceHttpRoutes1(app, httpRouteRuntime);
 
 registerStoryHttpRoutes2(app, httpRouteRuntime);
+registerAggregationTitleTranslationRoutes(app, httpRouteRuntime);
 
 const backfillTodayTitles = createTodayTitleBackfill({
   readView: readTodayView,

@@ -1,6 +1,7 @@
 import type { PrimaryDeliveryStatus, wechatPreflight } from "../server/primary-delivery.js";
 import type { CommunityView } from "../server/community-view.js";
 import type { AggregationView } from "../server/aggregation-desk.js";
+import type { AggregationTitleTranslation, TitleTranslationResult, TitleTranslationTarget } from "../server/title-translation-types.js";
 import type { DraftOverview } from "../server/draft-overview.js";
 import type { CommunityPlatform, TopicFeedView } from "../server/topic-feeds.js";
 import type { HomeLayout } from "../server/home-layout.js";
@@ -325,6 +326,8 @@ export const api = {
   saveHomeLayout: (layout: HomeLayout) => request<HomeLayout>("/api/home-layout", { method: "PATCH", body: JSON.stringify(layout) }),
   retryPackageJob: (id: string) => request<{ job: ProductJob; reused: boolean }>(`/api/product/jobs/${encodeURIComponent(id)}/retry`, { method: "POST", body: "{}" }),
   aggregations: () => request<AggregationView>("/api/aggregations"),
+  aggregationTitleTranslations: (signal?: AbortSignal) => request<AggregationTitleTranslation[]>("/api/aggregations/title-translations", { signal }),
+  translateAggregationTitles: (items: TitleTranslationTarget[]) => request<TitleTranslationResult>("/api/aggregations/title-translations", { method: "POST", body: JSON.stringify({ items }) }),
   refreshAggregations: () => request<{run: WorkflowRun}>("/api/aggregations/refresh", {method:"POST",body:"{}"}),
   retainAggregation: (id: string) => request<{runId:string;candidateId:string}>(`/api/aggregations/${encodeURIComponent(id)}/select`, {method:"POST",body:"{}"}),
   topicFeed: (platform: CommunityPlatform) => request<TopicFeedView>(`/api/topic-feeds/${platform}`),

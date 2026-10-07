@@ -12,6 +12,9 @@ import { buildAggregationView } from "../../server/aggregation-desk.js";
 import { buildDraftOverview } from "../../server/draft-overview.js";
 import { discoveryFixture } from "../../tests/fixtures/discovery.js";
 import type { Candidate, WorkflowRun } from "../../server/types.js";
+import type { AggregationEntry, AggregationView } from "../../server/aggregation-desk.js";
+import { createAggregationTitleTranslationDesk } from "../../server/aggregation-title-translations.js";
+import type { TitleTranslationRecord } from "../../server/title-translation-types.js";
 
 const now = process.env.AI_NEWS_DESK_PREVIEW_TIME || new Date().toISOString();
 let state = createDefaultState();
@@ -57,12 +60,29 @@ const responses: Record<string, unknown> = {
   "/api/shell": { notifications: state.notifications, notificationsMuted: false, activeRunCount: 0 }, "/api/product/jobs": jobs,
   "/api/intakes/reviews": [], "/api/home-news": today.mustReads,
   "/api/community": buildCommunityView(state, now), "/api/aggregations": buildAggregationView(state, Date.parse(now)),
+  "/api/aggregations/title-translations": [],
   "/api/x/status": { configured: false, paidEnabled: false, bearerTokenConfigured: false, sourceIds: [], mode: "disabled", detail: "隔离示例，不连接 X" },
   "/api/health": { ok: true, codex: { ok: true, detail: "隔离示例，无模型调用" }, publisher: { mode: "chrome-extension", ok: false, detail: "隔离示例，没有平台连接" }, horizon: { ok: true, detail: "隔离示例，采集已关闭" } },
   "/api/publisher/status": { mode: "chrome-extension", ok: false, detail: "隔离示例，没有平台连接" },
   "/api/data/storage": { stateBytes: 0, databaseBytes: 0, legacyStateBytes: 0, mediaBytes: 0, materialBytes: 0, jobBytes: 0, backupBytes: 0, totalBytes: 0 },
   "/api/delivery/social/status": { connected: false, settings: { enabled: false, extensionId: "", tokenConfigured: false }, accounts: [] },
 };
+const translationPreview = process.env.AI_NEWS_DESK_PREVIEW_TRANSLATIONS === "1";
+const translationCache = new Map<string, TitleTranslationRecord>(), translationMetrics = { calls: 0, keys: [] as string[] };
+const translationEntries: AggregationEntry[] = Array.from({ length: 70 }, (_, index) => ({
+  id: `translation-${index}`, title: `Example model ${index}`, url: `https://example.com/model/${index}`, summary: "隔离示例材料，保留原始英文标题与顺序。", publishedAt: now, observedAt: now,
+  kind: index < 60 ? "news" : "digest", selected: false, platforms: [{ id: index < 40 ? "preview-a" : "preview-b", name: index < 40 ? "隔离平台 A" : "隔离平台 B", url: `https://example.com/model/${index}` }],
+  native: { channel: index >= 30 && index < 50 ? "selected" : "feed", order: index + 1, checkedAt: now }, ranking: { score: 70 - index, heat: 0, eligible: true, reasons: ["虚构示例"] },
+}));
+const translationView: AggregationView = { entries: translationEntries, recommended: translationEntries.slice(0, 60), platformEntries: { "preview-a": translationEntries.slice(0, 40), "preview-b": translationEntries.slice(40) },
+  platforms: ["A", "B"].map(name => ({ id: `preview-${name.toLowerCase()}`, name: `隔离平台 ${name}`, homepage: `https://example.com/${name}`, status: "ready", checkedAt: now })), active: false };
+const translationDesk = createAggregationTitleTranslationDesk({
+  readView: async () => structuredClone(translationView), readCache: async keys => keys.flatMap(key => translationCache.has(key) ? [{ ...translationCache.get(key)! }] : []),
+  writeCache: async records => { records.forEach(record => translationCache.set(record.key, { ...record })); },
+  provider: async () => ({ ...state.aiSettings.providers[0]!, model: "synthetic-analysis-model" }),
+  generate: async input => { translationMetrics.calls++; translationMetrics.keys.push(...input.items.map(item => item.key)); return { output: { items: input.items.map(item => ({ key: item.key, titleZh: `隔离示例：模型 ${item.title.match(/\d+$/u)?.[0]} 更新` })) }, model: input.provider.model, translatedAt: now }; },
+});
+if (translationPreview) { responses["/api/aggregations"] = translationView; responses["/api/preview/title-translation-metrics"] = translationMetrics; }
 if (full) {
   const communityStory = structuredClone(full.story);
   communityStory.explanation.status = "ready";
@@ -81,7 +101,13 @@ if (full) {
   responses[`/api/drafts/${full.draft.id}/agent/threads`] = [];
 }
 const app = express();
-app.use("/api", (req, res, next) => {
+app.use(express.json());
+app.use("/api", async (req, res, next) => {
+  if (translationPreview && req.path === "/aggregations/title-translations" && (req.method === "GET" || req.method === "POST")) {
+    try { res.json(req.method === "GET" ? await translationDesk.cached() : await translationDesk.translate(req.body?.items)); }
+    catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "隔离示例翻译失败" }); }
+    return;
+  }
   // The reader records an opened event; this fixture acknowledges it without storing anything.
   if (full && req.method === "POST" && /^\/stories\/[^/]+\/events$/u.test(req.path)) { res.json({ event: { id: "fixture-event", createdAt: now } }); return; }
   if (req.method !== "GET") { res.status(405).json({ error: "隔离截图仅允许读取示例数据" }); return; }
