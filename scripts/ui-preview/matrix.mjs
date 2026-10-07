@@ -7,10 +7,14 @@ import path from "node:path";
 import { chromium } from "playwright-core";
 import sharp from "sharp";
 import { capturePreview } from "./shot.mjs";
+import { verifyCssBuildPair } from "./css-pair.mjs";
 
 const [destination, baseline] = process.argv.slice(2);
 if (!destination) throw new Error("matrix.mjs <output directory> [before directory]");
 await mkdir(destination, { recursive: true });
+const cssPair = process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST
+  ? await verifyCssBuildPair(path.resolve(process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST), path.resolve(process.env.AI_NEWS_DESK_DIST_ROOT || ".artifacts/verify/dist"))
+  : undefined;
 const instant = "2026-10-07T12:00:00.000Z";
 const child = spawn(process.execPath, ["--import", "tsx", "scripts/ui-preview/fixture.ts"], { env: { ...process.env, AI_NEWS_DESK_PREVIEW_MATRIX: "1", AI_NEWS_DESK_PREVIEW_TIME: instant }, stdio: ["ignore", "pipe", "pipe"] });
 let output = "";
@@ -19,20 +23,14 @@ const origin = await new Promise((resolve, reject) => {
   child.stderr.on("data", chunk => { output += chunk; });
   child.once("exit", code => reject(new Error(`Fixture exited ${code}: ${output}`)));
 });
-// A paired run keeps both CSS versions in one renderer process. SVG curve
-// rasterization otherwise varies between fresh Chrome processes on this host.
-let beforeChild;
-let beforeOrigin;
+// Same-origin paired navigation also prevents Chromium from selecting another
+// renderer for the second port. Before assets are still served from their own
+// untouched build, and comparison remains strict on every raw pixel.
+let beforeLocation;
 if (process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST) {
   if (!baseline) throw new Error("Paired comparison requires a before screenshot directory");
   await mkdir(baseline, { recursive: true });
-  beforeChild = spawn(process.execPath, ["--import", "tsx", "scripts/ui-preview/fixture.ts"], { env: { ...process.env, AI_NEWS_DESK_PREVIEW_MATRIX: "1", AI_NEWS_DESK_PREVIEW_TIME: instant, AI_NEWS_DESK_DIST_ROOT: path.resolve(process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST) }, stdio: ["ignore", "pipe", "pipe"] });
-  let beforeOutput = "";
-  beforeOrigin = await new Promise((resolve, reject) => {
-    beforeChild.stdout.on("data", chunk => { beforeOutput += chunk; const match = beforeOutput.match(/http:\/\/127\.0\.0\.1:\d+/u); if (match) resolve(match[0]); });
-    beforeChild.stderr.on("data", chunk => { beforeOutput += chunk; });
-    beforeChild.once("exit", code => reject(new Error(`Before fixture exited ${code}: ${beforeOutput}`)));
-  });
+  beforeLocation = `${origin}/__before/`;
 }
 const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--disable-gpu", "--force-color-profile=srgb", "--disable-skia-runtime-opts", "--disable-lcd-text", "--disable-font-subpixel-positioning"] });
 const pages = ["today", "aggregations", "community", "workbench", "drafts", "sources", "editorial-system", "runs", "schedule", "ai-settings"];
@@ -49,7 +47,10 @@ const measurements = [];
 try {
   for (const width of [1440, 390]) {
     for (const item of cases) {
-      const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, reducedMotion: "reduce", locale: "zh-CN", timezoneId: "Asia/Shanghai" });
+      // 3x preserves the requested CSS viewport and compares nine times as many
+      // pixels. Integer icon viewports / 24 now have an exact binary scale,
+      // avoiding the observed fractional SVG stroke rasterization variation.
+      const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, deviceScaleFactor: 3, reducedMotion: "reduce", locale: "zh-CN", timezoneId: "Asia/Shanghai" });
       await context.addInitScript(value => { const NativeDate = Date; class FixedDate extends NativeDate { constructor(...args) { super(...(args.length ? args : [value])); } static now() { return NativeDate.parse(value); } } globalThis.Date = FixedDate; }, instant);
       const page = await context.newPage();
       const errors = [];
@@ -57,9 +58,9 @@ try {
       page.on("pageerror", error => errors.push(String(error)));
       page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
       // No external origin can be read, including an accidental platform request.
-      await page.route("**/*", route => [origin, beforeOrigin].includes(new URL(route.request().url()).origin) ? route.continue() : route.abort());
-      if (beforeOrigin) {
-        await page.goto(`${beforeOrigin}/#${item.hash}`, { waitUntil: "networkidle" });
+      await page.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+      if (beforeLocation) {
+        await page.goto(`${beforeLocation}#${item.hash}`, { waitUntil: "networkidle" });
         await page.locator(".page, .aggregation-page").first().waitFor();
         if (item.action) await item.action(page);
         await page.waitForTimeout(500);
@@ -83,12 +84,12 @@ try {
         assert.deepEqual(after.info, before.info, `${name}: dimensions changed`);
         assert.equal(Buffer.compare(after.data, before.data), 0, `${name}: pixels changed`);
       }
-      measurements.push({ name, overflow, consoleErrors: errors.length, pixelDifference: baseline ? 0 : undefined });
+      measurements.push({ name, deviceScaleFactor: 3, cssOnlyBuild: Boolean(cssPair), overflow, consoleErrors: errors.length, pixelDifference: baseline ? 0 : undefined });
       await context.close();
     }
   }
   await writeFile(path.join(destination, "matrix.json"), JSON.stringify(measurements, null, 2));
   console.log(JSON.stringify({ screenshots: measurements.length, compared: baseline ? measurements.length : 0, pixelDifferences: baseline ? 0 : undefined, consoleErrors: 0, measurements }));
 } finally {
-  await browser.close(); child.kill("SIGTERM"); beforeChild?.kill("SIGTERM");
+  await browser.close(); child.kill("SIGTERM");
 }
