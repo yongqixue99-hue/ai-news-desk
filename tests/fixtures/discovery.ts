@@ -5,21 +5,20 @@ import type { ArticleDraft } from "../../server/types.js";
 import type { ContentPackage } from "../../server/product-types.js";
 
 /** Original, isolated UI fixtures. Never import into a user's workflow. */
-export function discoveryFixture() {
+export function discoveryFixture(now = new Date().toISOString()) {
   const state = createDefaultState();
   state.settings.scheduleEnabled = false;
   state.settings.officialMonitorEnabled = false;
   state.sources.forEach((source) => { source.enabled = false; });
-  const now = new Date().toISOString();
   const titles = ["隔离示例：Acme 开放本地模型，先看使用条件", "隔离示例：一款能保留来源的 AI 阅读工具", "隔离示例：长型号 ModelWithAVeryLongUnbrokenName2026Preview 在本地运行的限制", "隔离示例：开发者记录了一次失败的自动化实验", "隔离示例：研究团队公开评测方法与适用范围", "隔离示例：一份保留代码与步骤的入门指南"];
   const candidates = titles.map((title, i) => {
-    const candidate = rawItemToCandidate({ id: `ui-${i}`, title: `Acme releases ${["LocalModel", "Reader", "LongModel", "Runner", "Benchmark", "Guide"][i]}`, url: `https://example.com/ui-${i}`, published_at: new Date(Date.now() - (i + 1) * 3_600_000).toISOString(), fetched_at: now, content: "Acme released a local model for personal evaluation. Commercial use requires a separate agreement. This is an original UI fixture, not live news.", source_type: "rss", metadata: { feed_name: "隔离示例来源", source_role: "official" } }, 48, ["ai"]);
+    const candidate = rawItemToCandidate({ id: `ui-${i}`, title: `Acme releases ${["LocalModel", "Reader", "LongModel", "Runner", "Benchmark", "Guide"][i]}`, url: `https://example.com/ui-${i}`, published_at: new Date(Date.parse(now) - (i + 1) * 3_600_000).toISOString(), fetched_at: now, content: "Acme released a local model for personal evaluation. Commercial use requires a separate agreement. This is an original UI fixture, not live news.", source_type: "rss", metadata: { feed_name: "隔离示例来源", source_role: "official" } }, 48, ["ai"]);
     candidate.score = 15; candidate.recommendationScore = 90 - i;
     candidate.briefing = { titleZh: title, summaryZh: "开放范围是个人评估，商业使用仍需单独约定。这里只展示隔离测试材料。", basis: i === 2 ? "excerpt" : "full-source", generatedAt: now, providerId: "fixture" };
     return candidate;
   });
   state.runs = [{ id: "ui-fixture", origin: "link-intake", createdAt: now, updatedAt: now, collectedAt: now, status: "ready", stage: "隔离测试数据", windowHours: 48, sourceIds: [], scheduled: false, rawCount: candidates.length, candidates, logs: [] }];
-  const today = buildTodayView(state);
+  const today = buildTodayView(state, now);
   const stories = [...today.mustReads, ...today.secondary, ...today.watching, ...(today.interesting ?? [])].filter((story, i, all) => all.findIndex((s) => s.id === story.id) === i);
   if (!stories.length) throw new Error("UI fixtures did not produce Stories");
   today.mustReads = stories.slice(0, 3); today.secondary = stories.slice(3); today.interesting = []; today.watching = []; today.releaseHighlights = []; today.backlog = [];
