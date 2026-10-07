@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import path from "node:path";
 import test from "node:test";
 import { chromium } from "playwright-core";
 import { findChromeExecutable } from "../../server/chrome-launch.js";
 
 test("mobile task prompt leaves topic actions and navigation unobstructed", { timeout: 60_000 }, async () => {
   const child = spawn(process.execPath, ["--import", "tsx", "scripts/ui-preview/fixture.ts"], {
-    env: { ...process.env, AI_NEWS_DESK_PREVIEW_JOBS: "1" }, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32",
+    env: { ...process.env, AI_NEWS_DESK_PREVIEW_JOBS: "1", AI_NEWS_DESK_DIST_ROOT: process.env.AI_NEWS_DESK_DIST_ROOT || path.resolve("dist") },
+    stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32",
   });
   let output = "";
   child.stderr.on("data", data => { output += String(data); });
