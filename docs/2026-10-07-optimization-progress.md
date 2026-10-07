@@ -8,7 +8,7 @@
 | --- | --- | --- | --- | --- |
 | A1 Codex 健康检查 | 已合并 | [#11](https://github.com/yongqixue99-hue/ai-news-desk/pull/11) | 旧 CLI 0.134：healthy → config error；桌面 CLI 0.162.0-alpha.2：23/23 开关通过 | 四项验证及两个 CI 全过；未上线 |
 | A2 中止与休眠采集 | 已合并 | [#12](https://github.com/yongqixue99-hue/ai-news-desk/pull/12) | 中止后失败次数 +1 → +0；模拟休眠事件 0 → 1 | 两次真实跨休眠采集待观察；未上线 |
-| A3 交付休眠超时 | 进行中 | — | 20 分钟跳变：unknown → sending，随后 verified | 登录期限仍 10 分钟；未上线 |
+| A3 交付休眠超时 | 进行中 | [#13](https://github.com/yongqixue99-hue/ai-news-desk/pull/13) | 20 分钟跳变：unknown → sending，随后 verified | 登录期限仍 10 分钟；未上线 |
 | B1 启动数据瘦身 | 未开始 | — | 计划值 16.1 MB，待复测 | 不改存储 |
 | B2 选题行信息 | 未开始 | — | 待测 | 代码可合并，效果待用户看后上线 |
 | B3 后台中文标题 | 未开始 | — | 计划值 7 条约 81 秒，待复测 | 保持现有分析模型；不做真实模型调用 |
