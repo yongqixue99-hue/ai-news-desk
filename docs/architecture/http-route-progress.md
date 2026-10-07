@@ -9,8 +9,8 @@
 | package | 已合并 | [#37](https://github.com/yongqixue99-hue/ai-news-desk/pull/37) | 6 | 121261→115083 | 原文6/6完全一致；单测1378、编辑22/22、构建、E2E13全过 |
 | editorial | 已合并 | [#38](https://github.com/yongqixue99-hue/ai-news-desk/pull/38) | 7 | 115083→110655 | 原文7/7完全一致；单测1380、编辑22/22、构建、E2E13全过 |
 | draft | 已合并 | [#39](https://github.com/yongqixue99-hue/ai-news-desk/pull/39) | 13 | 110655→94156 | 原文13/13完全一致；单测1382、编辑22/22、构建、E2E13全过 |
-| delivery | 进行中 | [#40](https://github.com/yongqixue99-hue/ai-news-desk/pull/40) | 14 | 94156→79607 | 原文14/14完全一致；单测1384、编辑22/22、构建、E2E13全过 |
-| learning | 未开始 | — | 18 | — | — |
+| delivery | 已合并 | [#40](https://github.com/yongqixue99-hue/ai-news-desk/pull/40) | 14 | 94156→79607 | 原文14/14完全一致；单测1384、编辑22/22、构建、E2E13全过 |
+| learning | 进行中 | [#41](https://github.com/yongqixue99-hue/ai-news-desk/pull/41) | 18 | 79607→68690 | 原文18/18完全一致；单测1386、编辑22/22、构建、E2E13全过 |
 | workflow | 未开始 | — | 15 | — | — |
 | data | 未开始 | — | 6 | — | — |
 | settings | 未开始 | — | 8 | — | — |
