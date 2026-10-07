@@ -25,6 +25,49 @@ const fixture = () => {
     advance: (ms: number) => { clock += ms; } };
 };
 
+/** Keep polling during active time; one large jump represents suspension. */
+const elapseWithTicks = async (f: ReturnType<typeof fixture>, duration: number) => {
+  for (let elapsed = 0; elapsed < duration;) {
+    const step = Math.min(20_000, duration - elapsed);
+    f.advance(step); elapsed += step;
+    await f.desk.tick();
+  }
+};
+
+test("a twenty-minute suspension preserves an in-flight delivery until its active timeout", async () => {
+  const f = fixture();
+  let release!: () => void, signal: AbortSignal | undefined;
+  const slow = new Promise<void>(resolve => { release = resolve; });
+  f.drivers.wechat.deliver = async (_draft, _state, _target, cancellation) => {
+    signal = cancellation; f.calls.push("wechat"); await slow;
+    return { status: "verified", detail: "已核对" };
+  };
+  await f.desk.start(f.draft.id, ["wechat"], f.draft.updatedAt);
+  const first = f.desk.tick();
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    f.advance(20 * 60_000);
+    await f.desk.tick();
+    assert.equal(f.draft.deliveryBatches![0].targets[0].status, "sending");
+    assert.equal(signal?.aborted, false);
+    assert.deepEqual(f.calls, ["wechat"]);
+  } finally { release(); await first; }
+  assert.equal(f.draft.deliveryBatches![0].targets[0].status, "verified");
+});
+
+test("suspension does not extend the ten-minute login expiry", async () => {
+  const f = fixture();
+  f.drivers.zhihu.inspect = async () => ({ ready: false, status: "waiting-login", detail: "等待登录" });
+  const batch = await f.desk.start(f.draft.id, ["zhihu"], f.draft.updatedAt);
+  await f.desk.tick();
+  f.advance(20 * 60_000);
+  await f.desk.tick();
+  assert.equal(f.draft.deliveryBatches![0].expiresAt, batch.expiresAt);
+  assert.equal(f.draft.deliveryBatches![0].targets[0].status, "failed");
+  assert.match(f.draft.deliveryBatches![0].targets[0].detail, /超过 10 分钟/);
+  assert.deepEqual(f.calls, []);
+});
+
 test("a slow platform does not delay another platform's login resumption", async () => {
   const f = fixture();
   let release!: () => void, signedIn = false, firstFinished = false;
@@ -55,8 +98,7 @@ test("sending timeout stays unknown and a late result cannot silently revive it"
   const first = f.desk.tick();
   try {
     await new Promise<void>(resolve => setImmediate(resolve));
-    f.advance(10 * 60_000);
-    await f.desk.tick();
+    await elapseWithTicks(f, 10 * 60_000);
     assert.equal(f.draft.deliveryBatches![0].targets[0].status, "unknown");
     assert.equal(signal?.aborted, true);
     await assert.rejects(f.desk.start(f.draft.id, ["wechat"], f.draft.updatedAt, batch.id), /结果未知/);
@@ -90,7 +132,9 @@ test("a timeout receipt retries local persistence after a transient storage fail
   await f.desk.start(f.draft.id, ["wechat"], f.draft.updatedAt);
   const first = f.desk.tick();
   try {
-    await new Promise<void>(resolve => setImmediate(resolve)); f.advance(10 * 60_000); fail = true;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await elapseWithTicks(f, 10 * 60_000 - 20_000);
+    f.advance(20_000); fail = true;
     await assert.rejects(f.desk.tick(), /storage busy/);
     await f.desk.tick();
     assert.equal(f.draft.deliveryBatches![0].targets[0].status, "unknown");
