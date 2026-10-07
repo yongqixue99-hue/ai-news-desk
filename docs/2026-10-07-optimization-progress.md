@@ -20,7 +20,7 @@
 | D1 诊断存储分离 | 未开始 | — | 计划值 140–240 ms / runs 17.4 MB，待复测 | 仅副本；完整 PR 等待决定，不合并 |
 | D2 旧样式清理 | 已合并 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27)、[#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28)、[#29](https://github.com/yongqixue99-hue/ai-news-desk/pull/29)、[#30](https://github.com/yongqixue99-hue/ai-news-desk/pull/30)、[#31](https://github.com/yongqixue99-hue/ai-news-desk/pull/31)、[#32](https://github.com/yongqixue99-hue/ai-news-desk/pull/32)、[#33](https://github.com/yongqixue99-hue/ai-news-desk/pull/33) | 构建CSS457709→431197 B（-5.79%）；删除288条全无引用规则 | 15/15独立PR已合并；每批四项/两个CI全过、48/48像素一致；未上线 |
 | D3 文档整理 | 已合并 | [#34](https://github.com/yongqixue99-hue/ai-news-desk/pull/34) | README331→283行；启动206→9行；交接761→52行；103块/119210 B原文完整 | 四项及最终verify/windows-desktop全过；原文完整；未上线 |
-| D4 大文件拆分 | 进行中 | [#35](https://github.com/yongqixue99-hue/ai-news-desk/pull/35)、[#36](https://github.com/yongqixue99-hue/ai-news-desk/pull/36)、[#37](https://github.com/yongqixue99-hue/ai-news-desk/pull/37)、[#38](https://github.com/yongqixue99-hue/ai-news-desk/pull/38)、[#39](https://github.com/yongqixue99-hue/ai-news-desk/pull/39) | index149583→94156 B；内联API126→70；draft原文13/13一致 | 4/11领域已合并；本批等CI；前端另审；未上线 |
+| D4 大文件拆分 | 进行中 | [#35](https://github.com/yongqixue99-hue/ai-news-desk/pull/35)、[#36](https://github.com/yongqixue99-hue/ai-news-desk/pull/36)、[#37](https://github.com/yongqixue99-hue/ai-news-desk/pull/37)、[#38](https://github.com/yongqixue99-hue/ai-news-desk/pull/38)、[#39](https://github.com/yongqixue99-hue/ai-news-desk/pull/39) | index149583→79607 B；内联API126→56；delivery原文14/14一致 | 5/11领域已合并；本批等CI；前端另审；未上线 |
 
 ## 执行记录
 
@@ -237,3 +237,7 @@
 - D4 editorial PR #38 最终verify/windows-desktop全部成功，通过正常PR流程合并至07e8283；4/11领域完成，开始draft，未部署。
 
 - D4 draft领域：先失败回归后搬迁13个路由，依赖仅在原使用点接入，还原后逐段原文完全相同；126个原API及5个旧注册器顺序一致，注册无IO。index 110655→94156 B、剩70个内联API；四项单测1382/1382、编辑22/22、隔离构建、E2E13/13全过；等待最终CI，未上线。
+
+- D4 draft PR #39 最终verify/windows-desktop全部成功，通过正常PR流程合并至c5f6fe2；5/11领域完成，开始delivery，未部署。
+
+- D4 delivery领域：先失败回归后搬迁14个路由，依赖仅在原使用点接入，还原后逐段原文完全相同；126个原API及5个旧注册器顺序一致，注册无IO。index 94156→79607 B、剩56个内联API；四项单测1384/1384、编辑22/22、隔离构建、E2E13/13全过；等待最终CI，未上线。
