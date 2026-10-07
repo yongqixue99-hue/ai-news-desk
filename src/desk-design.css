@@ -23,8 +23,6 @@ button:disabled { cursor: not-allowed; }
 .brand-mark { border-width: 1px; background: var(--accent); color: #fffdf8; }
 .brand-mark.app-brand-mark { width: 36px; height: 36px; flex-basis: 36px; border: 0; background: transparent; color: var(--accent); }
 .app-brand-mark img { display: block; width: 100%; height: 100%; }
-.sidebar-profile strong { font-size: 12px; }
-.sidebar-profile small { font-size: 10px; }
 .sidebar-collapsed .nav-section-label { display: none; }
 .nav-item.active { border-color: transparent; background: var(--accent-soft); color: var(--accent-deep); box-shadow: none; }
 .nav-item:hover { background: #eeeee7; }
@@ -44,8 +42,6 @@ button:disabled { cursor: not-allowed; }
   .nav-item-sources { margin-top: 22px; }
   .sidebar-collapsed .nav-item-sources { margin-top: 16px; }
   .sidebar-footer { gap: 5px; }
-  .sidebar-profile { margin-top: 14px; padding-top: 15px; }
-  .sidebar-profile > span { border-radius: 6px; background: #e7e7dc; }
   .sidebar-toggle { width: 25px; flex-basis: 25px; }
   .sidebar-expanded .brand { padding-left: 4px; }
   .sidebar-expanded .brand > .brand-copy { display: flex; }
@@ -81,13 +77,6 @@ button:disabled { cursor: not-allowed; }
 .today-news-search-field svg { color: #82867a; }
 .today-news-search > button { min-height: 48px; border-radius: 6px; font-size: 12px; }
 .today-news-search > p { margin: 0 0 0 1px; font-size: 11px; line-height: 1.6; }
-.today-metrics { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 0; padding: 14px 0; border-block: 1px solid var(--line); }
-.today-metrics > div { display: flex; align-items: baseline; min-height: 0; gap: 7px; padding: 0 20px; border-right: 1px solid var(--line); }
-.today-metrics > div:first-child { padding-left: 0; }
-.today-metrics > div:last-child { padding-right: 0; border-right: 0; }
-.today-metrics svg { align-self: center; color: #8a8d80; width: 14px; height: 14px; }
-.today-metrics span { font-size: 11px; }
-.today-metrics strong { color: #42473c; font-family: var(--desk-sans); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .today-editorial-grid { display: grid; grid-template-columns: minmax(0, 1fr) 272px; align-items: start; gap: 32px; padding-top: 30px; }
 .today-reading-column { min-width: 0; }
 .today-section { margin-top: 32px; }
@@ -223,8 +212,6 @@ button:disabled { cursor: not-allowed; }
   .today-story h3 { font-size: 19px; }
   .today-story-image { min-height: 145px; }
   .desk-section-caption { display: none; }
-  .today-metrics > div { padding-inline: 12px; }
-  .today-metrics svg { display: none; }
   .desk-resume { padding-inline: 16px; }
   .desk-resume-all { width: calc(100% + 32px); margin-inline: -16px; padding-inline: 16px; }
   .desk-resume h2 { font-size: 21px; }
@@ -239,8 +226,6 @@ button:disabled { cursor: not-allowed; }
   .today-header { flex-direction: row; }
   .today-header-actions { width: auto; }
   .today-metrics > div:nth-child(n) { border-block: 0; border-right: 1px solid var(--line); padding-left: 14px; }
-  .today-metrics > div:first-child { padding-left: 0; }
-  .today-metrics > div:last-child { border-right: 0; }
 }
 
 @media (max-width: 720px) {
@@ -271,13 +256,9 @@ button:disabled { cursor: not-allowed; }
   .today-news-search-field input { min-width: 0; font-size: 12px; }
   .today-news-search-field > svg { width: 16px; }
   .today-news-search > p { grid-column: 1 / -1; font-size: 10px; }
-  .today-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 0; padding: 14px 0; }
   .today-metrics > div:nth-child(n) { padding: 0 10px; gap: 7px; border: 0; }
   .today-metrics > div:nth-child(3n+1) { padding-left: 0; }
   .today-metrics > div:nth-child(3n+2) { border-inline: 1px solid var(--line); }
-  .today-metrics svg { display: none; }
-  .today-metrics span { font-size: 10px; }
-  .today-metrics strong { font-size: 16px; }
   .today-editorial-grid { grid-template-areas: "resume" "reading" "watch" "source"; padding-top: 20px; gap: 24px; }
   .today-reading-column { grid-area: reading; }
   .today-section-heading { flex-direction: row; align-items: center; gap: 10px; }
