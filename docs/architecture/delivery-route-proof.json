@@ -1,0 +1,114 @@
+[
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/wechat/settings",
+    "bytes": 2438,
+    "sha256": "18f1572f70f04156264e98d5e77e5f2ac484eae7a68c3d00796227d072ffeedb"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/wechat/test",
+    "bytes": 543,
+    "sha256": "5c0dc41dd171c461e23bd1f586eb735aa3af1eee02168fe24d4ea7feef903172"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/drafts/:draftId/delivery-status",
+    "bytes": 609,
+    "sha256": "4c79c72414575d9de0655ccffaddf619313ffd6063e23481b1051ea3cf849d78"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/wechat-attempts/:attemptId/resolve",
+    "bytes": 676,
+    "sha256": "c8bd9af7af4be8124f6d80e4661f93e141fccbfc95a3584de3d207157f05dedc"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/wechat-sync",
+    "bytes": 1611,
+    "sha256": "53aab539eed419814a9eef3edda2bf82a771a9741932563661a9d50dc4ab740f"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/publisher/status",
+    "bytes": 184,
+    "sha256": "33c3c1cdb8b050551f86d88f3c1ea1261a4519a2d6664141b5c5740b99e75dec"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/drafts/:draftId/publisher-preflight",
+    "bytes": 540,
+    "sha256": "bea033044997d6375eb716c242ef441933d18a6081d95c1e2c4c19ffa1bac667"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/publisher/extension/bootstrap",
+    "bytes": 159,
+    "sha256": "5e50e877ef006f4e59162a30073f3c0b652f58e643406b6222441c62e67f4ff9"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/publisher/extension/heartbeat",
+    "bytes": 731,
+    "sha256": "b643c632d3ab02467845c992ce422bc3ccbeea5b92e96dead9184201493fa680"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/publisher/extension/jobs/next",
+    "bytes": 418,
+    "sha256": "48c47019ed2ed6f637f5015551934fb7c44c15f50d9accad34884eca1e4bf1f5"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/publisher/extension/jobs/:jobId/result",
+    "bytes": 859,
+    "sha256": "3ffa4e0980381fc2e9a09327f36247f758ce68a11fceec81f5063a8afab9c6bd"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/publisher/launch",
+    "bytes": 183,
+    "sha256": "be12602b89c89725b54c984777676fbd2917fb2fed2a187ed3c04d554091f0e2"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/fill",
+    "bytes": 712,
+    "sha256": "56616a8ad922a456da4dfc1881adaa9c1e1d51aa257a7b5ccf0dca8c2f965ebd"
+  },
+  {
+    "dependencyReferences": 4,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/publish-confirmed",
+    "bytes": 5230,
+    "sha256": "c09fed7d98f22bf6e8074bcaf06a16e186e7dcc0599e88c207724e224a056092"
+  }
+]
