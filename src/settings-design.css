@@ -1,0 +1,140 @@
+/* Scoped to the two settings pages; editorial pages keep their existing layout. */
+.settings-tab-panel[hidden], .provider-row[hidden], .platform-settings-content > [hidden] { display: none !important; }
+.ai-settings-page, .schedule-page { max-width: 1360px; margin-inline: auto; }
+.ai-settings-page .page-header, .schedule-page .page-header { padding-bottom: 20px; border-bottom: 0; }
+.settings-tabs { display: flex; align-items: center; gap: 30px; border-bottom: 1px solid var(--line); margin-bottom: 24px; overflow-x: auto; }
+.settings-tabs > button { flex-shrink: 0; min-height: 45px; padding: 0 1px; border: 0; border-bottom: 2px solid transparent; background: none; color: #77776f; font: inherit; font-size: 13px; cursor: pointer; }
+.settings-tabs > button[aria-selected=true] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.settings-tabs button:focus-visible, .platform-settings-nav button:focus-visible, .provider-filter button:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.settings-group-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 24px 0 14px; }
+.settings-group-heading h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.settings-group-heading > span { font-size: 12px; color: #82827a; }
+.settings-policy-disclosure { border-bottom: 1px solid var(--line); }
+.settings-policy-disclosure > summary { display: flex; align-items: center; gap: 9px; min-height: 42px; list-style: none; cursor: pointer; color: #64665e; font-size: 12px; }
+.settings-policy-disclosure > summary small { margin-left: auto; color: #838579; font-size: 11px; }
+.settings-policy-disclosure > summary svg { flex-shrink: 0; }
+.settings-policy-disclosure .spending-policy-panel { margin: 0 0 16px; border: 1px solid var(--line); border-radius: 6px; background: #fafaf7; }
+.settings-policy-disclosure .spending-policy-copy p { font-size: 12px; line-height: 1.8; }
+.settings-policy-disclosure .spending-policy-copy small, .settings-policy-disclosure .spending-policy-actions button { font-size: 11px; }
+.ai-settings-page .ai-role-overview { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-top: 0; }
+.ai-settings-page .ai-role-card { grid-template-columns: 23px minmax(0, 1fr); gap: 8px; min-height: 156px; border: 0; border-right: 1px solid var(--line); border-radius: 0; padding: 18px 14px; box-shadow: none; background: #fafaf8; }
+.ai-settings-page .ai-role-card:last-child { border-right: 0; }
+.ai-settings-page .ai-role-icon { width: 23px; height: 25px; border-radius: 0; background: none; color: #74766d; }
+.ai-settings-page .ai-role-copy > span { display: block; font-size: 13px; margin: 3px 0 8px; }
+.ai-settings-page .ai-role-copy > span small { display: block; margin-top: 7px; font-size: 10px; font-weight: 400; color: #85877c; line-height: 1.5; }
+.ai-settings-page .ai-role-copy select { width: 100%; min-width: 0; height: 33px; padding: 0 7px; border: 1px solid #dddfd6; border-radius: 4px; background: white; color: #36392f; font-size: 12px; }
+.ai-settings-page .ai-role-copy > small { font-size: 10px; margin-top: 6px; }
+.ai-settings-page .ai-role-health { font-size: 11px; margin-top: 7px; }
+.ai-settings-page .ai-settings-section { border: 0; border-radius: 0; margin-top: 26px; overflow: visible; }
+.ai-settings-page .ai-section-heading { background: none; grid-template-columns: 30px minmax(0, 1fr) auto; padding: 0 0 18px; min-height: 0; gap: 9px; }
+.ai-settings-page .ai-section-heading .section-icon { width: 26px; height: 26px; border: 0; border-radius: 0; background: none; color: #686e5e; }
+.ai-settings-page .ai-section-heading h2 { font-size: 16px; }
+.ai-settings-page .ai-section-heading p { font-size: 12px; line-height: 1.7; }
+.ai-settings-page .secure-note, .ai-settings-page .section-count { font-size: 11px; color: #828778; }
+.provider-filter { display: flex; gap: 6px; margin: 15px 0 10px; }
+.provider-filter button { border: 1px solid transparent; padding: 7px 11px; border-radius: 5px; background: transparent; color: #888c7d; font-size: 12px; cursor: pointer; }
+.provider-filter button[aria-pressed=true] { border-color: #e1e3da; background: #f6f7f2; color: #414939; }
+.ai-settings-page .provider-row { grid-template-columns: 36px minmax(160px, 1fr) minmax(155px, .8fr) 163px; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--line); background: none; box-shadow: none; }
+.ai-settings-page .provider-logo { width: 34px; height: 34px; border-radius: 6px; }
+.ai-settings-page .provider-copy strong { font-size: 14px; }
+.ai-settings-page .provider-copy > div { flex-wrap: wrap; gap: 5px; }
+.ai-settings-page .provider-copy p.provider-model-name { font-size: 11px; margin: 7px 0; overflow-wrap: anywhere; }
+.ai-settings-page .active-pill { font-size: 10px; border-radius: 3px; }
+.provider-more > summary { width: fit-content; font-size: 11px; color: #858b78; cursor: pointer; }
+.ai-settings-page .provider-more p, .ai-settings-page .provider-more small { font-size: 11px; line-height: 1.7; }
+.ai-settings-page .provider-capabilities span { font-size: 10px; }
+.ai-settings-page .provider-key-state { font-size: 11px; }
+.ai-settings-page .provider-health-readout { width: 100%; border-top: 0; padding-top: 0; }
+.ai-settings-page .provider-health-readout b { font-size: 11px; font-weight: 500; }
+.ai-settings-page .provider-health-readout small { font-size: 10px; }
+.ai-settings-page .provider-actions { flex-wrap: nowrap; gap: 7px; }
+.ai-settings-page .provider-actions button { min-width: 0; min-height: 33px; padding-inline: 9px; white-space: nowrap; font-size: 11px; }
+.ai-settings-page .writing-review-mode { padding: 17px 0; background: none; gap: 12px; }
+.ai-settings-page .writing-review-mode button { border-radius: 6px; }
+.ai-settings-page .writing-review-mode button strong, .ai-settings-page .skill-row strong { font-size: 13px; }
+.ai-settings-page .writing-review-mode button span, .ai-settings-page .skill-row p { font-size: 12px; line-height: 1.7; }
+.ai-settings-page .skill-row small { font-size: 11px; }
+.ai-settings-page .material-filter-tabs button { font-size: 12px; }
+.schedule-page .settings-section { border-radius: 6px; }
+.schedule-page .settings-section-heading > div { min-width: 0; flex: 1; }
+.schedule-page .settings-section-heading h2 { font-size: 16px; }
+.schedule-page .settings-section-heading p { font-size: 12px; line-height: 1.8; }
+.schedule-page .settings-section-heading > .switch { flex-shrink: 0; }
+.automation-summary { display: grid; grid-template-columns: 1fr 1.2fr 1.2fr; gap: 25px; padding: 24px; background: #f8f8f5; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 26px; }
+.automation-summary > div { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
+.automation-summary > div + div { padding-left: 25px; border-left: 1px solid #e1e4d9; }
+.automation-summary span { color: #828777; font-size: 12px; }
+.automation-summary strong { font-size: 16px; font-weight: 550; line-height: 1.6; }
+.automation-summary small, .automation-summary .text-button { color: #8a8e7f; font-size: 11px; }
+.automation-plan-layout { display: grid; grid-template-columns: minmax(0, 1fr) 245px; gap: 30px; }
+.automation-plans { display: flex; flex-direction: column; gap: 17px; }
+.schedule-page .automation-plans .settings-section { padding: 22px; }
+.increment-controls { display: flex; gap: 12px; align-items: center; margin-top: 24px; font-size: 12px; }
+.increment-controls label { color: #818675; }
+.increment-controls select { border: 1px solid var(--line); border-radius: 4px; height: 35px; min-width: 120px; padding: 0 10px; background: white; font-size: 12px; }
+.increment-controls a { margin-left: auto; color: #777f68; display: flex; align-items: center; gap: 5px; text-decoration: none; font-size: 11px; }
+.increment-controls a svg { transform: rotate(-90deg); }
+.increment-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; border-top: 1px solid var(--line); padding-top: 13px; font-size: 11px; color: #868d77; }
+.increment-foot small { margin-left: auto; font-size: 10px; }
+.schedule-page .automation-plans .form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 22px; }
+.schedule-page .form-grid label { min-width: 0; }
+.schedule-page .form-grid label > span { font-size: 11px; }
+.schedule-page .form-grid input, .schedule-page .form-grid select { min-width: 0; width: 100%; font-size: 12px; height: 36px; }
+.schedule-page .form-grid small { font-size: 10px; line-height: 1.7; }
+.schedule-catchup { display: flex; gap: 7px; align-items: center; font-size: 11px; color: #879077; margin: 17px 0; line-height: 1.7; }
+.schedule-catchup svg { flex-shrink: 0; }
+.schedule-advanced { border-top: 1px solid var(--line); padding-top: 15px; }
+.schedule-advanced > summary { display: flex; justify-content: space-between; align-items: center; list-style: none; cursor: pointer; font-size: 12px; color: #737d65; }
+.schedule-advanced .setting-check-row { margin-top: 17px; }
+.technical-catalog-note { display: flex; align-items: center; gap: 11px; color: #77816b; padding: 10px 4px 18px; border-bottom: 1px solid var(--line); }
+.technical-catalog-note span { flex: 1; display: grid; gap: 6px; }
+.technical-catalog-note strong { font-size: 12px; font-weight: 500; }.technical-catalog-note small { font-size: 11px; color: #8f9782; line-height: 1.7; }.technical-catalog-note b { font-size: 10px; font-weight: 400; }
+.automation-activity { border-left: 1px solid var(--line); padding-left: 24px; }
+.automation-activity .settings-group-heading { margin-top: 0; }.automation-activity h2 { font-size: 14px; }.automation-activity .text-button { font-size: 11px; }
+.automation-activity ol { list-style: none; padding: 0; margin: 22px 0; }
+.automation-activity li { position: relative; border-left: 1px solid var(--line); padding: 0 0 25px 15px; }
+.automation-activity li:before { position: absolute; content: ""; height: 5px; width: 5px; left: -3px; top: 5px; border-radius: 50%; background: #87977a; }
+.automation-activity li.failed:before { background: var(--accent); }.automation-activity li.failed p { color: var(--accent); }
+.automation-activity time { display: block; font-size: 10px; color: #8a937e; margin-bottom: 9px; }
+.automation-activity strong { font-size: 12px; font-weight: 500; }.automation-activity p { font-size: 11px; line-height: 1.8; color: #8a947c; margin: 7px 0 0; overflow-wrap: anywhere; }
+.automation-activity .settings-empty-note { margin-top: 22px; font-size: 12px; line-height: 1.9; }
+.automation-boundary { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 20px; color: #8a937d; }
+.automation-boundary p { font-size: 11px; }
+.platform-settings-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 30px; }
+.platform-settings-nav { display: flex; flex-direction: column; gap: 7px; align-self: start; border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
+.platform-settings-nav button { display: flex; align-items: center; gap: 12px; text-align: left; padding: 15px 11px; border: 0; border-radius: 4px; background: none; color: #6a7460; cursor: pointer; }
+.platform-settings-nav button[aria-pressed=true] { background: var(--accent-soft); color: var(--accent); }
+.platform-settings-nav button > svg { flex-shrink: 0; }.platform-settings-nav button span { font-size: 13px; }.platform-settings-nav button small { display: block; color: #8b937e; font-size: 10px; margin-top: 6px; line-height: 1.6; }
+.platform-settings-content { min-width: 0; }.schedule-page .platform-settings-content .settings-section { border: 0; padding: 0; margin-top: 0; background: none; }
+.schedule-page .wechat-connection-layout { grid-template-columns: 1fr; gap: 22px; }.schedule-page .wechat-fields { grid-template-columns: 1fr 1fr; gap: 18px; }.schedule-page .wechat-fields > label:last-child { grid-column: 1 / -1; }
+.schedule-page .wechat-fields label > span { font-size: 12px; }.schedule-page .wechat-fields input { font-size: 13px; height: 39px; }.schedule-page .wechat-fields small { font-size: 10px; }
+.schedule-page .wechat-setup-guide { padding: 0; background: none; border: 0; }.schedule-page .wechat-status { padding: 13px; border-radius: 5px; }.schedule-page .wechat-status small { font-size: 11px; line-height: 1.7; }.schedule-page .wechat-status strong { font-size: 12px; }
+.settings-connection-help { padding: 17px 0 8px; }.settings-connection-help summary { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #7a826f; cursor: pointer; list-style: none; }.settings-connection-help li { font-size: 12px; line-height: 1.9; }
+.settings-environment { border-top: 1px solid var(--line); margin-top: 30px; padding-top: 18px; }.settings-environment > summary { display: flex; align-items: center; gap: 8px; list-style: none; font-size: 12px; color: #808773; cursor: pointer; }
+.schedule-page .platform-settings-content .social-setup { margin-top: 0; border: 0; padding: 0; }
+.schedule-page .data-management-section { border: 0; padding: 0; margin: 0; }.schedule-page .storage-usage-grid { margin-top: 25px; }.schedule-page .data-safety-note, .schedule-page .archive-preview-boundary { font-size: 12px; line-height: 1.8; }
+@media (max-width: 1100px) {
+  .ai-settings-page .ai-role-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }.ai-settings-page .ai-role-card:nth-child(2) { border-right: 0; }.ai-settings-page .ai-role-card:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .ai-settings-page .provider-row { grid-template-columns: 33px minmax(150px, 1fr) minmax(130px, .8fr); }.ai-settings-page .provider-actions { grid-column: 2 / -1; justify-content: flex-start; }.ai-settings-page .provider-key-state { display: flex; }
+  .automation-plan-layout { grid-template-columns: minmax(0, 1fr) 200px; gap: 23px; }.automation-activity { padding-left: 19px; }.automation-summary { gap: 17px; padding: 20px; }.automation-summary > div + div { padding-left: 17px; }.automation-summary strong { font-size: 14px; }
+  .schedule-page .automation-plans .form-grid { grid-template-columns: 1fr 1fr; }.schedule-page .automation-plans .form-grid label:last-child { grid-column: 1 / -1; }
+  .platform-settings-layout { grid-template-columns: 170px minmax(0, 1fr); gap: 23px; }
+  .settings-policy-disclosure .spending-policy-panel { grid-template-columns: 30px minmax(0,1fr); }.settings-policy-disclosure .spending-policy-actions { grid-column: 2; }
+}
+@media (max-width: 800px) {
+  .automation-plan-layout { grid-template-columns: 1fr; }.automation-activity { border-left: 0; border-top: 1px solid var(--line); padding: 23px 0 0; }.automation-activity ol { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }.automation-boundary { margin-top: 8px; }
+  .platform-settings-layout { grid-template-columns: 1fr; }.platform-settings-nav { flex-direction: row; overflow-x: auto; }.platform-settings-nav button { flex: 1; flex-shrink: 0; min-width: 145px; }
+  .ai-settings-page .writing-review-mode { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 600px) {
+  .settings-tabs { gap: 24px; margin-bottom: 20px; }.settings-tabs > button { font-size: 12px; min-height: 42px; }.settings-group-heading > span { display: none; }
+  .settings-policy-disclosure > summary { font-size: 11px; gap: 6px; }.settings-policy-disclosure > summary small { font-size: 10px; }.settings-policy-disclosure .spending-policy-panel { grid-template-columns: 1fr; padding: 15px; }.settings-policy-disclosure .spending-policy-icon { display: none; }.settings-policy-disclosure .spending-policy-actions { grid-column: 1; flex-wrap: wrap; }
+  .ai-settings-page .ai-role-card { grid-template-columns: 1fr; gap: 6px; padding: 15px 12px; min-height: 0; }.ai-settings-page .ai-role-icon { display: none; }.ai-settings-page .ai-role-health { grid-column: 1; font-size: 10px; }.ai-settings-page .ai-role-copy > span { font-size: 12px; }.ai-settings-page .ai-role-copy select { font-size: 11px; }.ai-settings-page .ai-role-copy > span small { font-size: 10px; min-height: 30px; }
+  .ai-settings-page .ai-section-heading { grid-template-columns: 25px minmax(0, 1fr); }.ai-settings-page .ai-section-heading h2 { font-size: 14px; }.ai-settings-page .secure-note { display: none; }.ai-settings-page .ai-section-heading p { font-size: 11px; }
+  .ai-settings-page .provider-row { grid-template-columns: 32px minmax(0, 1fr); gap: 11px; }.ai-settings-page .provider-key-state { grid-column: 2; }.ai-settings-page .provider-actions { grid-column: 2; }.ai-settings-page .provider-copy strong { font-size: 13px; }
+  .automation-summary { grid-template-columns: 1fr 1fr; gap: 20px; padding: 18px; }.automation-summary > div:first-child { grid-column: 1 / -1; border-bottom: 1px solid var(--line); padding-bottom: 17px; }.automation-summary > div + div { border-left: 0; padding-left: 0; }.automation-summary span { font-size: 11px; }.automation-summary strong { font-size: 13px; }.automation-summary small { font-size: 10px; }
+  .schedule-page .automation-plans .settings-section { padding: 18px 15px; }.schedule-page .settings-section-heading h2 { font-size: 14px; }.schedule-page .settings-section-heading p { font-size: 11px; }.increment-controls { flex-wrap: wrap; gap: 9px; }.increment-controls a { font-size: 10px; }.increment-foot small { margin-left: 0; }
+  .schedule-page .automation-plans .form-grid { grid-template-columns: 1fr; }.schedule-page .automation-plans .form-grid label:last-child { grid-column: 1; }.technical-catalog-note { gap: 8px; }.technical-catalog-note small { font-size: 10px; }.automation-activity ol { grid-template-columns: 1fr; }
+  .schedule-page .wechat-fields { grid-template-columns: 1fr; }.schedule-page .wechat-fields > label:last-child { grid-column: 1; }.platform-settings-nav button { padding: 12px 10px; min-width: 145px; }.platform-settings-nav button span { font-size: 12px; }
+  .schedule-page .page-header-actions { flex-wrap: wrap; }.schedule-page .page-header-actions button { font-size: 11px; }
+}

@@ -13,3 +13,4 @@ test-results/
 
 # Per-machine desktop runtime
 .runtime/
+.claude/launch.json

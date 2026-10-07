@@ -8,11 +8,11 @@ import { captureRenderedPageImages } from "./page-screenshot.js";
 import { isLocalImageFileReady, isNeutralImagePublishReady } from "./image-readiness.js";
 import { eligibleEditorialImage, isPlaceholderEditorialCaption, uniqueEligibleEditorialImages } from "./editorial-image-policy.js";
 import { searchLicensedEditorialImages } from "./online-image-search.js";
-import { readState, updateState, workflowMediaRoot } from "./storage.js";
-import { storyById } from "./story-desk.js";
+import { readStateProjection, updateState, workflowMediaRoot } from "./storage.js";
+import { collectStoryImages, storyById } from "./story-desk.js";
 import { selectStoryArticleSources } from "./story-article-sources.js";
 import type { StorySignalView } from "./product-types.js";
-import type { ExtractedPage, ImageCollectionReport, SourceImage, SourceRole } from "./types.js";
+import type { ExtractedPage, ImageCollectionReport, SourceImage, SourceRole, WorkflowState } from "./types.js";
 
 export interface VisualAssetCounts {
   discoveredImageCount: number;
@@ -208,6 +208,7 @@ const canDownload = (image: SourceImage) => /^https?:\/\//iu.test(image.url.trim
 export interface VisualHydrationOptions {
   scope?: "preview" | "article";
   progress?: (value: number, stage: string) => void;
+  signal?: AbortSignal;
 }
 
 const collectArticleVisuals = async (storyId: string, dependencies: VisualHydrationDependencies, options: VisualHydrationOptions) => {
@@ -262,6 +263,27 @@ export const runVisualHydration = async (
   dependencies: VisualHydrationDependencies,
   options: VisualHydrationOptions = {},
 ): Promise<VisualHydrationResult> => {
+  options.signal?.throwIfAborted();
+  if (options.signal) {
+    const original = dependencies;
+    const guard = async <T>(operation: () => Promise<T>) => {
+      options.signal!.throwIfAborted();
+      const result = await operation();
+      options.signal!.throwIfAborted();
+      return result;
+    };
+    const search = original.searchOnline, stylize = original.stylizeIdentity, generate = original.generateFallback;
+    dependencies = { ...original,
+      getStory: () => guard(original.getStory),
+      extract: (...args) => guard(() => original.extract(...args)),
+      localize: (...args) => guard(() => original.localize(...args)),
+      capture: (...args) => guard(() => original.capture(...args)),
+      persistExtraction: (...args) => guard(() => original.persistExtraction(...args)),
+      persistImages: (...args) => guard(() => original.persistImages(...args)),
+      searchOnline: search ? (...args) => guard(() => search(...args)) : undefined,
+      stylizeIdentity: stylize ? (...args) => guard(() => stylize(...args)) : undefined,
+      generateFallback: generate ? (...args) => guard(() => generate(...args)) : undefined };
+  }
   if (options.scope === "article") return collectArticleVisuals(storyId, dependencies, options);
   const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
   let story = await dependencies.getStory();
@@ -414,39 +436,61 @@ export const runVisualHydration = async (
   );
 };
 
-const candidateForSignal = (state: Awaited<ReturnType<typeof readState>>, signal: StorySignalView) =>
+const candidateForSignal = (state: Readonly<WorkflowState>, signal: StorySignalView) =>
   state.runs.find((run) => run.id === signal.runId)
     ?.candidates.find((candidate) => candidate.id === signal.candidateId);
 
-const persistImagesForStory = async (
-  storyId: string,
-  fallbackSignal: StorySignalView,
-  images: SourceImage[],
-) => updateState((state) => {
-  const currentStory = storyById(state, storyId);
-  if (!currentStory) return;
-  for (const image of images) {
-    let matched = false;
-    for (const signal of currentStory.signals) {
-      const candidate = candidateForSignal(state, signal);
-      if (!candidate || !candidate.images.some((entry) => sameImage(entry, image))) continue;
-      candidate.images = mergeVisualImages(candidate.images, [image]);
-      candidate.imageCount = candidate.images.length;
-      matched = true;
+/** A hydration job holds its Story membership while localizing images. Source
+ * extraction can change canonical URLs, so that step explicitly rebuilds it.
+ * Image reads remain fresh, using exactly StoryDesk's ordering and eligibility. */
+export const createVisualHydrationStorage = (storyId: string, dependencies: {
+  project: typeof readStateProjection;
+  update: typeof updateState;
+  findStory?: (state: Readonly<WorkflowState>, id: string) => VisualStorySnapshot | undefined;
+  signal?: AbortSignal;
+}) => {
+  let currentStory: VisualStorySnapshot | undefined;
+  let resolved = false;
+  const getStory = async () => {
+    if (!resolved) {
+      currentStory = await dependencies.project(state => {
+        const story = (dependencies.findStory ?? storyById)(state, storyId);
+        return story ? { id: story.id, title: story.title, originalTitle: story.originalTitle, summary: story.summary, images: story.images, signals: story.signals } : undefined;
+      });
+      resolved = true;
     }
-    if (matched) continue;
-    const fallback = candidateForSignal(state, fallbackSignal);
-    if (!fallback) continue;
-    fallback.images = mergeVisualImages(fallback.images, [image]);
-    fallback.imageCount = fallback.images.length;
-  }
-});
-
-const productionDependencies = (storyId: string): VisualHydrationDependencies => ({
-  getStory: async () => storyById(await readState(), storyId),
-  extract: extractPage,
-  persistExtraction: async (signal, page) => {
-    await updateState((state) => {
+    const membership = currentStory;
+    if (!membership) return undefined;
+    return dependencies.project(state => {
+      const candidates = membership.signals.flatMap(signal => { const candidate = candidateForSignal(state, signal); return candidate ? [candidate] : []; });
+      return candidates.length ? { ...membership, images: collectStoryImages(candidates) } : undefined;
+    });
+  };
+  const persistImages = async (fallbackSignal: StorySignalView, images: SourceImage[]) => {
+    const story = await getStory();
+    if (!story) return;
+    await dependencies.update(state => {
+      dependencies.signal?.throwIfAborted();
+      for (const image of images) {
+        let matched = false;
+        for (const signal of story.signals) {
+          const candidate = candidateForSignal(state, signal);
+          if (!candidate || !candidate.images.some((entry) => sameImage(entry, image))) continue;
+          candidate.images = mergeVisualImages(candidate.images, [image]);
+          candidate.imageCount = candidate.images.length;
+          matched = true;
+        }
+        if (matched) continue;
+        const fallback = candidateForSignal(state, fallbackSignal);
+        if (!fallback) continue;
+        fallback.images = mergeVisualImages(fallback.images, [image]);
+        fallback.imageCount = fallback.images.length;
+      }
+    });
+  };
+  const persistExtraction = async (signal: StorySignalView, page: ExtractedPage) => {
+    await dependencies.update(state => {
+      dependencies.signal?.throwIfAborted();
       const candidate = candidateForSignal(state, signal);
       if (!candidate) return;
       candidate.canonicalUrl = page.canonicalUrl;
@@ -454,8 +498,14 @@ const productionDependencies = (storyId: string): VisualHydrationDependencies =>
       candidate.imageCount = candidate.images.length;
       if (!candidate.excerpt.trim() && page.text.trim()) candidate.excerpt = page.text.trim().slice(0, 600);
     });
-  },
-  persistImages: (signal, images) => persistImagesForStory(storyId, signal, images),
+    resolved = false;
+  };
+  return { getStory, persistImages, persistExtraction };
+};
+
+const productionDependencies = (storyId: string, signal?: AbortSignal): VisualHydrationDependencies => ({
+  ...createVisualHydrationStorage(storyId, { project: readStateProjection, update: updateState, signal }),
+  extract: extractPage,
   localize: downloadSourceImage,
   capture: captureRenderedPageImages,
   searchOnline: (story, requestedLimit, priority) => searchLicensedEditorialImages(story, requestedLimit, { priority }),
@@ -484,6 +534,7 @@ export const hydrateStoryAssets = (
   minimumImages = 2,
   options: VisualHydrationOptions = {},
 ) => {
+  options.signal?.throwIfAborted();
   const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
   const key = `${storyId}:${minimum}:${options.scope ?? "preview"}`;
   const existing = inFlight.get(key);
@@ -496,7 +547,7 @@ export const hydrateStoryAssets = (
   const report = (value: number, stage: string) => {
     for (const listener of listeners) listener(value, stage);
   };
-  const operation = runVisualHydration(storyId, minimum, productionDependencies(storyId), { ...options, progress: report })
+  const operation = runVisualHydration(storyId, minimum, productionDependencies(storyId, options.signal), { ...options, progress: report })
     .finally(() => inFlight.delete(key));
   inFlight.set(key, { promise: operation, listeners });
   return operation;

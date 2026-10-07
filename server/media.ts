@@ -4,6 +4,7 @@ import path from "node:path";
 import { downloadSourceImage } from "./extractor.js";
 import { workflowMediaRoot } from "./storage.js";
 import type { DraftImagePlacement, SourceImage } from "./types.js";
+import { userProvidedImage } from "./user-provided-media.js";
 
 const supportedTypes = new Map([
   ["image/jpeg", ".jpg"],
@@ -56,7 +57,7 @@ export const saveUploadedDraftImage = async (
   };
   return {
     id: `placement_${randomUUID().slice(0, 8)}`,
-    image,
+    image: userProvidedImage(image),
     afterParagraph: -1,
     caption,
   };
@@ -81,7 +82,7 @@ export const importDraftImageFromUrl = async (
   const image = await downloadSourceImage(sourceImage, draftId);
   return {
     id: `placement_${randomUUID().slice(0, 8)}`,
-    image,
+    image: userProvidedImage(image),
     afterParagraph: -1,
     caption,
   };

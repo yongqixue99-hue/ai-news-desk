@@ -133,3 +133,20 @@ test("focused news search covers seven Hong Kong calendar days without X or comm
     keywords: "GPT-6 Astra",
   });
 });
+test('a stuck adapter reaches its deadline while completed source results survive', async () => {
+  const desk = createSourceDesk({
+    timeoutMs: 20,
+    collectStructured: async () => ({items:[item('kept','rss')]}),
+    collectCommunity: async () => new Promise<never>(()=>{}),
+  });
+  let timer: ReturnType<typeof setTimeout>;
+  try {
+    const batch = await Promise.race([
+      desk.collect({sources:[source('rss','rss'),source('github','github')],topicIds:['ai']}),
+      new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('collection hung')),500);}),
+    ]);
+    assert.deepEqual(batch.items.map(i=>i.id),['kept']);
+    assert.ok(batch.failures.github);
+    assert.equal(batch.failures.rss,undefined);
+  } finally { clearTimeout(timer!); }
+});

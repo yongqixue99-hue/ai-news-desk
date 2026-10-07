@@ -29,6 +29,16 @@ test("a factual contradiction in the closing take is also blocked",()=> {
  const report=evaluateDraftPackageQuality({draft:{...draft,take:"GPT-5.5 的价格为 2 美元。"},contentPackage:pack});
  assert.ok(report.blockers.some(issue=>issue.message.startsWith("文末判断：")));
 });
+
+test("a platform title is checked against frozen facts while keeping source reviews bound to the original document", async () => {
+ const { reviewDraftQuality } = await import("./draft-quality-review.js");
+ const store = { getContentPackage: <T>() => pack as T, getSourceSnapshot: <T>() => undefined };
+ const before = JSON.stringify(draft);
+ const report = reviewDraftQuality(draft, store, { deliveryTitle: "GPT-5.5 的价格为 2 美元" });
+ assert.ok(report.blockers.some(message => /数字|数值|2/u.test(message)));
+ assert.deepEqual(report.binding, bindDraftCheck(draft, pack));
+ assert.equal(JSON.stringify(draft), before);
+});
 test("explicit fact review binds only the inspected document and chosen frozen facts",async()=>{
  const {bindReviewedParagraph}=await import("./draft-quality-review.js");
  const edited=structuredClone({...draft,bodyHtml:"<p>GPT-5.5：价格为 1 美元。</p>"});

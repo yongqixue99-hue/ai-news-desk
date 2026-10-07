@@ -392,10 +392,12 @@ const collectFeed = async (
         } catch { return; }
         const url = `https://aihot.news/api/v1/stories/${publicId}`;
         try {
-          const result = await reader.read({sourceId: source.id, url, parserVersion: 'aihot-event-members-v1', maxBytes: 512 * 1024,
+          const result = await reader.read({sourceId: source.id, url, parserVersion: 'aihot-event-reading-v2', maxBytes: 512 * 1024,
             init:{signal:requestSignal(signal,18_000),headers:{accept:'application/json','user-agent':'AI-News-Desk/0.2 (portable collector)'}},
             parse:content=>parseAihotStoryRelations(content,hot)});
-          hot.metadata = {...hot.metadata, aggregation_related_urls: result.items[0]?.metadata?.aggregation_related_urls};
+          hot.metadata = {...hot.metadata,
+            aggregation_related_urls: result.items[0]?.metadata?.aggregation_related_urls,
+            aggregation_event: result.items[0]?.metadata?.aggregation_event};
           routes.push({sourceId:source.id,url,status:'success',rawCount:0,cacheStatus:result.cacheStatus,lastSuccessfulAt:result.lastSuccessfulAt});
         } catch(error) {
           routes.push({sourceId:source.id,url,status:'error',rawCount:0,detail:'事件成员读取失败，仅按已知原文链接合并',errorCode:error instanceof SourceRouteReadError?error.code:'network'});

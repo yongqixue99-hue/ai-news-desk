@@ -1,6 +1,8 @@
+import { uploadCoverInPage } from "./xiaoheihe-cover.js";
 import {
   createPublisherBridgeClient,
   planEditorTab,
+  waitingForEditorLogin,
   startPublisherBridgePolling,
   XIAOHEIHE_PAGE_SCRIPTS,
 } from "./publisher-bridge.js";
@@ -65,12 +67,18 @@ async function captureActiveXPost() {
 async function sendJobToPage(tabId, job) {
   let lastError;
   let injected = false;
+  const loginDeadline = Date.now() + 150_000;
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
       const result = await chrome.tabs.sendMessage(tabId, {
         type: "AI_NEWS_FILL_XIAOHEIHE",
         job,
       });
+      if (waitingForEditorLogin(result) && Date.now() < loginDeadline) {
+        await delay(1_000);
+        attempt -= 1;
+        continue;
+      }
       if (result?.retry) {
         await delay(750);
         continue;
@@ -282,6 +290,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "AI_NEWS_UPLOAD_XIAOHEIHE_COVER") {
+    if (!sender.tab?.id || !/^https:\/\/(?:[^/]+\.)?xiaoheihe\.cn\//i.test(sender.url || "") || !/^data:image\//i.test(String(message.payload?.dataUrl || ""))) {
+      sendResponse({ ok: false, detail: "封面上传请求无效" }); return undefined;
+    }
+    chrome.scripting.executeScript({ target: { tabId: sender.tab.id }, world: "MAIN", func: uploadCoverInPage, args: [message.payload] })
+      .then(results => sendResponse(results[0]?.result || { ok: false, detail: "平台未返回封面结果" }))
+      .catch(error => sendResponse({ ok: false, detail: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
   if (message?.type === "AI_NEWS_UPLOAD_XIAOHEIHE_IMAGE_POST") {
     if (!sender.tab?.id || !/^https:\/\/(?:[^/]+\.)?xiaoheihe\.cn\//i.test(sender.url || "")) {
       sendResponse({ ok: false, detail: "图文图片任务不是由小黑盒编辑页发起" });
@@ -365,6 +383,11 @@ const publisherBridge = createPublisherBridgeClient({
   origin: WORKBENCH_ORIGIN,
   clientId: chrome.runtime.id,
   version: chrome.runtime.getManifest().version,
+  pendingReports: {
+    load: async () => (await chrome.storage.local.get("publisherPendingReport")).publisherPendingReport,
+    save: async (value) => chrome.storage.local.set({ publisherPendingReport: value }),
+    clear: async () => chrome.storage.local.remove("publisherPendingReport"),
+  },
   runJob: async (job) => {
     const editorUrl = String(job?.editorUrl || "");
     if (!/^https:\/\/(?:[^/]+\.)?xiaoheihe\.cn\//i.test(editorUrl)) {

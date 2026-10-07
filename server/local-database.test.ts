@@ -23,6 +23,21 @@ const withDatabase = async (run: (root: string, store: LocalDatabase) => Promise
   }
 };
 
+test("filtered rework reads cannot be crowded out by collection events and disclose a capped result", async () => {
+  await withDatabase(async (_root, store) => {
+    for (const draftId of ["one", "two", "one"]) store.recordWorkflowEvent({ type: "draft.edit-observation", subjectType: "draft", subjectId: `${draftId}:${store.listWorkflowEvents(1)[0]?.id || "first"}`, payload: { draftId, reasons: ["structure"] } });
+    for (let index = 0; index < 2005; index++) store.recordWorkflowEvent({ type: "collection", subjectType: "story", subjectId: String(index) });
+    assert.ok(store.listWorkflowEvents(2000).every(event => event.type === "collection"));
+    const window = { since: "2026-08-01T00:00:00Z", through: "2026-09-01T00:00:00Z" };
+    const report = store.queryWorkflowEvents("draft.edit-observation", { ...window, limit: 2 });
+    assert.equal(report.total, 3); assert.equal(report.events.length, 2); assert.equal(report.truncated, true);
+    const own = store.queryWorkflowEvents("draft.edit-observation", { ...window, draftId: "one" });
+    assert.equal(own.total, 2); assert.equal(own.truncated, false);
+    assert.equal(store.queryWorkflowEvents("draft.edit-observation", { since: "2026-09-01T00:00:00Z", through: "2026-10-01T00:00:00Z" }).total, 0);
+    assert.equal(store.queryWorkflowEvents("draft.edit-observation", { ...window, draftId: "' OR 1=1 --" }).total, 0);
+  });
+});
+
 test("SQLite imports legacy state once and keeps a recoverable migration snapshot", async () => {
   await withDatabase(async (root, store) => {
     assert.deepEqual(store.readState(), { version: 11, marker: "legacy" });

@@ -34,14 +34,15 @@ export const resolveCodexExecutable = (
   const platform = environment.platform ?? process.platform;
   if (platform === "darwin") {
     const roots = environment.macApplicationsRoots ?? ["/Applications", path.join(homedir(), "Applications")];
-    const candidates = roots.flatMap((root) => ["ChatGPT.app", "Codex.app"].flatMap((name) => {
-      const executable = path.join(root, name, "Contents", "Resources", "codex");
+    // Newer desktop builds ship the CLI under codex-cli/bin instead of Resources.
+    const candidates = roots.flatMap((root) => ["ChatGPT.app", "Codex.app"].flatMap((name) => [["codex"], ["codex-cli", "bin", "codex"]].flatMap((layout) => {
+      const executable = path.join(root, name, "Contents", "Resources", ...layout);
       try {
         accessSync(executable, constants.X_OK);
         const stats = statSync(executable);
         return stats.isFile() ? [{ executable, modifiedAt: stats.mtimeMs }] : [];
       } catch { return []; }
-    })).sort((left, right) => right.modifiedAt - left.modifiedAt);
+    }))).sort((left, right) => right.modifiedAt - left.modifiedAt);
     return candidates[0]?.executable ?? "codex";
   }
   if (platform !== "win32") return "codex";

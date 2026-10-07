@@ -6,6 +6,9 @@ export const hasOfficialUpdateAnchor = (url: URL) => Boolean(url.hash) && url.pr
     || (url.hostname === "platform.claude.com" && url.pathname === "/docs/en/release-notes/overview"));
 
 export const areDistinctOfficialUpdates = (left: string, right: string) => {
+  // Both recognized update URLs need a fragment. Ordinary article pairs do
+  // not need to construct URLs during every Story or community comparison.
+  if (!left.includes("#") || !right.includes("#")) return false;
   try {
     const a = new URL(left);
     const b = new URL(right);

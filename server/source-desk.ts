@@ -9,6 +9,7 @@ import type {
 } from "./types.js";
 import { sourceRoleFor, sourceSupportsTopics } from "./source-routing.js";
 import { hasOfficialUpdateAnchor } from "./official-update-url.js";
+import { deadlineSignal, withAbort } from './abort.js';
 import type { XAccountObservation } from "./x-official.js";
 export { createZhihuHotlist } from "./zhihu-hotlist.js";
 export { buildTopicFeed, communityPlatforms, retainZhihuTopic } from "./topic-feeds.js";
@@ -57,6 +58,7 @@ interface StructuredCollectionResult {
 }
 
 interface SourceDeskDependencies {
+  timeoutMs?: number;
   collectStructured: (
     sources: SourceConfig[],
     request: SourceCollectRequest,
@@ -124,24 +126,27 @@ export const buildFocusedNewsSearchRequest = (
  */
 export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
   async collect(request: SourceCollectRequest): Promise<SignalBatch> {
+    const parentSignal = request.signal;
+    const signal = deadlineSignal(dependencies.timeoutMs ?? 180_000, parentSignal);
+    request = {...request, signal};
     const structuredSources = request.sources.filter((source) => !isCommunityAdapter(source) && source.kind !== "x");
     const communitySources = request.sources.filter(isCommunityAdapter);
     const xSources = request.sources.filter((source) => source.kind === "x");
     const failures: Record<string, string> = {};
     const structuredPromise: Promise<StructuredCollectionResult> = structuredSources.length
-      ? dependencies.collectStructured(structuredSources, request).catch((error) => {
+      ? withAbort(() => dependencies.collectStructured(structuredSources, request), signal).catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         for (const source of structuredSources) failures[source.id] = message;
         return { items: [], horizonRunId: undefined, failures: {} } satisfies StructuredCollectionResult;
       })
       : Promise.resolve({ items: [], horizonRunId: undefined, failures: {} } satisfies StructuredCollectionResult);
     const communityPromise = communitySources.length
-      ? (dependencies.collectCommunity ?? collectCommunitySources)(
+      ? withAbort(() => (dependencies.collectCommunity ?? collectCommunitySources)(
         communitySources,
         request.topicIds,
         { keywords: request.filters?.keywords },
         { signal: request.signal },
-      ).catch((error) => {
+      ), signal).catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         for (const source of communitySources) failures[source.id] = message;
         return { items: [], failures: {} };
@@ -149,7 +154,7 @@ export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
       : Promise.resolve({ items: [], failures: {} });
     const xPromise = xSources.length
       ? dependencies.collectXOfficial
-        ? dependencies.collectXOfficial(xSources, { signal: request.signal }).catch((error) => {
+        ? withAbort(() => dependencies.collectXOfficial!(xSources, { signal }), signal).catch((error) => {
           const message = error instanceof Error ? error.message : String(error);
           for (const source of xSources) failures[source.id] = message;
           return { items: [], failures: {}, cursors: {}, accountObservations: {} };
@@ -162,6 +167,7 @@ export const createSourceDesk = (dependencies: SourceDeskDependencies) => ({
         })
       : Promise.resolve({ items: [], failures: {}, cursors: {}, accountObservations: {} });
     const [structured, community, xOfficial] = await Promise.all([structuredPromise, communityPromise, xPromise]);
+    parentSignal?.throwIfAborted();
     Object.assign(failures, structured.failures);
     Object.assign(failures, community.failures);
     Object.assign(failures, xOfficial.failures);

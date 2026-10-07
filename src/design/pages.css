@@ -1,0 +1,16 @@
+/* One masthead voice for every destination; page geometry stays with the page. */
+:is(.page-header, .community-square-header, .aggregation-heading) h1 { font-family: var(--font-display); font-size: 30px; font-weight: 900; line-height: 1.2; letter-spacing: .02em; color: var(--ink); }
+:is(.page-header, .community-square-header, .aggregation-heading) h1 + p { color: var(--muted); }
+
+/* Floating surfaces share one elevation. */
+:is(.notification-center, .story-drawer, .rail-dialog, .home-layout-dialog, .quick-draft-modal, .community-draft-modal) { border-color: var(--line); box-shadow: var(--shadow-3); }
+.product-job-toggle { border-color: var(--line); border-radius: 999px; background: var(--paper); box-shadow: var(--shadow-2); }
+
+/* Ledger rows give a hover cue so the eye keeps its line. */
+.candidate-table th { font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--muted); }
+.source-manager-row { transition: background .14s var(--ease); }
+.source-manager-row:hover { background: #fbfaf8; }
+
+@media (max-width: 720px) {
+  :is(.page-header, .community-square-header, .aggregation-heading) h1 { font-size: 26px; }
+}

@@ -694,9 +694,7 @@ const storyFromCluster = (cluster: StoryCluster, now: string): StoryView => {
   const headlinePrimary = firstPartyLaunch ?? primary;
   const technicalArticle = primary.candidate.technicalArticle;
   const bestInsight = records.find((record) => record.candidate.communityInsight)?.candidate.communityInsight;
-  const images = uniqueEligibleEditorialImages(
-    uniqueBy(records.flatMap((record) => record.candidate.images), (image) => normalizedUrl(image.url) || image.id),
-  ).slice(0, 48);
+  const images = collectStoryImages(records.map(record => record.candidate));
   const localImages = images.filter(isLocalImageFileReady);
   const publishReadyImages = localImages.filter((image) => isNeutralImagePublishReady(image, now));
   const factualPublishedTimes = eventRecords
@@ -1030,6 +1028,11 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
     },
   };
 };
+
+/** Shared image ordering/deduplication for Story views and lazy image hydration. */
+export const collectStoryImages = (candidates: ReadonlyArray<Pick<Candidate, "images">>) => uniqueEligibleEditorialImages(
+  uniqueBy(candidates.flatMap(candidate => candidate.images), image => normalizedUrl(image.url) || image.id),
+).slice(0, 48);
 
 export const storyById = (state: WorkflowState, storyId: string, now = new Date().toISOString()) =>
   buildStories(state, now).find((story) => story.id === storyId);

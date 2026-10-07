@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useDialogA11y } from "../hooks/useDialogA11y";
-import { ArrowRight, ChevronRight, Radio, X } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronRight, Radio, X } from "lucide-react";
 import type { DraftOverview } from "../api";
 import { draftStatusLabel } from "../draft-lifecycle-view";
 import type { AppPage, StoryView, TodayView } from "../types";
@@ -20,6 +20,10 @@ interface TodayWorkspaceRailProps {
 export function TodayWorkspaceRail({ today, showDrafts = true, drafts, draftError, openingDraftId, onRetry, onNavigate, onOpenDraft, onOpenStory }: TodayWorkspaceRailProps) {
   const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1120px)").matches);
   const [open, setOpen] = useState(false);
+  const [pendingExpanded, setPendingExpanded] = useState(false);
+  const [watchingOpen, setWatchingOpen] = useState(false);
+  const pending = today.pending ?? [];
+  const visiblePending = pendingExpanded ? pending : pending.slice(0, 6);
   const dialog = useDialogA11y<HTMLElement>({ open: compact && open, onClose: () => setOpen(false) });
   useEffect(() => { const media = window.matchMedia("(max-width: 1120px)"); const update = () => setCompact(media.matches); media.addEventListener("change", update); return () => media.removeEventListener("change", update); }, []);
   useEffect(() => { if (!compact || !open) return; const old = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = old; }; }, [compact, open]);
@@ -37,18 +41,19 @@ export function TodayWorkspaceRail({ today, showDrafts = true, drafts, draftErro
       </section> : null}
 
       <section className="desk-pending-topics" aria-label="我的待选题">
-        <div className="today-section-heading"><div><h2>我的待选题 <small>{today.pending?.length ?? 0}</small></h2></div></div>
-        {today.pending?.length ? today.pending.map((story) => <button type="button" key={story.id} onClick={() => openStory(story)}><span>{story.title}</span><ChevronRight size={15} /></button>)
+        <div className="today-section-heading"><div><h2>我的待选题 <small>{pending.length}</small></h2></div></div>
+        {pending.length ? <div className={`desk-pending-items${pendingExpanded ? " is-expanded" : ""}`} id="today-pending-topics">{visiblePending.map((story) => <button type="button" key={story.id} onClick={() => openStory(story)}><span>{story.title}</span><ChevronRight size={15} aria-hidden="true" /></button>)}</div>
           : <p className="story-empty-copy">留住想写的新闻或问题，下次从这里继续。</p>}
+        {pending.length > 6 ? <div className="desk-pending-footer"><button type="button" className="text-button" aria-expanded={pendingExpanded} aria-controls="today-pending-topics" onClick={() => setPendingExpanded((expanded) => !expanded)}>{pendingExpanded ? "收起待选题" : `展开其余 ${pending.length - 6} 条`}<ChevronDown size={14} aria-hidden="true" /></button></div> : null}
       </section>
 
-      <section className="today-watch-list">
-        <div className="today-section-heading"><div><h2>继续观察 <small>{today.watching.length}</small></h2></div></div>
+      <details className="today-watch-list today-watch-disclosure" open={watchingOpen} onToggle={(event) => setWatchingOpen(event.currentTarget.open)}>
+        <summary><h2>继续观察 <small>{today.watching.length}</small></h2><ChevronDown size={15} aria-hidden="true" /></summary>
         <p className="desk-rail-note">这些线索还需要补充证据。</p>
-        {today.watching.length ? today.watching.map((story) => (
+        <div className="today-watch-items">{today.watching.length ? today.watching.map((story) => (
           <button type="button" key={story.id} onClick={() => openStory(story)}><span>{story.title}</span><small>{story.assignment.blockers[0] || story.assignment.reason}</small><ChevronRight size={15} /></button>
-        )) : <p className="story-empty-copy">目前没有等待补证的事件。</p>}
-      </section>
+        )) : <p className="story-empty-copy">目前没有等待补证的事件。</p>}</div>
+      </details>
       <button type="button" className="desk-source-link" onClick={() => onNavigate("sources")}><Radio size={16} /><span>管理我的新闻源</span><ArrowRight size={15} /></button>
     </>;
   return <aside className="today-workspace-rail" aria-label="我的编辑工作">

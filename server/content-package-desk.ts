@@ -48,21 +48,24 @@ export const createContentPackageDesk = (overrides: Partial<ContentPackageDeskDe
       progress?: (value: number, stage: string) => void,
       minimumImages = 2,
       editorial?: { intent: EditorialIntent; reason: string },
+      options: { signal?: AbortSignal } = {},
     ) {
+      options.signal?.throwIfAborted();
       const initialState = await dependencies.readState();
       const resolvedMode = requestedMode ?? storyById(initialState, storyId)?.assignment.mode;
       const resolvedIntent = editorial?.intent ?? (resolvedMode === "community" ? "community" : resolvedMode === "curate" ? "source" : "news");
       // Establish a readable factual body before spending time on illustrations.
       const articleEvidence = resolvedIntent === "news"
-        ? await dependencies.prepareArticleEvidence(initialState, storyId, (value, stage) => progress?.(Math.max(0.05, Math.min(0.4, (value - 0.65) * 2)), stage))
+        ? await dependencies.prepareArticleEvidence(initialState, storyId, (value, stage) => progress?.(Math.max(0.05, Math.min(0.4, (value - 0.65) * 2)), stage), { signal: options.signal })
         : undefined;
       const [visualResult, discussionSamples, sourceMaterials] = await Promise.all([
-        dependencies.hydrateAssets(storyId, minimumImages, { progress: (value, stage) => progress?.(0.4 + Math.min(1, Math.max(0, value)) * 0.45, stage), scope: "article" }),
+        dependencies.hydrateAssets(storyId, minimumImages, { progress: (value, stage) => progress?.(0.4 + Math.min(1, Math.max(0, value)) * 0.45, stage), scope: "article", signal: options.signal }),
         dependencies.hydrateDiscussion(storyId),
         resolvedIntent === "source"
           ? dependencies.loadSourceMaterials(initialState, storyId)
           : Promise.resolve([]),
       ]);
+      options.signal?.throwIfAborted();
       progress?.(0.88, "整理事实、社区证据与相关素材");
       const builtPackage = buildContentPackage(await dependencies.readState(), {
         storyId,
@@ -83,6 +86,7 @@ export const createContentPackageDesk = (overrides: Partial<ContentPackageDeskDe
       const existing = database.getContentPackage<ContentPackage>(builtPackage.id);
       progress?.(0.94, existing ? "复用同一证据版本素材包" : "冻结图片与版权证据");
       const contentPackage = existing ?? await dependencies.freezeAssets(builtPackage);
+      options.signal?.throwIfAborted();
       const saved = existing ?? database.saveContentPackage(contentPackage);
       if (!existing) {
         database.recordFeedback({

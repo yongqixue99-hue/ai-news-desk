@@ -137,7 +137,7 @@
 
   const findRootByChildText = (document, rootSelector, childSelector, text) => queryAll(document, rootSelector)
     .find((root) => isVisible(root) && [...root.querySelectorAll(childSelector)]
-      .some((child) => child.textContent?.trim() === text));
+      .some((child) => String(child.textContent || '').replace(/\s+/g, '').toLowerCase() === text.replace(/\s+/g, '').toLowerCase()));
 
   const findSelectedCommunity = (document, text) => findRootByChildText(
     document,
@@ -167,7 +167,24 @@
     text,
   );
 
+  const readArticleSnapshot = (document) => {
+    const { title, body } = findEditor(document);
+    if (!title || !body) return undefined;
+    const text = value => String(value || '').replace(/\u200b/gu, '').replace(/\s+/gu, ' ').trim();
+    const blockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,td,th';
+    const blocks = [...body.querySelectorAll(blockSelector)]
+      .filter(element => !element.querySelector(blockSelector) && !element.closest?.('button,[role="button"]'))
+      .map(element => text(readEditableText(element))).filter(Boolean);
+    const images = [...body.querySelectorAll('img')].map(image => String(image.currentSrc || image.src || '').replace(/^http:/u, 'https:'));
+    const links = [...body.querySelectorAll('a[href]')].map(link => ({ text: text(link.textContent), href: link.getAttribute('href') || '' }));
+    const captions = [...body.querySelectorAll('.article__image-box')].map(box => ({ source: imageSource(box), text: text(readEditableText(findImageDescriptionEditor(box))) }));
+    return { title: readEditableText(title), content: { blocks: blocks.length ? blocks : [text(body.textContent)], images, links, captions },
+      imageCount: images.length, pendingMarkers: /AIIMG:[A-Za-z0-9_.:-]+/u.test(body.textContent || ''),
+      pendingImageIds: [...String(body.textContent || '').matchAll(/AIIMG:([A-Za-z0-9_.:-]+)/gu)].map(match => match[1]) };
+  };
+
   global.XiaoheiheDom = {
+    readArticleSnapshot,
     findEditor,
     captureInsertedImageBox,
     findImageBoxBySource,

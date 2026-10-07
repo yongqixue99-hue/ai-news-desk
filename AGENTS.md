@@ -5,6 +5,7 @@
 1. Read `README.md` for the implemented product surface.
 2. Read `docs/mature-personal-product.md` for the product contract.
 3. Read `docs/WINDOWS-DEVELOPMENT-HANDOFF.md` for the decisions, current status, and next priorities.
+4. Read `docs/2026-10-07-optimization-plan.md` for the ordered follow-up tasks, their acceptance criteria, and the commands for isolated verification and deployment.
 
 This repository is a single-user, local-first AI and technology editorial desk. The user operates the product; the eventual article is written for ordinary readers interested in AI and technology.
 
@@ -60,7 +61,11 @@ Routes and React components should consume these interfaces instead of reimpleme
 - Before handing off a change, run:
   - `npm test`
   - `npm run eval:editorial`
-  - `npm run build`
+  - `npm run build -- --outDir .artifacts/verify/dist --emptyOutDir`
+  - `AI_NEWS_DESK_DIST_ROOT="$PWD/.artifacts/verify/dist" npm run test:e2e` (PowerShell: set `$env:AI_NEWS_DESK_DIST_ROOT` first)
+- The local service serves the repository's `dist/`. A plain `npm run build` publishes the frontend immediately; run it only when the user has approved a release, then restart the service.
+- New styles belong in `src/design/` (unlayered). The older stylesheets live in the `legacy` cascade layer; do not append rules to them.
+- This repository is public. Do not commit screenshots or exports that show the user's real drafts, sources, or accounts.
 - The 2026-09-02 Windows continuation baseline is 524 tests passing and editorial golden set 22/22. Test discovery totals may differ by shell or platform; zero failures is the invariant.
 - Add a failing regression test before fixing an editorial or migration bug.
 - Preserve unrelated user changes in a dirty worktree.

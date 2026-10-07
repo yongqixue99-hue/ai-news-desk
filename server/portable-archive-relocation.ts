@@ -137,7 +137,7 @@ const buildPortableArchiveRelocationPlan = (
       }
     }
   }
-  for (const draft of state.drafts ?? []) {
+  for (const draft of [...(state.drafts ?? []), ...(state.draftTrash ?? []).map(entry => entry.draft)]) {
     add({
       ownerType: "draft", ownerId: draft.id, field: "intake.sourceAssetPath", sourcePath: draft.intake?.sourceAssetPath,
       replacePath: (targetPath) => { if (draft.intake) draft.intake.sourceAssetPath = targetPath; },

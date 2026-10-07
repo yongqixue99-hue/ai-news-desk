@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessEditorialOpportunity } from "./newsworthiness.js";
+import { assessEditorialOpportunity, editorialExclusionFor, mayShareEditorialEvent } from "./newsworthiness.js";
 
 // Hand-labelled synthetic cases test routing boundaries, not live-event recall.
 const cases = [
@@ -53,4 +53,53 @@ test("a monthly news recap cannot promote model releases mentioned in its body",
 test("confirmed security incidents are not rumors merely because data leaked", () => {
   assert.equal(assessEditorialOpportunity("OpenAI patches vulnerability that leaked ChatGPT user data").lane, "important");
   assert.equal(assessEditorialOpportunity("OpenAI confirms data breach after leaked API keys").lane, "important");
+});
+
+test("repeated title classification reuses both exclusions and an unclassified result", (context) => {
+  const titles = ["Cache repeat: confirmed model launch", "Cache repeat: join our AI webinar"];
+  const normalized = new Map<string, number>();
+  const original = String.prototype.normalize;
+  context.mock.method(String.prototype, "normalize", function (this: string, form?: string) {
+    const input = String(this);
+    if (titles.includes(input)) normalized.set(input, (normalized.get(input) ?? 0) + 1);
+    return original.call(input, form);
+  });
+  for (let repeat = 0; repeat < 20; repeat += 1) {
+    assert.equal(editorialExclusionFor(titles[0]), undefined);
+    assert.equal(editorialExclusionFor(titles[1]), "promotion");
+    assert.equal(mayShareEditorialEvent(titles[0], titles[1]), false);
+  }
+  assert.deepEqual(titles.map(title => normalized.get(title)), [1, 1]);
+});
+
+test("the title cache is bounded and evicted titles keep their classification", (context) => {
+  const title = "Cache eviction: weekly roundup of model releases";
+  let classifications = 0;
+  const original = String.prototype.normalize;
+  context.mock.method(String.prototype, "normalize", function (this: string, form?: string) {
+    const input = String(this);
+    if (input === title) classifications += 1;
+    return original.call(input, form);
+  });
+  assert.equal(editorialExclusionFor(title), "digest");
+  assert.equal(editorialExclusionFor(title), "digest");
+  assert.equal(classifications, 1);
+  for (let index = 0; index < 5_001; index += 1) editorialExclusionFor(`Cache bound ${index}: ordinary report`);
+  assert.equal(editorialExclusionFor(title), "digest");
+  assert.equal(classifications, 2);
+});
+
+test("cached classifications preserve distinct input and normalization boundaries", () => {
+  const boundaries = [
+    ["Cache boundary: model reportedly launches tomorrow", "rumor"],
+    ["Cache boundary: model launches tomorrow", undefined],
+    ["Cache boundary: ＪＯＩＮ ＯＵＲ ＡＩ ＷＥＢＩＮＡＲ", "promotion"],
+    ["Cache boundary: model weights leaked", "rumor"],
+    ["Cache boundary: user data leaked", undefined],
+    ["Cache boundary: API client v1.2.3 release notes", "minor"],
+    ["Cache boundary: API client v1.2.3 patches CVE-2026-12345", undefined],
+  ] as const;
+  for (const order of [boundaries, [...boundaries].reverse(), boundaries]) {
+    for (const [title, expected] of order) assert.equal(editorialExclusionFor(title), expected);
+  }
 });

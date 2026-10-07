@@ -86,6 +86,7 @@ const loadAdapter = async () => {
   context.globalThis = context;
   vm.runInNewContext(source, context);
   return context.XiaoheiheDom as {
+    readArticleSnapshot: (document: FixtureDocument) => { title: string; content: { blocks: string[]; images: string[]; links: Array<{ text: string; href: string }>; captions: Array<{ source: string; text: string }> }; imageCount: number; pendingMarkers: boolean } | undefined;
     findEditor: (document: FixtureDocument) => {
       title?: FixtureElement;
       body?: FixtureElement;
@@ -132,6 +133,29 @@ test("recognizes Xiaoheihe's current two-ProseMirror article editor", async () =
   assert.match(result.title?.parentElement?.raw.attr("class") ?? "", /editor-title__container/);
   assert.match(result.body?.parentElement?.raw.attr("class") ?? "", /article__edit-content--inner/);
   assert.notEqual(result.title, result.body);
+});
+
+test("resume readback captures the native title, evidence links, ordered images, captions and unfinished markers", async () => {
+  const $ = load(`<div class="editor-title__container"><div class="ProseMirror" contenteditable="true"><p>真实标题</p></div></div>
+    <div class="article__edit-content--inner"><div class="ProseMirror" contenteditable="true">
+      <p>第一段 <a href="https://example.com/source">原始来源</a></p>
+      <div class="article__image-box"><img src="https://cdn.example.com/one.png"><div class="image-desc"><div class="ProseMirror" contenteditable="true"><p>图注与测试条件</p></div></div></div>
+      <p>后一段</p><img src="https://cdn.example.com/two.png">
+    </div></div>`);
+  const adapter = await loadAdapter();
+  const document = new FixtureDocument($);
+  const snapshot = adapter.readArticleSnapshot(document)!;
+  assert.equal(snapshot.title, "真实标题");
+  assert.equal(snapshot.imageCount, 2);
+  assert.equal(snapshot.pendingMarkers, false);
+  assert.deepEqual(Array.from(snapshot.content.images), ["https://cdn.example.com/one.png", "https://cdn.example.com/two.png"]);
+  assert.equal(snapshot.content.links[0]!.href, "https://example.com/source");
+  assert.equal(snapshot.content.captions[0]!.text, "图注与测试条件");
+  assert.ok(snapshot.content.blocks.includes("后一段"));
+  $('.article__edit-content--inner > .ProseMirror').append('<p>AIIMG:unfinished</p>');
+  assert.equal(adapter.readArticleSnapshot(document)!.pendingMarkers, true);
+  $('a').attr('href', 'https://example.com/changed');
+  assert.equal(adapter.readArticleSnapshot(document)!.content.links[0]!.href, "https://example.com/changed");
 });
 
 test("keeps compatibility with the legacy input title editor", async () => {

@@ -367,19 +367,17 @@ export function Workbench({
   };
 
   return (
-    <div className="page workbench-page">
+    <div className="page workbench-page editorial-workbench">
       <header className="page-header workbench-header">
         <div>
           <h1>新闻工作台</h1>
-          <p>找到新闻，核对来源，整理成你的下一篇文章。</p>
+          <ol className="workbench-route" aria-label="写作流程">{["采集新闻", "选择题目", "生成草稿", "编辑与发布"].map((label, index) => <li key={label} aria-current={activeStep === index + 1 ? "step" : undefined}><small>{index + 1}</small>{label}{index < 3 ? <ArrowRight size={12} aria-hidden="true" /> : null}</li>)}</ol>
         </div>
         <div className="header-meta">
           <span><CalendarDays size={17} />{formatDate(new Date())}</span>
           <span className="next-run"><Clock3 size={17} />{settings.scheduleEnabled ? `下次采集 ${settings.scheduleTime}` : "定时采集已关闭"}</span>
         </div>
       </header>
-
-      <nav className="workbench-route" aria-label="写作流程">{["采集新闻", "选择题目", "生成草稿", "编辑与发布"].map((label, index) => <span key={label} aria-current={activeStep === index + 1 ? "step" : undefined}><small>{String(index + 1).padStart(2, "0")}</small>{label}{index < 3 ? <ArrowRight size={13} /> : null}</span>)}</nav>
 
       <div className={`workbench-grid ${runRailOpen ? "" : "run-rail-collapsed-layout"}`}>
         <section className="workflow-surface" aria-label="采集控制台">
@@ -511,7 +509,7 @@ export function Workbench({
               <div className="candidate-toolbar">
                 <label className="candidate-sort" title="只有公开互动或多家独立跟进才算传播证据；没有数据不会被判为低热度">
                   <ArrowDownUp size={14} />
-                  <select value={candidateSort} onChange={(event) => setCandidateSort(event.target.value as CandidateSortMode)}>
+                  <select aria-label="候选新闻排序" value={candidateSort} onChange={(event) => setCandidateSort(event.target.value as CandidateSortMode)}>
                     <option value="recommended">综合推荐</option>
                     <option value="heat">公开传播优先</option>
                     <option value="value">价值优先</option>

@@ -214,7 +214,8 @@ const claimReviewGeneration = async (reviewId: string, selection: EvidenceReview
   return result;
 };
 
-export const executeReviewGeneration = async (reviewId: string, progress?: (value: number, stage: string) => void) => {
+export const executeReviewGeneration = async (reviewId: string, progress?: (value: number, stage: string) => void, signal?: AbortSignal) => {
+  signal?.throwIfAborted();
   const state = await readState();
   const record = state.intakeReviews.find((entry) => entry.id === reviewId);
   const run = state.runs.find((entry) => entry.id === record?.runId);
@@ -242,19 +243,23 @@ export const executeReviewGeneration = async (reviewId: string, progress?: (valu
   builtContentPackage.assets = images.map((image, index) => assetFromSourceImage(image, builtContentPackage.id, index));
   if (builtContentPackage.assets.some((asset) => asset.sourceImage.localPath && !asset.localReady)) throw new Error("已选择的导入图片在本机不可读，请重新导入后确认");
   builtContentPackage.imageIds = images.map((image) => image.id);
-  const contentPackage = database.getContentPackage<ContentPackage>(builtContentPackage.id)
-    ?? database.saveContentPackage(await freezeContentPackageAssets(builtContentPackage));
+  const existingPackage = database.getContentPackage<ContentPackage>(builtContentPackage.id);
+  const frozenPackage = existingPackage ?? await freezeContentPackageAssets(builtContentPackage);
+  signal?.throwIfAborted();
+  const contentPackage = existingPackage ?? database.saveContentPackage(frozenPackage);
   const candidate = candidateFor(claim.record, normalized.text, images);
     await updateState((state) => {
+      signal?.throwIfAborted();
       const run = state.runs.find((entry) => entry.id === claim.run.id);
       if (run) { run.candidates = [candidate]; run.status = "generating"; run.stage = "使用冻结证据成稿"; }
     });
-    const { draft } = await createDraftFromPackage(contentPackage.id, progress, { draftId: claim.record.draftId, intake: {
+    const { draft } = await createDraftFromPackage(contentPackage.id, progress, { signal, draftId: claim.record.draftId, intake: {
       type: claim.record.bundle.source.kind === "url" ? "link" : "screenshot", extractedText: normalized.text,
       ignoredElements: claim.record.bundle.noiseBlocks.map((entry) => `${entry.reason}：${entry.text}`), sourceAssetPath: claim.record.bundle.source.assetPath,
     } });
     const finishedAt = now();
     await updateState((state) => {
+      signal?.throwIfAborted();
       const run = state.runs.find((entry) => entry.id === claim.run.id);
       if (!run) return;
       candidate.status = "drafted";

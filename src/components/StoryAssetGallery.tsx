@@ -31,7 +31,7 @@ export function StoryAssetGallery({ images, localCount, publishReadyCount, repor
           <dl><div><dt>来自</dt><dd>{selected.attribution || "来源待核对"}</dd></div><div><dt>保存状态</dt><dd>{selected.localPath && selected.publicPath ? "已保存在本地" : "仅有原链接 · 等待下载"}</dd></div>
           {selected.width && selected.height ? <div><dt>尺寸</dt><dd>{selected.width} × {selected.height}</dd></div> : null}
           <div><dt>案例关系</dt><dd>{selected.evidenceNote || (selected.entityTags?.length ? `相关实体：${selected.entityTags.join("、")}；具体实验条件待核对` : "未单独记录具体案例，需对照来源与图注")}</dd></div>
-          <div><dt>使用权</dt><dd>{selected.rights === "owned" ? "自有素材" : selected.rights === "licensed" ? "已记录授权，交付时复核" : selected.rights === "expired" ? "授权已过期" : "发布前待确认"}</dd></div><div><dt>允许平台</dt><dd>{selected.allowedPlatforms?.join("、") || "尚未记录"}</dd></div></dl>
+          <div><dt>使用权</dt><dd>{selected.rights === "user-provided" ? "用户提供" : selected.rights === "owned" ? "自有素材" : selected.rights === "licensed" ? "已记录授权，交付时复核" : selected.rights === "expired" ? "授权已过期" : "发布前待确认"}</dd></div><div><dt>允许平台</dt><dd>{selected.allowedPlatforms?.join("、") || "尚未记录"}</dd></div></dl>
           <button className="secondary-button" aria-pressed={zoomed} onClick={() => setZoomed(!zoomed)}>{zoomed ? "适应窗口" : "放大图片"}</button>
           <a className="text-button" href={selected.originalImageUrl || previewUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} />查看完整图片</a>
           <a className="text-button" href={selected.sourceUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} />打开原文出处</a>

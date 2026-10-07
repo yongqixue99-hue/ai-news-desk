@@ -1,5 +1,4 @@
-import { isIP } from 'node:net';
-import { isDisallowedRemoteAddress } from './remote-url.js';
+import { aggregationLink as canonical, readAggregationEvent, type AggregationEvent } from './aggregation-event.js';
 import { createHash } from 'node:crypto';
 import { aggregationCatalog, aggregationSourceIds } from './aggregation-catalog.js';
 import { aihotSelectedUrl } from './aggregation-native.js';
@@ -9,6 +8,7 @@ import type { RawHorizonItem, WorkflowState, WorkflowRun, Candidate } from './ty
 export interface AggregationEntry {
   id: string; title: string; summary: string; url: string; publishedAt?: string; eventUpdatedAt?: string; observedAt: string;
   kind: 'news' | 'digest'; selected: boolean;
+  event?: AggregationEvent;
   platforms: Array<{id: string; name: string; url: string}>;
   native?: {channel: 'hot'|'selected'|'feed'; order: number; rank?: number; featured?: boolean; score?: number; reason?: string; checkedAt: string; eventUrl?: string};
   ranking?: {score: number; heat: number; eligible: boolean; reasons: string[]};
@@ -21,17 +21,6 @@ export interface AggregationView {
   platforms: Array<{id: string; name: string; homepage: string; status: 'pending'|'disabled'|'unread'|'ready'|'stale'|'error'|'empty'; checkedAt?: string; latestAt?: string; detail?: string}>;
   active: boolean;
 }
-const canonical = (raw: string) => {
-  try {
-    const u = new URL(raw);
-    if (!['http:','https:'].includes(u.protocol) || u.username || u.password) return undefined;
-    const host = u.hostname.replace(/^\[|\]$/g,'');
-    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || (isIP(host) && isDisallowedRemoteAddress(host))) return undefined;
-    u.hash = '';
-    for (const key of [...u.searchParams.keys()]) if (/^(utm_|fbclid$|gclid$)/i.test(key)) u.searchParams.delete(key);
-    u.searchParams.sort(); return u.href;
-  } catch { return undefined; }
-};
 const sourceId = (item: RawHorizonItem) => String(item.metadata?.source_id || '');
 const channel = (item: RawHorizonItem): 'hot'|'selected'|'feed' => item.metadata?.aggregation_channel === 'hot' ? 'hot' : item.metadata?.aggregation_channel === 'selected' ? 'selected' : 'feed';
 const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
@@ -90,6 +79,7 @@ export function buildAggregationView(state: WorkflowState, now=Date.now()): Aggr
         id:createHash('sha256').update(url).digest('hex').slice(0,24), title:item.title,summary:item.content||'',url,
         publishedAt:item.published_at,eventUpdatedAt,observedAt:item.fetched_at||checkedAt,kind:platform.kind,selected:selected.has(url),
         platforms:[{id:platform.id,name:platform.name,url:canonical(String(meta.discovery_url||item.url))||url}],
+        event:platform.id === 'aihot-news' ? readAggregationEvent(meta.aggregation_event) : undefined,
         native:{channel:lane,order:finite(meta.aggregation_order)??index+1,rank:rank&&rank<=10&&lane==='hot'?rank:undefined,
           featured:meta.aggregation_selected===true||lane==='selected', score:finite(meta.aggregation_score),
           reason:typeof meta.aggregation_reason==='string'?meta.aggregation_reason:undefined, checkedAt,
@@ -104,6 +94,7 @@ export function buildAggregationView(state: WorkflowState, now=Date.now()): Aggr
         if (!previous.summary && entry.summary) {previous.summary=entry.summary;previous.title=entry.title;}
         previous.publishedAt=published;
         previous.eventUpdatedAt ||= entry.eventUpdatedAt;
+        previous.event ||= entry.event;
         if (nativeOrder(entry,previous)<0) previous.native=entry.native;
         if (!previous.native?.eventUrl && entry.native?.eventUrl) previous.native={...previous.native!,eventUrl:entry.native.eventUrl};
         if (!previous.platforms.some(p=>p.id===platform.id)) previous.platforms.push(entry.platforms[0]!);

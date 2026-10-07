@@ -231,6 +231,7 @@ export const createStoryEvidenceDesk = (dependencies: Partial<StoryEvidenceDeskD
       signal?: AbortSignal;
       progress?: (value: number, stage: string) => void;
     } = {}) {
+      options.signal?.throwIfAborted();
       const initialState = await deps.readState();
       const story = storyById(initialState, storyId, deps.now().toISOString());
       if (!story) throw new Error("Story 不存在");
@@ -340,6 +341,7 @@ export const createStoryEvidenceDesk = (dependencies: Partial<StoryEvidenceDeskD
           ?? story.signals[0]?.url;
         const timestamp = deps.now().toISOString();
         await deps.updateState((state) => {
+          options.signal?.throwIfAborted();
           const candidates = matched.map(({ item, images, relation }) => {
             const candidate = rawItemToCandidate(item, 7 * 24, story.topicIds);
             return {

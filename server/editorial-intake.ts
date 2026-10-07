@@ -144,15 +144,16 @@ export const inspectEditorialIntake = (
 
 interface EditorialIntakeDependencies {
   readState: () => Promise<WorkflowState>;
-  enrichExplanation: (storyId: string) => Promise<StoryView>;
+  enrichExplanation: (storyId: string, signal?: AbortSignal) => Promise<StoryView>;
   buildPackage: (
     storyId: string,
     mode: Exclude<AssignmentMode, "watch" | "skip">,
     progress: EditorialProgressReporter | undefined,
     minimumImages: number,
     editorial: { intent: EditorialIntent; reason: string },
+    options?: { signal?: AbortSignal },
   ) => Promise<{ contentPackage: ContentPackage; reused: boolean }>;
-  createDraft: (packageId: string, progress?: EditorialProgressReporter) => Promise<{ draft: ArticleDraft; reused: boolean }>;
+  createDraft: (packageId: string, progress?: EditorialProgressReporter, options?: { signal?: AbortSignal }) => Promise<{ draft: ArticleDraft; reused: boolean }>;
 }
 
 export const createEditorialIntakeDesk = (overrides: Partial<EditorialIntakeDependencies> = {}) => {
@@ -168,12 +169,13 @@ export const createEditorialIntakeDesk = (overrides: Partial<EditorialIntakeDepe
 
   return {
     open,
-    async createDraft(input: EditorialDraftRequest, progress?: EditorialProgressReporter): Promise<EditorialDraftResult> {
+    async createDraft(input: EditorialDraftRequest, progress?: EditorialProgressReporter, options: { signal?: AbortSignal } = {}): Promise<EditorialDraftResult> {
+      options.signal?.throwIfAborted();
       progress?.(0.04, "识别来源与推荐稿型");
       let view = await open(input);
       if ((view.intake.sourceKind !== "self-contained-community" || view.story.technicalArticle) && view.story.explanation.basis !== "full-source") {
         progress?.(0.1, "读取原始来源正文");
-        await dependencies.enrichExplanation(view.story.id);
+        await dependencies.enrichExplanation(view.story.id, options.signal);
         view = await open(input);
       }
       const intent = input.intent ?? view.intake.recommendedIntent;
@@ -187,19 +189,22 @@ export const createEditorialIntakeDesk = (overrides: Partial<EditorialIntakeDepe
         (value, stage) => progress?.(0.12 + Math.min(1, Math.max(0, value)) * 0.55, stage),
         2,
         { intent, reason: view.intake.recommendationReason },
+        options,
       );
+      options.signal?.throwIfAborted();
       if (packageResult.contentPackage.status !== "ready") {
         throw new Error(packageResult.contentPackage.blockers[0] || "素材包没有达到成稿条件");
       }
       if (input.sourceMode && intent === "source") {
         const database = await getLocalDatabase();
+        options.signal?.throwIfAborted();
         const variant = { ...packageResult.contentPackage, id: `${packageResult.contentPackage.id}_${input.sourceMode}`, sourceMode: input.sourceMode };
         packageResult.contentPackage = database.getContentPackage<ContentPackage>(variant.id) ?? database.saveContentPackage(variant);
       }
       progress?.(0.70, "通过统一素材包生成草稿");
       const draftResult = input.sourceMode === "source"
-        ? await createSourceDraftFromPackage(packageResult.contentPackage.id)
-        : await dependencies.createDraft(packageResult.contentPackage.id, (value, stage) => progress?.(0.70 + Math.min(1, Math.max(0, value)) * 0.29, stage));
+        ? await createSourceDraftFromPackage(packageResult.contentPackage.id, options)
+        : await dependencies.createDraft(packageResult.contentPackage.id, (value, stage) => progress?.(0.70 + Math.min(1, Math.max(0, value)) * 0.29, stage), options);
       return {
         ...view,
         contentPackage: packageResult.contentPackage,

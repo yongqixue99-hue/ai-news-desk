@@ -223,3 +223,37 @@ test("community briefing keeps event facts separate from discussion viewpoints",
   assert.equal(parsed[0].communityInsight?.summaryZh, "讨论者更关心实际延迟，而不是发布本身。");
   assert.deepEqual(parsed[0].communityInsight?.focusZh, ["有人分享了一周实测经验", "延迟仍是主要问题"]);
 });
+test('briefing grounding rejects invented companies even when the publisher is that company', () => {
+  const input = {...candidate('grounding', 'A local guide explains Python debugging.'), title: 'A guide to Python debugging', sourceName: 'OpenAI'};
+  assert.throws(() => parseCandidateBriefings(JSON.stringify({items:[{
+    candidateId: input.id, titleZh:'Python 调试教程', summaryZh:'OpenAI 发布了 Python 调试工具。',
+  }]}), buildCandidateBriefingEvidence([input]), {generatedAt:'2026-09-29', providerId:'fixture'}), /主体.*OpenAI/);
+});
+
+test('briefing grounding preserves guide/review identity instead of inventing a launch', () => {
+  const input = {...candidate('guide', 'How to use Claude for debugging existing projects.'), title:'How to use Claude for debugging'};
+  assert.throws(() => parseCandidateBriefings(JSON.stringify({items:[{
+    candidateId: input.id, titleZh:'Claude 发布全新调试功能', summaryZh:'介绍在已有项目中使用 Claude 调试的方法。',
+  }]}), buildCandidateBriefingEvidence([input]), {generatedAt:'2026-09-29', providerId:'fixture'}), /教程|测评/);
+});
+
+test('briefing grounding allows company translations and supported releases', () => {
+  const input = {...candidate('nvidia', 'NVIDIA releases a new inference tool.'), title:'NVIDIA releases an inference tool'};
+  const result = parseCandidateBriefings(JSON.stringify({items:[{
+    candidateId:input.id,titleZh:'英伟达发布推理工具',summaryZh:'英伟达推出一款推理工具。',
+  }]}),buildCandidateBriefingEvidence([input]),{generatedAt:'2026-09-29',providerId:'fixture'});
+  assert.equal(result.length,1);
+});
+test('one unsupported summary can be skipped without losing supported siblings', () => {
+  const evidence=buildCandidateBriefingEvidence([
+    {...candidate('bad','A Python guide.'),title:'A Python guide'},
+    {...candidate('good','NVIDIA releases an inference tool.'),title:'NVIDIA releases an inference tool'},
+  ]);
+  const failures:string[]=[];
+  const result=parseCandidateBriefings(JSON.stringify({items:[
+    {candidateId:'bad',titleZh:'Python 调试指南',summaryZh:'Google 推出调试工具。'},
+    {candidateId:'good',titleZh:'英伟达发布推理工具',summaryZh:'英伟达推出推理工具。'},
+  ]}),evidence,{generatedAt:'2026-09-29',providerId:'fixture',onGroundingIssue:(id,message)=>failures.push(`${id} ${message}`)});
+  assert.deepEqual(result.map(r=>r.candidateId),['good']);
+  assert.match(failures[0]!,/bad.*Google/);
+});

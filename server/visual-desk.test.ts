@@ -9,8 +9,12 @@ import {
   countVisualAssets,
   mergeVisualImages,
   runVisualHydration,
+  createVisualHydrationStorage,
   type VisualHydrationDependencies,
 } from "./visual-desk.js";
+import { createDefaultState } from "./defaults.js";
+import { collectStoryImages } from "./story-desk.js";
+import type { Candidate } from "./types.js";
 
 const imageFixtureRoot = mkdtempSync(path.join(tmpdir(), "ai-news-visual-images-"));
 after(() => rmSync(imageFixtureRoot, { recursive: true, force: true }));
@@ -62,12 +66,50 @@ test("article material collection continues beyond two cached covers and include
   assert.equal(fixture.calls.generate, 0);
 });
 
+test("a timed-out image read cannot persist late assets or begin screenshot fallbacks", async () => {
+  const controller = new AbortController();
+  const fixture = memoryDependencies({ extracted: [] });
+  fixture.dependencies.extract = async () => {
+    controller.abort(new Error("image job timed out"));
+    return page([image("late-image")]);
+  };
+  await assert.rejects(runVisualHydration("story-test", 2, fixture.dependencies, { scope: "article", signal: controller.signal }), /image job timed out/);
+  assert.equal(fixture.images().length, 0);
+  assert.equal(fixture.calls.capture + fixture.calls.generate + fixture.calls.localize, 0);
+});
+
 const page = (images: SourceImage[]): ExtractedPage => ({
   url: signal.url,
   canonicalUrl: signal.url,
   title: signal.title,
   text: "Example source text",
   images,
+});
+
+test("image hydration refreshes images without rebuilding Stories until source identity changes", async () => {
+  const state = createDefaultState();
+  const candidate: Candidate = {
+    id: signal.candidateId, rawId: "raw", sourceType: "rss", sourceName: "Official source", sourceRole: "official",
+    title: signal.title, url: signal.url, excerpt: "", publishedAt: signal.publishedAt, fetchedAt: signal.fetchedAt,
+    score: 10, scoreBreakdown: { consequence: 2, novelty: 2, evidence: 2, relevance: 2, timeliness: 2, confirmation: 0, penalty: 0 },
+    heatScore: 0, heatBreakdown: { engagement: 0, sourceReach: 0, crossSource: 0, freshness: 0 }, recommendationScore: 70,
+    clusterSize: 1, relatedSources: ["Official source"], evidence: "官方", imageCount: 0, images: [], selected: true, status: "candidate",
+  };
+  state.runs = [{ id: signal.runId, createdAt: signal.fetchedAt, updatedAt: signal.fetchedAt, status: "ready", stage: "ready", windowHours: 24, sourceIds: [], scheduled: false, rawCount: 1, candidates: [candidate], logs: [] }];
+  let lookups = 0;
+  const storage = createVisualHydrationStorage("story-test", {
+    project: async select => structuredClone(select(state)), update: async mutate => mutate(state),
+    findStory: () => { lookups++; return { id: "story-test", title: signal.title, originalTitle: signal.title, summary: "", signals: [signal], images: candidate.images }; },
+  });
+  for (let index = 0; index < 12; index++) {
+    await storage.persistImages(signal, [image(`image-${index}`)]);
+    assert.deepEqual((await storage.getStory())?.images, collectStoryImages([candidate]));
+  }
+  assert.equal(lookups, 1);
+  await storage.persistExtraction(signal, { ...page([image("chart")]), canonicalUrl: "https://example.com/canonical" });
+  assert.deepEqual((await storage.getStory())?.images, collectStoryImages([candidate]));
+  assert.equal(lookups, 2);
+  assert.equal(candidate.canonicalUrl, "https://example.com/canonical");
 });
 
 const memoryDependencies = (input: {

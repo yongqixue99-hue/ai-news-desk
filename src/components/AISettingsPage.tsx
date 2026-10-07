@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState } from "react";
+import { SettingsTabs } from "./SettingsTabs";
 import {
   AlertTriangle,
   Bot,
-  BrainCircuit,
   Check,
+  ChevronDown,
   CheckCircle2,
   ChevronRight,
   Cpu,
@@ -76,6 +77,7 @@ interface AISettingsPageProps {
 
 const rightsLabels: Record<ImageMaterial["rights"], string> = {
   owned: "自有／已授权",
+  "user-provided": "用户提供",
   licensed: "许可使用",
   official: "官方来源（仍需复核）",
   "editorial-screenshot": "评论性截图",
@@ -155,6 +157,11 @@ export function AISettingsPage({
   onImportMaterial,
   onDeleteMaterial,
 }: AISettingsPageProps) {
+  const [section, setSection] = useState<"models" | "skills" | "materials">("models");
+  const [showAllProviders, setShowAllProviders] = useState(false);
+  const currentProviderIds = [aiSettings.activeProviderId, aiSettings.completionProviderId, aiSettings.analysisProviderId, aiSettings.optimizationProviderId];
+  const isCurrentConnection = (provider: AiProviderConfig) => provider.kind === "codex-cli" || provider.apiKeyConfigured || currentProviderIds.includes(provider.id);
+  const commonConnectionCount = aiSettings.providers.filter(isCurrentConnection).length;
   const activeProvider = aiSettings.providers.find((provider) => provider.id === aiSettings.activeProviderId);
   const completionProvider = aiSettings.providers.find((provider) => provider.id === aiSettings.completionProviderId);
   const analysisProvider = aiSettings.providers.find((provider) => provider.id === aiSettings.analysisProviderId);
@@ -368,10 +375,16 @@ export function AISettingsPage({
       <header className="page-header">
         <div>
           <h1>AI 设置</h1>
-          <p>分别配置成稿、低延迟补全、文章理解与优化模型，再组装可复用的 Skill。</p>
+          <p>模型分工、写作规则与图片素材，分开管理。</p>
         </div>
       </header>
 
+      <SettingsTabs id="ai-settings" label="AI 设置分类" value={section} onChange={setSection} tabs={[
+        { id: "models", label: "模型与分工" }, { id: "skills", label: "Skill 库" }, { id: "materials", label: "图片素材库" },
+      ]} />
+      <div className="settings-tab-panel" role="tabpanel" id="ai-settings-panel-models" aria-labelledby="ai-settings-tab-models" hidden={section !== "models"}>
+      <details className="settings-policy-disclosure">
+        <summary><ShieldCheck size={15} /><span>费用策略</span><small>{spendingPolicy === "zero-cost" ? "X / Gemini API 已锁定" : "允许 X / Gemini API"}</small><ChevronDown size={14} /></summary>
       <section className={`spending-policy-panel policy-${spendingPolicy}`} aria-labelledby="spending-policy-heading">
         <span className="spending-policy-icon"><ShieldCheck size={20} /></span>
         <div className="spending-policy-copy">
@@ -391,6 +404,8 @@ export function AISettingsPage({
         </div>
       </section>
 
+      </details>
+      <div className="settings-group-heading"><h2>当前任务分工</h2><span>分别选择各项任务的模型</span></div>
       <section className="ai-role-overview" aria-label="AI 工作角色">
         {[
           { id: "draft", label: "成稿", description: "生成快讯与正文", provider: activeProvider, icon: <Sparkles size={17} /> },
@@ -410,7 +425,25 @@ export function AISettingsPage({
               <span className="ai-role-icon">{slot.icon}</span>
               <div className="ai-role-copy">
                 <span>{slot.label}<small>{slot.description}</small></span>
-                <strong>{completionDisabled ? "自动 API 补全已关闭" : slot.provider?.name || "尚未选择"}</strong>
+                <select
+                  aria-label={`用于${slot.label}的模型`}
+                  value={slot.provider?.id || ""}
+                  disabled={Boolean(roleBusy) || completionBusy || Boolean(skillBusy?.startsWith("provider:"))}
+                  onChange={(event) => {
+                    const provider = aiSettings.providers.find((item) => item.id === event.target.value);
+                    if (!provider) return;
+                    if (slot.id === "draft") void activateProvider(provider);
+                    else if (slot.id === "completion") void assignCompletionProvider(provider);
+                    else void assignAgentRole(slot.id as ArticleAgentRole, provider);
+                  }}
+                >
+                  <option value="" disabled>{completionDisabled ? "自动 API 补全已关闭" : "选择模型"}</option>
+                  {aiSettings.providers.map((provider) => {
+                    const locked = spendingPolicy === "zero-cost" && (provider.id === "gemini" || /gemini/iu.test(provider.name));
+                    const unavailable = locked || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured) || (slot.id === "completion" && provider.kind !== "openai-compatible");
+                    return <option key={provider.id} value={provider.id} disabled={unavailable}>{provider.name}{locked ? " · 费用锁定" : provider.kind !== "codex-cli" && !provider.apiKeyConfigured ? " · 待配置" : ""}</option>;
+                  })}
+                </select>
                 <small>{completionDisabled ? "仍可正常手写、粘贴或使用网页协作" : slot.id === "completion"
                   ? slot.provider?.inlineCompletionModel || slot.provider?.model || "未填写模型"
                   : slot.provider?.model || "未填写模型"}</small>
@@ -427,24 +460,28 @@ export function AISettingsPage({
       <section className="ai-settings-section provider-section">
         <div className="ai-section-heading">
           <span className="section-icon"><Bot size={20} /></span>
-          <div><h2>AI 接口与 Agent 分工</h2><p>成稿、补全、理解和改稿可以使用不同模型；API Key 只进入本机受保护存储。</p></div>
+          <div><h2>模型连接</h2><p>API Key 只进入本机受保护存储；配置保存与连接测试分别记录。</p></div>
           <span className="secure-note"><LockKeyhole size={14} />不写入项目文件</span>
+        </div>
+        <div className="provider-filter" role="group" aria-label="模型连接筛选">
+          <button type="button" aria-pressed={!showAllProviders} onClick={() => setShowAllProviders(false)}>常用连接 {commonConnectionCount}</button>
+          <button type="button" aria-pressed={showAllProviders} onClick={() => setShowAllProviders(true)}>全部连接 {aiSettings.providers.length}</button>
         </div>
         <div className="provider-list">
           {aiSettings.providers.map((provider) => {
             const active = provider.id === aiSettings.activeProviderId;
             const completion = provider.id === aiSettings.completionProviderId;
-            const activating = skillBusy === `provider:${provider.id}`;
             const testing = providerTestBusy === provider.id;
             const latestHealth = aiSettings.latestProviderHealth[provider.id];
             const healthView = providerHealthPresentation(provider, latestHealth);
             const meteredLocked = spendingPolicy === "zero-cost" && (provider.id === "gemini" || /gemini/iu.test(provider.name));
             return (
-              <article className={`${active ? "provider-row active" : "provider-row"}${meteredLocked ? " metered-locked" : ""}`} key={provider.id}>
+              <article className={`${active ? "provider-row active" : "provider-row"}${meteredLocked ? " metered-locked" : ""}`} key={provider.id} hidden={!showAllProviders && !isCurrentConnection(provider)}>
                 <span className={`provider-logo provider-logo-${provider.id}`}><ProviderBrandIcon provider={provider} /></span>
                 <div className="provider-copy">
                   <div><strong>{provider.name}</strong>{active ? <span className="active-pill"><Check size={11} />正在成稿</span> : null}{completion ? <span className="active-pill"><Zap size={11} />{provider.apiKeyConfigured ? "正在补全" : "补全预设 · 待配置"}</span> : null}</div>
-                  <p>{provider.description}</p>
+                  <p className="provider-model-name">{provider.model || "未填写模型"}</p>
+                  <details className="provider-more"><summary>能力与调用方式</summary><p>{provider.description}</p>
                   <small className={provider.kind === "codex-cli" ? "provider-cost-label included" : "provider-cost-label metered"}>
                     {provider.kind === "codex-cli" ? "现有 ChatGPT 登录 · 不单独走 API 账单" : meteredLocked ? "Gemini API · 已锁定" : "按量接口 · 仅在主动启用后调用"}
                   </small>
@@ -455,6 +492,7 @@ export function AISettingsPage({
                     {provider.supportsVision ? <span className="vision">截图识别</span> : <span className="muted">不支持看图</span>}
                     {provider.kind === "codex-cli" ? <span className="native">原生 Skill</span> : <span>提示词 Skill</span>}
                   </div>
+                  </details>
                 </div>
                 <div className="provider-key-state">
                   {provider.kind === "codex-cli" ? (
@@ -470,41 +508,6 @@ export function AISettingsPage({
                       <b>{healthView.label}</b>
                       <small>{latestHealth ? `上次 ${checkedAtLabel(latestHealth.lastCheckedAt)} · ${healthView.detail}` : healthView.detail}</small>
                     </span>
-                  </div>
-                </div>
-                <div className="provider-agent-roles" aria-label={`${provider.name} 的 AI 分工`}>
-                  <span><BrainCircuit size={13} />AI 分工</span>
-                  <div>
-                    <button
-                      type="button"
-                      className={completion ? "selected" : ""}
-                      disabled={completionBusy || meteredLocked || provider.kind !== "openai-compatible" || !provider.apiKeyConfigured}
-                      title={provider.kind === "openai-compatible" ? "用这个低延迟 API 预测下一句或下一段" : "本机 Codex 适合长任务，不用于逐字补全"}
-                      onClick={() => void assignCompletionProvider(provider)}
-                    >
-                      {completionBusy && !completion ? <LoaderCircle className="spin" size={12} /> : <Zap size={12} />}
-                      用于补全
-                    </button>
-                    <button
-                      type="button"
-                      className={aiSettings.analysisProviderId === provider.id ? "selected" : ""}
-                      disabled={Boolean(roleBusy) || meteredLocked || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured)}
-                      title="用这个模型解释原文、核对草稿并回答追问"
-                      onClick={() => void assignAgentRole("analysis", provider)}
-                    >
-                      {roleBusy === "analysis" && aiSettings.analysisProviderId !== provider.id ? <LoaderCircle className="spin" size={12} /> : <FileSearch size={12} />}
-                      分析
-                    </button>
-                    <button
-                      type="button"
-                      className={aiSettings.optimizationProviderId === provider.id ? "selected" : ""}
-                      disabled={Boolean(roleBusy) || meteredLocked || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured)}
-                      title="用这个模型检查问题并提出一版可应用的优化稿"
-                      onClick={() => void assignAgentRole("optimization", provider)}
-                    >
-                      {roleBusy === "optimization" && aiSettings.optimizationProviderId !== provider.id ? <LoaderCircle className="spin" size={12} /> : <WandSparkles size={12} />}
-                      优化
-                    </button>
                   </div>
                 </div>
                 <div className="provider-actions">
@@ -527,15 +530,7 @@ export function AISettingsPage({
                     aria-expanded={providerModal?.id === provider.id}
                     onClick={() => openProvider(provider)}
                   >配置 API</button>
-                  <button
-                    type="button"
-                    className={active ? "provider-enable active" : "provider-enable"}
-                    disabled={active || activating || meteredLocked || (provider.kind !== "codex-cli" && !provider.apiKeyConfigured)}
-                    onClick={() => void activateProvider(provider)}
-                  >
-                    {activating ? <LoaderCircle className="spin" size={14} /> : active ? <Check size={14} /> : null}
-                    {active ? "已启用" : "使用此 AI"}
-                  </button>
+
                 </div>
               </article>
             );
@@ -543,6 +538,8 @@ export function AISettingsPage({
         </div>
       </section>
 
+      </div>
+      <div className="settings-tab-panel" role="tabpanel" id="ai-settings-panel-skills" aria-labelledby="ai-settings-tab-skills" hidden={section !== "skills"}>
       <section className="ai-settings-section skill-section">
         <div className="ai-section-heading">
           <span className="section-icon"><Library size={20} /></span>
@@ -586,6 +583,8 @@ export function AISettingsPage({
         </div>
       </section>
 
+      </div>
+      <div className="settings-tab-panel" role="tabpanel" id="ai-settings-panel-materials" aria-labelledby="ai-settings-tab-materials" hidden={section !== "materials"}>
       <section className="ai-settings-section material-section">
         <div className="ai-section-heading">
           <span className="section-icon"><Images size={20} /></span>
@@ -655,7 +654,7 @@ export function AISettingsPage({
               const governance = materialGovernanceView(material);
               return (
                 <article className={`material-card governance-${governance.status}`} key={material.id}>
-                  <div className="material-image-wrap"><img src={material.publicPath} alt={material.title} /><span className={material.rights}>{rightsLabels[material.rights]}</span></div>
+                  <div className="material-image-wrap"><img src={material.publicPath} alt={material.title} loading="lazy" /><span className={material.rights}>{rightsLabels[material.rights]}</span></div>
                   <div className="material-card-copy">
                     <strong>{material.title}</strong>
                     <small>{material.attribution}</small>
@@ -681,6 +680,7 @@ export function AISettingsPage({
         )}
       </section>
 
+      </div>
       {providerModal ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) closeProvider(); }}>
           <section ref={providerDialogRef} id="provider-config-dialog" tabIndex={-1} className="source-modal provider-modal" role="dialog" aria-modal="true" aria-labelledby="provider-modal-title" aria-describedby="provider-modal-description">

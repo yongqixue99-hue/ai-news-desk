@@ -93,6 +93,17 @@ test("publisher caption prefers the edited paragraph over a generic image label"
   assert.doesNotMatch(publisherBodyHtml(next), /<p>图：广告示意图<\/p>/);
 });
 
+test("personal uploads do not add internal filenames or local-upload labels to the delivered article", () => {
+  const next = draft();
+  Object.assign(next.images[0].image, { rights: "user-provided", sourceUrl: "local-upload", attribution: "本地上传", caption: "image" });
+  next.images[0].caption = "image";
+  next.bodyHtml = '<p>前文</p><img src="/media/draft_test/image_one.png" data-media-id="placement_one"><p>后文</p>';
+  assert.doesNotMatch(publisherBodyHtml(next), /来源：本地上传|<p>图：/);
+  assert.equal(publisherImageCaptions(next).get("placement_one"), "");
+  next.bodyHtml = next.bodyHtml.replace("<p>后文</p>", "<p>图：会议现场</p><p>后文</p>");
+  assert.equal(publisherImageCaptions(next).get("placement_one"), "会议现场");
+});
+
 test("publisher keeps visible linked attribution for licensed images", () => {
   const next = draft();
   next.images[0].image.rights = "licensed";

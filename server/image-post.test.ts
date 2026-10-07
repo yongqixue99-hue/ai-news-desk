@@ -7,6 +7,14 @@ import {
   normalizeImagePostCopy,
 } from "./image-post.js";
 
+test("image-post creation accepts the same mixed-language titles as Xiaoheihe delivery", () => {
+  const title = "DeepSeek月之暗面将和OpenAi向联合国汇报Ai风险了";
+  assert.equal(normalizeImagePostCopy({ title, lines: ["独立测试正文。"] }).title, title);
+  assert.throws(() => normalizeImagePostCopy({
+    title: `${"中".repeat(29)}ABCD`, lines: ["独立测试正文。"],
+  }), /当前 31 字/);
+});
+
 test("image-post copy stays short, emotional and free of summary scaffolding", () => {
   const copy = normalizeImagePostCopy({
     title: "Codex 用完额度，竟然弹出 8 美元“续命”按钮",

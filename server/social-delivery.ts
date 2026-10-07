@@ -2,8 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import * as cheerio from "cheerio";
 import { bodyHtmlWithRequiredImageAttribution } from "./article-html.js";
 import { publicationRevisionHash } from "./publication-state.js";
+import { socialArticleTitle, socialMetadataBinding } from "./social-metadata.js";
 import { evaluateDraftReadiness } from "./draft-readiness.js";
-import { socialPlatforms, type SocialPlatform, type SocialAccount, type SocialDeliveryReceipt } from "./social-delivery-types.js";
+import { socialPlatforms, socialTitleProblem, type SocialPlatform, type SocialAccount, type SocialDeliveryReceipt } from "./social-delivery-types.js";
 import type { ArticleDraft, WorkflowState, DraftImagePlacement } from "./types.js";
 import type { SocialBridgeMethod } from "./social-bridge.js";
 import type { WeChatImageAsset } from "./wechat-draft.js";
@@ -11,7 +12,10 @@ import type { WeChatImageAsset } from "./wechat-draft.js";
 type Bridge = { request: (method: SocialBridgeMethod, params?: Record<string, unknown>) => Promise<unknown> };
 const record = (input: unknown): Record<string, unknown> => input && typeof input === "object" && !Array.isArray(input) ? input as Record<string, unknown> : {};
 const text = (input: unknown) => typeof input === "string" ? input.slice(0, 300) : "";
-export const socialRevisionHash = (draft: ArticleDraft, platform: SocialPlatform) => createHash("sha256").update(`${platform}:${publicationRevisionHash(draft, "wechat")}`).digest("hex");
+export const socialRevisionHash = (draft: ArticleDraft, platform: SocialPlatform) => {
+  const metadata = socialMetadataBinding(draft, platform);
+  return createHash("sha256").update(`${platform}:${publicationRevisionHash(draft, "wechat")}${metadata ? `:${metadata}` : ""}`).digest("hex");
+};
 export const socialDraftUrl = (platform: SocialPlatform, input: unknown) => {
   try {
     const url = new URL(String(input));
@@ -27,9 +31,10 @@ export const socialAccounts = (input: unknown): SocialAccount[] => {
     const account = list.find(entry => entry.id === platform.id);
     const authenticated = account?.isAuthenticated === true;
     const username = text(account?.username).trim();
-    return { id: platform.id, available: platform.enabled && Boolean(account), authenticated, username, accountId: text(account?.userId),
-      detail: !platform.enabled ? "待接入：草稿适配尚未核验，可打开平台手动发布"
-        : !account ? "当前同步助手未提供此平台" : !authenticated ? "请先在同一个 Chrome 登录"
+    const authState = !platform.enabled ? "unavailable" : authenticated ? "signed-in" : account?.isAuthenticated === false ? "signed-out" : "unknown";
+    return { id: platform.id, available: platform.enabled && Boolean(account), authenticated, authState, username, accountId: text(account?.userId),
+      detail: !platform.enabled ? "可打开编辑页；自动存稿尚未接通"
+        : authState === "unknown" ? "登录状态待检测，已登录账号无需重登" : !authenticated ? "等待在 Chrome 登录，完成后自动继续"
           : !username || !text(account?.userId) ? "助手未返回完整账号标识，暂不能投递" : `已登录 · ${username}` };
   });
 };
@@ -37,7 +42,7 @@ interface Dependencies {
   bridge: Bridge;
   read: () => Promise<WorkflowState>;
   update: <T>(mutate: (state: WorkflowState) => T) => Promise<T>;
-  quality: (draft: ArticleDraft) => Promise<void>;
+  quality: (draft: ArticleDraft, deliveryTitle?: string) => Promise<void>;
   loadImage: (placement: DraftImagePlacement) => Promise<WeChatImageAsset>;
 }
 export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
@@ -47,7 +52,8 @@ export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
     if (raw.isAuthenticated !== true || !text(raw.username).trim() || !text(raw.userId).trim()) throw new Error("未取得可核对的登录账号，请刷新连接状态并登录平台");
     return { name: text(raw.username).trim(), id: text(raw.userId).trim() };
   };
-  const deliver = async (draftId: string, platform: SocialPlatform, expectedAccount: string, expectedUpdatedAt: string, expectedAccountId: string): Promise<SocialDeliveryReceipt> => {
+  const deliver = async (draftId: string, platform: SocialPlatform, expectedAccount: string, expectedUpdatedAt: string, expectedAccountId: string, expectedRevision?: string, signal?: AbortSignal): Promise<SocialDeliveryReceipt> => {
+    signal?.throwIfAborted();
     if (!socialPlatforms.find(item => item.id === platform)?.enabled) throw new Error("这个平台的草稿投递尚未接通");
     const key = `${draftId}:${platform}`;
     if (active.has(key)) throw new Error("该平台正在投递，请等待当前回执");
@@ -57,10 +63,11 @@ export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
       const state = await dependencies.read();
       const draft = state.drafts.find(entry => entry.id === draftId);
       if (!draft) throw new Error("草稿不存在");
-      if (draft.updatedAt !== expectedUpdatedAt) throw new Error("草稿已变化，请保存当前正文后重新投递");
+      if (expectedRevision ? socialRevisionHash(draft, platform) !== expectedRevision : draft.updatedAt !== expectedUpdatedAt) throw new Error("草稿已变化，请保存当前正文后重新投递");
       if (draft.contentFormat === "image-post") throw new Error("新增渠道目前支持文章，请切换为文章格式");
-      const title = draft.title.trim();
-      if (!title || Array.from(title).length > (platform === "baijiahao" ? 30 : 100)) throw new Error(platform === "baijiahao" ? "百家号文章标题需为 1–30 字" : "知乎文章标题需为 1–100 字");
+      const title = socialArticleTitle(draft, platform);
+      const titleProblem = socialTitleProblem(platform, title);
+      if (titleProblem) throw new Error(titleProblem);
       const initialAccount = await account(platform);
       if (!expectedAccount || !expectedAccountId || initialAccount.name !== expectedAccount || initialAccount.id !== expectedAccountId) throw new Error("登录账号已变化，请刷新后核对目标账号");
       const revisionHash = socialRevisionHash(draft, platform);
@@ -69,40 +76,49 @@ export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
       const same = previous.find(receipt => receipt.platform === platform && receipt.accountId === expectedAccountId && receipt.revisionHash === revisionHash && ["reported", "reviewed"].includes(receipt.status));
       if (same) return same;
       if (previous.some(receipt => receipt.platform === platform && receipt.accountId === expectedAccountId && receipt.status === "reported")) throw new Error("请先核对上次助手回执中的草稿，再投递新版本");
-      await dependencies.quality(draft);
+      await dependencies.quality(draft, title);
       const $ = cheerio.load(`<article>${bodyHtmlWithRequiredImageAttribution(draft)}</article>`, null, false);
       const nodes = $("article img").toArray();
       const placements = nodes.map(node => draft.images.find(item => item.id === $(node).attr("data-media-id")));
       if (placements.some(item => !item)) throw new Error("正文包含未纳入素材管理的图片，请重新插入");
       const used = placements.filter((item): item is DraftImagePlacement => Boolean(item));
-      const readiness = evaluateDraftReadiness({ ...draft, images: used }, platform);
+      const coverId = draft.socialMetadata?.[platform]?.coverPlacementId;
+      const cover = coverId ? draft.images.find(item => item.id === coverId) : used[0];
+      if (coverId && !cover) throw new Error("所选平台封面已不存在，请重新选择封面");
+      const required = [...new Map([...used, ...(cover ? [cover] : [])].map(item => [item.id, item])).values()];
+      const readiness = evaluateDraftReadiness({ ...draft, title, images: required }, platform);
       if (!readiness.ready) throw new Error(readiness.blockers.join("；"));
       if (!$("article").text().trim()) throw new Error("文章正文不能为空");
       // Validate every local path and fingerprint before any upload; never send local file URLs.
-      const assets = await Promise.all(used.map(dependencies.loadImage));
+      const assets = await Promise.all(required.map(dependencies.loadImage));
+      const uploaded = new Map<string, string>();
       for (let index = 0; index < assets.length; index++) {
+        signal?.throwIfAborted();
         const asset = assets[index]!;
         const response = record(await dependencies.bridge.request("uploadImage", { platform, imageData: Buffer.from(asset.bytes).toString("base64"), mimeType: asset.contentType }));
         const url = new URL(String(response.url ?? ""));
         const hosts = platform === "zhihu" ? ["zhimg.com"] : ["baidu.com", "bdstatic.com", "bcebos.com"];
         if (url.protocol !== "https:" || url.username || url.password || url.port || !hosts.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))) throw new Error("图片上传未返回目标平台的图片地址");
-        $(nodes[index]!).attr("src", url.href).removeAttr("data-media-id data-caption data-attribution");
+        uploaded.set(required[index]!.id, url.href);
       }
+      nodes.forEach((node, index) => $(node).attr("src", uploaded.get(used[index]!.id)!).removeAttr("data-media-id data-caption data-attribution"));
       if ((await account(platform)).id !== expectedAccountId) throw new Error("图片准备期间账号发生变化，请重新核对");
       const current = (await dependencies.read()).drafts.find(entry => entry.id === draftId);
       if (!current || socialRevisionHash(current, platform) !== revisionHash) throw new Error("图片准备期间正文发生变化，已停止投递");
-      await dependencies.quality(current);
-      const currentReadiness = evaluateDraftReadiness({ ...current, images: current.images.filter(item => used.some(placement => placement.id === item.id)) }, platform);
+      await dependencies.quality(current, socialArticleTitle(current, platform));
+      const currentReadiness = evaluateDraftReadiness({ ...current, title, images: current.images.filter(item => required.some(placement => placement.id === item.id)) }, platform);
       if (!currentReadiness.ready) throw new Error(currentReadiness.blockers.join("；"));
       const now = new Date().toISOString();
       attempt = { id: randomUUID(), platform, account: expectedAccount, accountId: expectedAccountId, title, revisionHash, createdAt: now, updatedAt: now, status: "sending", detail: "已发送请求，等待助手回执", finalPublishAttempted: false };
       // Persist before the remote mutation. Interrupted tasks remain blocked across restarts.
       await dependencies.update(state => {
+        signal?.throwIfAborted();
         const current = state.drafts.find(entry => entry.id === draftId);
         if (!current || socialRevisionHash(current, platform) !== revisionHash) throw new Error("正文已变化，已停止投递");
         (current.socialDeliveries ??= []).unshift(attempt!);
       });
-      const response = record(await dependencies.bridge.request("syncArticle", { platforms: [platform], article: { title, content: $("article").html(), cover: $("article img").first().attr("src") } }));
+      signal?.throwIfAborted();
+      const response = record(await dependencies.bridge.request("syncArticle", { platforms: [platform], article: { title, content: $("article").html(), cover: cover ? uploaded.get(cover.id) : undefined } }));
       const returnedAccount = await account(platform);
       const results = Array.isArray(response.results) ? response.results.map(record) : [];
       const result = results.find(entry => entry.platform === platform);

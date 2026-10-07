@@ -1,3 +1,5 @@
+import type { PrimaryDeliveryStatus, wechatPreflight } from "../server/primary-delivery.js";
+import type { CommunityView } from "../server/community-view.js";
 import type { AggregationView } from "../server/aggregation-desk.js";
 import type { DraftOverview } from "../server/draft-overview.js";
 import type { CommunityPlatform, TopicFeedView } from "../server/topic-feeds.js";
@@ -46,6 +48,8 @@ import type {
   WeChatConnectionResult,
   WeChatDraftSyncReceipt,
 } from "./types";
+import type { DraftLibrarySelection, DraftTrashSelection, TrashedDraftSummary } from "../server/draft-library.js";
+import type { AiStyleResult } from "ai-style-score";
 
 const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
   const response = await fetch(url, {
@@ -307,9 +311,15 @@ export interface ProductJob {
 }
 
 export const api = {
+  aiStyleKeyStatus: () => request<{ configured: boolean }>("/api/ai-style-score/key"),
+  saveAiStyleKey: (key: string) => request<{ configured: boolean }>("/api/ai-style-score/key", { method: "PUT", body: JSON.stringify({ key }) }),
+  deleteAiStyleKey: () => request<{ configured: boolean }>("/api/ai-style-score/key", { method: "DELETE" }),
+  scoreAiStyle: (text: string) => request<AiStyleResult>("/api/ai-style-score", { method: "POST", body: JSON.stringify({ text }) }),
   bootstrap: () => request<WorkflowState>("/api/bootstrap"),
+  community: () => request<CommunityView>("/api/community"),
   shell: () => request<ShellView>("/api/shell"),
   today: () => request<TodayView>("/api/today?readOnly=1"),
+  translateTodayTitles: () => request<{ requested: number; completed: number; failed: number }>("/api/today/titles", { method: "POST", body: "{}" }),
   homeNews: (keyword: string) => request<StoryView[]>(`/api/home-news?keyword=${encodeURIComponent(keyword)}`),
   homeLayout: () => request<HomeLayout>("/api/home-layout"),
   saveHomeLayout: (layout: HomeLayout) => request<HomeLayout>("/api/home-layout", { method: "PATCH", body: JSON.stringify(layout) }),
@@ -596,6 +606,11 @@ export const api = {
     body: JSON.stringify({ mode }),
   }),
   draft: (draftId: string) => request<ArticleDraft>(`/api/drafts/${encodeURIComponent(draftId)}`),
+  createBlankDraft: () => request<ArticleDraft>("/api/drafts", { method: "POST", body: "{}" }),
+  trashDrafts: (drafts: DraftLibrarySelection[]) => request<{ draftIds: string[] }>("/api/draft-trash", { method: "POST", body: JSON.stringify({ drafts }) }),
+  draftTrash: () => request<TrashedDraftSummary[]>("/api/draft-trash"),
+  restoreTrashedDraft: (draftId: string) => request<ArticleDraft>(`/api/draft-trash/${encodeURIComponent(draftId)}/restore`, { method: "POST", body: "{}" }),
+  restoreTrashedDrafts: (drafts: DraftTrashSelection[]) => request<ArticleDraft[]>("/api/draft-trash/restore", { method: "POST", body: JSON.stringify({ drafts }) }),
   confirmDraft: (draftId: string, updatedAt: string) => request<ArticleDraft>(`/api/drafts/${encodeURIComponent(draftId)}/confirm`, { method: "POST", body: JSON.stringify({ updatedAt }) }),
   saveDraft: (draftId: string, draft: Partial<ArticleDraft>, saveMode: DraftSaveMode = "manual") =>
     request<ArticleDraft>(`/api/drafts/${draftId}`, {
@@ -711,9 +726,11 @@ export const api = {
       method: "POST",
     body: "{}",
   }),
+  primaryDeliveryStatus: (draftId: string) => request<PrimaryDeliveryStatus & { xiaoheiheNextCompanion?: "Steam" | "数码硬件"; wechatPreflight: ReturnType<typeof wechatPreflight> }>(`/api/drafts/${draftId}/delivery-status`),
+  resolveWeChatAttempt: (draftId: string, attemptId: string) => request<{ ok: boolean }>(`/api/drafts/${draftId}/wechat-attempts/${attemptId}/resolve`, { method: "POST", body: JSON.stringify({ resolution: "not-received", confirmed: true }) }),
   syncWeChatDraft: (
     draftId: string,
-    input: { author?: string; digest?: string; contentSourceUrl?: string },
+    input: { author?: string; digest?: string; contentSourceUrl?: string; coverPlacementId?: string; updatedAt?: string },
   ) => request<{ receipt: WeChatDraftSyncReceipt; draft: ArticleDraft }>(
     `/api/drafts/${draftId}/wechat-sync`,
     { method: "POST", body: JSON.stringify(input) },
@@ -754,10 +771,10 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
-  fillDraft: (draftId: string) =>
+  fillDraft: (draftId: string, updatedAt?: string) =>
     request<PublisherResult>(`/api/drafts/${draftId}/fill`, {
       method: "POST",
-      body: "{}",
+      body: JSON.stringify({ updatedAt }),
     }),
   confirmPublished: (draftId: string, platform: "xiaoheihe" | "wechat" = "xiaoheihe") =>
     request<{ confirmation: PlatformPublicationConfirmation; recentTopics: string[]; recentCommunities: string[] }>(
@@ -767,9 +784,22 @@ export const api = {
 };
 
 export const socialDeliveryApi = {
+  openReceipt: (id: string, receiptId: string) => request(`/api/drafts/${encodeURIComponent(id)}/social-deliveries/${encodeURIComponent(receiptId)}/open`, { method: "POST", body: "{}" }),
+  open: (platforms: string[]) => request<{ detail: string }>("/api/delivery/social/open", { method: "POST", body: JSON.stringify({ platforms }) }),
+  batches: (id: string) => request<import("../server/social-delivery-types").SocialDeliveryBatch[]>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches`),
+  start: (id: string, input: { platforms: string[]; updatedAt: string; accounts: Record<string, { account: string; accountId: string }> }) => request<import("../server/social-delivery-types").SocialDeliveryBatch & { browserError?: string }>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches`, { method: "POST", body: JSON.stringify(input) }),
+  cancel: (id: string, batchId: string) => request<import("../server/social-delivery-types").SocialDeliveryBatch>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST", body: "{}" }),
   status: () => request<import("../server/social-delivery-types").SocialDeliveryStatus>("/api/delivery/social/status"),
   settings: (input: { enabled: boolean; extensionId: string; token?: string }) => request("/api/delivery/social/settings", { method: "PATCH", body: JSON.stringify(input) }),
-  receipts: (id: string) => request<{ receipts: import("../server/social-delivery-types").SocialDeliveryReceipt[]; revisions: Record<string, string> }>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`),
+  receipts: (id: string, signal?: AbortSignal) => request<{ receipts: import("../server/social-delivery-types").SocialDeliveryReceipt[]; revisions: Record<string, string> }>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`, { signal }),
   deliver: (id: string, input: { platform: string; account: string; accountId: string; updatedAt: string }) => request<import("../server/social-delivery-types").SocialDeliveryReceipt>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`, { method: "POST", body: JSON.stringify(input) }),
   resolve: (id: string, receiptId: string, resolution: "reviewed" | "not-received") => request(`/api/drafts/${encodeURIComponent(id)}/social-deliveries/${encodeURIComponent(receiptId)}/resolve`, { method: "POST", body: JSON.stringify({ resolution }) }),
+};
+
+export const deliveryBatchApi = {
+  view: (id: string, signal?: AbortSignal) => request<import("../server/delivery-batch-types").DeliveryBatchView>(`/api/drafts/${encodeURIComponent(id)}/delivery-batches`, { signal }),
+  connections: (id: string, signal?: AbortSignal) => request<import("../server/delivery-batch-types").DeliveryBatchView["platforms"]>(`/api/drafts/${encodeURIComponent(id)}/delivery-connections`, { signal }),
+  start: (id: string, input: { platforms: string[]; updatedAt: string; retryOf?: string; accountBindings?: Record<string, string> }) => request<import("../server/delivery-batch-types").DeliveryBatch>(`/api/drafts/${encodeURIComponent(id)}/delivery-batches`, { method: "POST", body: JSON.stringify(input) }),
+  cancel: (id: string, batchId: string) => request<import("../server/delivery-batch-types").DeliveryBatch>(`/api/drafts/${encodeURIComponent(id)}/delivery-batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST", body: "{}" }),
+  open: (platforms: string[]) => request<{ detail: string }>("/api/delivery/batch/open", { method: "POST", body: JSON.stringify({ platforms }) }),
 };

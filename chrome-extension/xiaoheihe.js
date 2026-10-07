@@ -178,7 +178,7 @@ async function ensureEditor() {
 
   const bodyText = document.body?.innerText || "";
   if (/扫码登录|账号登录|登录后发布|立即登录/.test(bodyText) || /login|signin/i.test(location.href)) {
-    return { issue: { name: "登录", ok: false, detail: "请先在这个常用 Chrome 中登录小黑盒，再重新点击填入" } };
+    return { issue: { name: "登录", ok: false, detail: "请在当前 Chrome 登录小黑盒；登录后会自动继续填入" } };
   }
 
   const writeArticle = textMatch(/^(写文章|发布文章)$/);
@@ -202,7 +202,7 @@ async function ensureEditor() {
 async function ensureImagePostEditor() {
   const bodyText = document.body?.innerText || "";
   if (/扫码登录|账号登录|登录后发布|立即登录/.test(bodyText) || /login|signin/i.test(location.href)) {
-    return { issue: { name: "登录", ok: false, detail: "请先在这个常用 Chrome 中登录小黑盒，再重新点击填入" } };
+    return { issue: { name: "登录", ok: false, detail: "请在当前 Chrome 登录小黑盒；登录后会自动继续填入" } };
   }
 
   const findFields = () => {
@@ -301,15 +301,16 @@ async function fillImagePost(job) {
     });
     steps.push({ name: "配图", ok: Boolean(upload?.ok), detail: String(upload?.detail || "图集上传没有返回结果") });
     if (!upload?.ok) return { pageUrl: location.href, steps };
-    steps.push(await chooseCommunity(job.community));
+    steps.push(await chooseCommunities(job));
     steps.push(await chooseTopics(job.topics));
+    steps.push(...await configurePublishing(job));
   } catch (error) {
     steps.push({ name: "页面操作", ok: false, detail: error instanceof Error ? error.message : String(error) });
   }
   return { pageUrl: location.href, steps };
 }
 
-async function uploadImages(job) {
+async function uploadImages(job, progress = {}) {
   const images = Array.isArray(job.images) ? job.images : [];
   const integrity = publisherJobAdapter?.validateArticleImagePayload(job);
   if (!integrity?.ok) {
@@ -321,26 +322,33 @@ async function uploadImages(job) {
   }
   if (!images.length) return { name: "配图", ok: true, detail: "本稿没有需要上传的图片" };
   const byId = new Map(images.map((image) => [image.id, image]));
-  const markers = domAdapter?.findImageMarkers(document, images.map((image) => image.id))
+  const recorded = (progress.uploadedImages || []).map(image => ({ id: image.id, source: image.source }));
+  if (recorded.some(image => !byId.has(image.id) || !domAdapter?.findImageBoxBySource(document, image.source))) {
+    return { name: "配图", ok: false, detail: "已记录的图片无法在平台核对，已停止续接，请先查看平台草稿" };
+  }
+  const remainingIds = images.filter(image => !recorded.some(item => item.id === image.id)).map(image => image.id);
+  const markers = domAdapter?.findImageMarkers(document, remainingIds)
     || [...document.querySelectorAll("[data-ai-news-image]")].map((element) => ({
       id: element.getAttribute("data-ai-news-image"),
       element,
     }));
   const markerIds = markers.map((entry) => String(entry.id || ""));
-  const exactDomMarkers = markers.length === images.length
+  const exactDomMarkers = markers.length === remainingIds.length
     && new Set(markerIds).size === markerIds.length
-    && markerIds.every((id) => byId.has(id));
+    && markerIds.every((id) => remainingIds.includes(id));
   if (!exactDomMarkers) {
     return {
       name: "配图",
       ok: false,
-      detail: `编辑器图片标记与载荷不一致（找到 ${markers.length} 个位置，需要 ${images.length} 张）`,
+      detail: `编辑器图片标记与待补图片不一致（找到 ${markers.length} 个位置，需要 ${remainingIds.length} 张）`,
     };
   }
 
-  let uploaded = 0;
+  let uploaded = recorded.length;
   const failures = [];
-  const uploadedDescriptions = [];
+  const uploadedDescriptions = recorded.map(image => ({
+    resolveImageBox: () => domAdapter?.findImageBoxBySource(document, image.source), caption: byId.get(image.id)?.caption,
+  }));
   for (const markerEntry of markers) {
     const marker = markerEntry.element;
     const image = byId.get(markerEntry.id);
@@ -378,7 +386,9 @@ async function uploadImages(job) {
           continue;
         }
         uploaded += 1;
+        recorded.push({ id: image.id, source: capturedSource });
         uploadedDescriptions.push({ resolveImageBox, caption: image.caption });
+        await progress.onProgress?.(recorded);
       } else failures.push(String(result?.detail || "图片上传没有返回成功状态"));
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
@@ -392,8 +402,10 @@ async function uploadImages(job) {
     if (!await fillImageDescription(entry.resolveImageBox, entry.caption)) {
       failures.push("图片已上传，但图片描述未能填入");
     }
+    await progress.onProgress?.(recorded);
   }
   await wait(500);
+  await progress.onProgress?.(recorded);
   const lostDescription = uploadedDescriptions.find(({ resolveImageBox, caption }) => {
     const imageBox = resolveImageBox();
     if (!(imageBox instanceof HTMLElement)) return true;
@@ -406,7 +418,7 @@ async function uploadImages(job) {
     return {
       name: "配图",
       ok: false,
-      detail: `已上传 ${uploaded}/${markers.length} 张，但最终复验发现图片描述没有保留`,
+      detail: `已上传 ${uploaded}/${images.length} 张，但最终复验发现图片描述没有保留`,
     };
   }
   return {
@@ -453,6 +465,38 @@ async function chooseCommunity(community) {
   return { name: "分区", ok: false, detail: `${community}选项已点击，但页面没有显示为已选择` };
 }
 
+async function chooseCommunities(job) {
+  const communities = Array.isArray(job.communities) ? job.communities : [job.community];
+  if (!communities.length || communities.length > 2 || (communities.includes("盒友杂谈") && communities.length !== 1)) return { name: "分区", ok: false, detail: "社区组合无效" };
+  for (const community of communities) {
+    const result = await chooseCommunity(community);
+    if (!result.ok) return result;
+  }
+  const selected = [...document.querySelectorAll('.editor__topic-item .topic-item__text')].map(item => item.textContent?.trim().toLowerCase());
+  const ok = selected.length === communities.length && communities.every(value => selected.includes(value.toLowerCase()));
+  return { name: "分区", ok, detail: ok ? communities.join(" · ") : "关联社区与本篇设置不一致" };
+}
+
+async function configurePublishing(job) {
+  if (!job.publishing) return [];
+  if (!globalThis.XiaoheiheSettings) return [{ name: "创作计划", ok: false, detail: "请更新新闻台助手后重试" }];
+  return globalThis.XiaoheiheSettings.configure(document, job.publishing, async cover => {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(cover.dataUrl));
+    const coverHash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    const key = `aiNewsDesk.coverCheckpoint.v1.${job.draftId}`;
+    return publisherJobAdapter.runCover({ draftId: job.draftId, coverHash }, {
+      loadCheckpoint: async () => { try { return (await chrome.storage.local.get(key))[key]; } catch { return undefined; } },
+      saveCheckpoint: async value => { try { await chrome.storage.local.set({ [key]: value }); } catch { /* Optional resume metadata. */ } },
+      readLive: async () => {
+        const image = document.querySelector('.form-thumb .thumb-card__image img');
+        const source = image && isVisible(image) && image.complete && image.naturalWidth > 0 && Number(getComputedStyle(image).opacity) > 0 ? image.currentSrc || image.src : undefined;
+        return { pageUrl: location.href, source };
+      },
+      upload: () => chrome.runtime.sendMessage({ type: "AI_NEWS_UPLOAD_XIAOHEIHE_COVER", payload: cover }),
+    });
+  });
+}
+
 async function chooseTopics(topics) {
   const missing = [];
   for (const topic of topics || []) {
@@ -471,7 +515,7 @@ async function chooseTopics(topics) {
       missing.push(topic);
       continue;
     }
-    setNativeValue(input, topic);
+    setNativeValue(input, topic.replace(/\s+/g, ""));
     let option;
     for (let attempt = 0; attempt < 24 && !option; attempt += 1) {
       option = domAdapter?.findTopicOption(document, topic);
@@ -503,46 +547,56 @@ async function fillJob(job) {
   if (readiness.issue) return { pageUrl: location.href, steps: [readiness.issue] };
   const steps = [];
   try {
-    const title = String(job.title || "");
-    let titleEditor = readiness.title;
-    fillPlainText(titleEditor, title);
-    await wait(300);
-    // ProseMirror may replace its root while normalizing the edit. Reacquire it
-    // before verification and retry once on the live node when needed.
-    titleEditor = findEditor().title || titleEditor;
-    let actualTitle = readEditableText(titleEditor);
-    if (actualTitle !== title.trim()) {
-      fillPlainText(titleEditor, title);
-      await wait(300);
-      titleEditor = findEditor().title || titleEditor;
-      actualTitle = readEditableText(titleEditor);
-    }
-    const titleOk = actualTitle === title.trim();
-    steps.push({
-      name: "标题",
-      ok: titleOk,
-      detail: titleOk ? "标题已填入并验证" : `标题验证失败（页面仍为 ${actualTitle.length} 字）`,
+    const checkpointKey = `aiNewsDesk.articleCheckpoint.v1.${job.draftId}`;
+    const readLive = async () => {
+      const snapshot = domAdapter?.readArticleSnapshot(document);
+      if (!snapshot) return undefined;
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ title: snapshot.title, content: snapshot.content })));
+      const signature = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+      return { ...snapshot, signature, pageUrl: location.href };
+    };
+    const content = await publisherJobAdapter.runArticleContent(job, {
+      // Checkpoints contain hashes and image IDs, never article text or image bytes.
+      loadCheckpoint: async () => {
+        try { return (await chrome.storage.local.get(checkpointKey))[checkpointKey]; } catch { return undefined; }
+      },
+      clearCheckpoint: async () => { try { await chrome.storage.local.remove(checkpointKey); } catch { /* Resume is optional. */ } },
+      saveCheckpoint: async checkpoint => { try { await chrome.storage.local.set({ [checkpointKey]: checkpoint }); } catch { /* Keep the completed fill usable even if local checkpoint storage is unavailable. */ } },
+      readLive,
+      fillTitle: async () => {
+        const title = String(job.title || "");
+        let editor = findEditor().title || readiness.title;
+        fillPlainText(editor, title);
+        await wait(300);
+        editor = findEditor().title || editor;
+        if (readEditableText(editor) !== title.trim()) {
+          fillPlainText(editor, title);
+          await wait(300);
+          editor = findEditor().title || editor;
+        }
+        const actualTitle = readEditableText(editor);
+        const ok = actualTitle === title.trim();
+        return { name: "标题", ok, detail: ok ? "标题已填入并验证" : `标题验证失败（页面仍为 ${actualTitle.length} 字）` };
+      },
+      fillBody: async () => {
+        const bodyHtml = String(job.bodyHtml || "");
+        const scratch = document.createElement("div");
+        scratch.innerHTML = bodyHtml;
+        const expected = (scratch.innerText || scratch.textContent || "").replace(/\s+/g, "").trim();
+        const editor = findEditor().body || readiness.editor;
+        fillEditable(editor, expected, bodyHtml);
+        await wait(500);
+        const actual = readEditableText(findEditor().body || editor).replace(/\s+/g, "");
+        const ok = expected.length > 0 && actual === expected;
+        return { name: "正文", ok, detail: ok ? `正文已填入并验证（${actual.length} 字）` : "正文回读与稿件不一致，请重新发送" };
+      },
+      uploadImages: progress => uploadImages(job, progress),
     });
-
-    const bodyHtml = String(job.bodyHtml || "");
-    const scratch = document.createElement("div");
-    scratch.innerHTML = bodyHtml;
-    const expectedBodyText = (scratch.innerText || scratch.textContent || "").replace(/\s+/g, "").trim();
-    fillEditable(readiness.editor, expectedBodyText, bodyHtml);
-    await wait(500);
-    const actualBodyText = readEditableText(readiness.editor).replace(/\s+/g, "");
-    const bodyOk = expectedBodyText.length === 0 || actualBodyText.length >= Math.min(expectedBodyText.length, 20);
-    steps.push({
-      name: "正文",
-      ok: bodyOk,
-      detail: bodyOk ? `正文已填入并验证（${actualBodyText.length} 字）` : "正文填入后被编辑器清空",
-    });
-
-    if (!titleOk || !bodyOk) return { pageUrl: location.href, steps };
-
-    steps.push(await uploadImages(job));
-    steps.push(await chooseCommunity(String(job.community || "")));
+    steps.push(...content.steps);
+    if (!content.ready) return { pageUrl: location.href, steps };
+    steps.push(await chooseCommunities(job));
     steps.push(await chooseTopics(Array.isArray(job.topics) ? job.topics : []));
+    steps.push(...await configurePublishing(job));
   } catch (error) {
     steps.push({
       name: "页面操作",

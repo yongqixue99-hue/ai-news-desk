@@ -72,6 +72,13 @@ test("discovery reader preserves scope, selection and position without implicit 
     await page.goto(`${origin}/#today`);
     await page.getByRole("tab", { name: "AI 新闻", exact: true }).waitFor();
     await page.getByRole("button", { name: `查看 ${fixture.story.title}`, exact: true }).waitFor();
+    const categories = page.getByRole("tablist", { name: "选题分类", exact: true });
+    assert.equal(await categories.isVisible(), true, "topic categories appear after Today finishes loading");
+    for (const name of ["AI 新闻", "知乎", "Hacker News", "V2EX", "GitHub"]) {
+      assert.equal(await categories.getByRole("tab", { name, exact: true }).isVisible(), true, `${name} remains available after loading`);
+    }
+    assert.equal(await categories.getByRole("tab", { name: "AI 新闻", exact: true }).getAttribute("aria-selected"), "true");
+    assert.equal(await page.locator(".today-page .page-loading").count(), 0, "the loading skeleton is replaced by the saved news list");
     if (!baseline) {
       const palette = await page.evaluate(() => {
         const style = getComputedStyle(document.documentElement);

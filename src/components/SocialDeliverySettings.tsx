@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, RefreshCw, Save } from "lucide-react";
 import { socialDeliveryApi } from "../api";
-import type { SocialDeliveryStatus } from "../../server/social-delivery-types";
+import { socialPlatforms, type SocialDeliveryStatus } from "../../server/social-delivery-types";
 
 export function SocialDeliverySettings() {
   const [status, setStatus] = useState<SocialDeliveryStatus>();
@@ -23,9 +23,17 @@ export function SocialDeliverySettings() {
     } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   };
+  const openPlatforms = async () => {
+    setError("");
+    try { await socialDeliveryApi.open(socialPlatforms.map(platform => platform.id)); }
+    catch (error) { setError(error instanceof Error ? error.message : String(error)); }
+  };
   return <section className="social-setup" id="social-delivery-settings">
     <div className="social-heading"><div><small>文章分发</small><h3>连接多平台同步助手</h3></div><span>{status?.connected ? "助手已连接" : "等待连接"}</span></div>
-    <p>使用 Wechatsync 文章同步助手，将已审定的文章送到知乎、百家号草稿箱。今日头条暂保留手动入口。</p>
+    <p>在 Chrome 中登录一次，以后直接复用。百家号、知乎可通过助手存草稿；头条暂提供编辑入口。</p>
+    <div className="social-actions"><button className="secondary-button" onClick={() => void openPlatforms()}><ExternalLink size={14} />打开平台登录</button><button className="secondary-button" disabled={busy} onClick={() => void perform(false)}><RefreshCw size={14} />{busy ? "正在检查…" : "检测连接"}</button></div>
+    <div className="social-accounts">{socialPlatforms.map(platform => <div key={platform.id}><b>{platform.name}</b><span>{status?.accounts.find(account => account.id === platform.id)?.detail || "正在检测…"}</span></div>)}</div>
+    <details className="social-connection-details" open={!status?.settings.tokenConfigured}><summary>{status?.settings.tokenConfigured ? "连接配置 · 已保存" : "首次连接同步助手"}</summary>
     <ol>
       <li><a href="https://www.wechatsync.com/#install" target="_blank" rel="noreferrer">安装文章同步助手 <ExternalLink size={12} /></a>，在同一个 Chrome 登录目标平台。</li>
       <li>打开 <code>chrome://extensions</code>，开启开发者模式，复制“文章同步助手”的扩展 ID。</li>
@@ -36,10 +44,10 @@ export function SocialDeliverySettings() {
       <label>桥接 Token<input type="password" value={token} onChange={event => setToken(event.target.value.trim())} autoComplete="new-password" placeholder={status?.settings.tokenConfigured ? "已保存，留空保持" : "仅保存到本机 Keychain / DPAPI"} /></label>
     </div>
     <label className="social-check"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} />启用本机连接</label>
-    <div className="social-actions"><button className="primary-button" disabled={busy} onClick={() => void perform(true)}><Save size={14} />保存连接</button><button className="secondary-button" disabled={busy} onClick={() => void perform(false)}><RefreshCw size={14} />{busy ? "正在检查…" : "刷新登录状态"}</button></div>
+    <div className="social-actions"><button className="primary-button" disabled={busy} onClick={() => void perform(true)}><Save size={14} />保存连接</button></div>
+    </details>
     <p role="status">{status?.detail ?? "正在读取连接配置…"}</p>
     {error ? <p role="alert" className="social-error">{error}</p> : null}
-    {status?.accounts.map(account => <p key={account.id}><b>{{ zhihu: "知乎", baijiahao: "百家号", toutiao: "今日头条" }[account.id]}</b> · {account.detail}</p>)}
     <small>首次安装、扫码登录和平台验证码需要你操作一次。Mac 和 Windows 分别连接；Token 不随项目或备份导出。</small>
   </section>;
 }

@@ -1,0 +1,53 @@
+/* Application frame: paper-toned navigation beside a white working sheet. */
+.app-shell.workspace-shell { font-family: var(--font-sans); background: var(--canvas); }
+.app-main { background: var(--paper); min-height: 100dvh; }
+.page { background: var(--paper); }
+
+.workspace-shell .main-sidebar { background: var(--canvas); border-color: var(--line); }
+.workspace-shell .brand { border-radius: var(--radius-m); color: var(--ink); }
+.workspace-shell .brand-copy { font-size: 15px; font-weight: 700; letter-spacing: .01em; color: var(--ink); }
+.workspace-shell .brand-copy small { margin-top: 2px; font-size: 9px; font-weight: 500; letter-spacing: .16em; color: var(--faint); }
+.workspace-shell .brand-mark.app-brand-mark img { border-radius: 8px; box-shadow: var(--shadow-1); }
+.workspace-shell .sidebar-toggle { border-radius: var(--radius-s); color: var(--faint); transition: background .16s var(--ease), color .16s var(--ease); }
+.workspace-shell .sidebar-toggle:hover { background: var(--canvas-deep); color: var(--ink); }
+
+.workspace-shell .nav-section-label { padding: 0 10px 8px; font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--faint); }
+.workspace-shell .nav-item { position: relative; height: 38px; gap: 10px; border: 0; border-radius: var(--radius-s); font-size: 13.5px; font-weight: 500; color: var(--text-secondary); transition: background .16s var(--ease), color .16s var(--ease), box-shadow .16s var(--ease); }
+.workspace-shell .nav-item > svg { color: var(--muted); transition: color .16s var(--ease); }
+.workspace-shell .nav-item:hover { background: var(--canvas-deep); color: var(--ink); }
+.workspace-shell .nav-item.active { background: var(--paper); color: var(--ink); font-weight: 650; box-shadow: var(--shadow-1), 0 0 0 1px var(--line-soft); }
+.workspace-shell .nav-item.active:hover { background: var(--paper); }
+.workspace-shell .nav-item.active > svg, .workspace-shell .nav-item.active .notification-bell-icon > svg { color: var(--accent); }
+.workspace-shell .sidebar-footer { gap: 2px; border-top: 1px solid var(--line); }
+.workspace-shell .sidebar-footer .nav-item { font-size: 13px; }
+.sidebar-tools-chevron { color: var(--faint); }
+.workspace-shell .notification-badge { background: var(--accent); color: #fff; font-weight: 700; }
+
+.sidebar-tools-panel { left: calc(100% + 14px); width: 236px; padding: 8px; border-color: var(--line); border-radius: var(--radius-l); box-shadow: var(--shadow-3); animation: pop-in .16s var(--ease); }
+.sidebar-tools-panel > strong { padding: 8px 10px 10px; font-size: 11px; letter-spacing: .08em; color: var(--faint); }
+.sidebar-tools-panel > button { min-height: 40px; border-radius: var(--radius-s); color: var(--text-secondary); transition: background .14s var(--ease); }
+.sidebar-tools-panel > button > svg:first-child { color: var(--muted); }
+.sidebar-tools-panel > button:hover { background: var(--surface-subtle); color: var(--ink); }
+.sidebar-tools-panel > button.active { background: var(--accent-soft); color: var(--accent-deep); }
+.sidebar-tools-panel > button.active > svg:first-child { color: var(--accent); }
+
+@keyframes pop-in { from { opacity: 0; transform: translateY(4px) scale(.985); } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
+
+@media (min-width: 721px) {
+  .app-shell.workspace-shell.sidebar-expanded { grid-template-columns: 224px minmax(0, 1fr); }
+  .workspace-shell.sidebar-expanded .main-sidebar { width: 224px; padding: 18px 12px 14px; }
+  .workspace-shell.sidebar-expanded .sidebar-brand-row { margin-bottom: 22px; padding-left: 2px; }
+  .workspace-shell.sidebar-expanded .nav-item { padding-inline: 10px; }
+  .workspace-shell .main-nav { gap: 22px; }
+  .workspace-shell.sidebar-collapsed .nav-item { min-height: 52px; border-radius: var(--radius-m); }
+  .workspace-shell.sidebar-collapsed .workspace-nav-group + .workspace-nav-group { border-color: var(--line); }
+  .app-main { box-shadow: -1px 0 0 var(--line); }
+}
+
+@media (max-width: 720px) {
+  .workspace-shell .main-sidebar { background: rgb(255 255 255 / 94%); backdrop-filter: saturate(1.4) blur(14px); border-color: var(--line); }
+  .workspace-shell .main-nav .nav-item { border-radius: var(--radius-m); color: var(--muted); }
+  .workspace-shell .main-nav .nav-item.active { background: none; box-shadow: none; color: var(--accent-deep); }
+  .workspace-shell .mobile-more-menu { border-color: var(--line); border-radius: var(--radius-l); box-shadow: var(--shadow-3); }
+}

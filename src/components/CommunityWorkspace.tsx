@@ -2,6 +2,8 @@ import { waitForProductJob, deferredJobMessage } from "../product-job-wait";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  ArrowLeft,
+  ChevronDown,
   Clock3,
   Flame,
   Image as ImageIcon,
@@ -12,7 +14,6 @@ import {
   Sparkles,
   ThumbsDown,
   ThumbsUp,
-  TrendingUp,
 } from "lucide-react";
 import {
   candidateMatchesTopic,
@@ -31,13 +32,15 @@ import type {
   WorkflowRun,
 } from "../types";
 import { EditorialReadingPane } from "./EditorialReadingPane";
+import type { CommunityView } from "../../server/community-view";
 
 type CommunitySortMode = "recommended" | "hot" | "latest";
 
 interface CommunityWorkspaceProps {
-  runs: WorkflowRun[];
+  runs?: WorkflowRun[];
+  feed?: CommunityView["feed"];
   sources: SourceConfig[];
-  settings: Settings;
+  settings: Pick<Settings, "personalizationEnabled">;
   onFeedback: (
     runId: string,
     candidateId: string,
@@ -48,13 +51,10 @@ interface CommunityWorkspaceProps {
   onAutoBrief: (requests: Array<{ runId: string; candidateIds: string[] }>) => Promise<void>;
 }
 
-const containsChinese = (value: string) => /[\u3400-\u9fff]/u.test(value);
 const displayTitle = (candidate: Candidate) => candidate.briefing?.titleZh
-  ?? (containsChinese(candidate.title) ? candidate.title : "正在生成中文标题…");
+  ?? candidate.title;
 const displaySummary = (candidate: Candidate) => candidate.briefing?.summaryZh
-  ?? (containsChinese(candidate.excerpt)
-    ? candidate.excerpt
-    : "正在读取来源并生成中文速览，不需要先打开英文原文。");
+  ?? candidate.excerpt;
 const entryKey = (entry: CommunityFeedEntry) => `${entry.runId}:${entry.candidate.id}`;
 
 const formatRelativeTime = (iso: string) => {
@@ -75,10 +75,19 @@ const sortEntries = (items: CommunityFeedEntry[], mode: CommunitySortMode) => [.
   return right.trendScore - left.trendScore;
 });
 
-const terminalStatuses = new Set(["complete", "failed", "cancelled"]);
+type BriefingState = "idle" | "loading" | "complete" | "error";
+const noRuns: WorkflowRun[] = [];
+export const communityBriefingLabel = (state: BriefingState, total: number, missing: number) => {
+  if (!total) return "等待首批社区信号";
+  if (!missing) return "中文速览已准备";
+  if (state === "loading") return "正在补全中文速览";
+  if (state === "error") return `部分中文速览暂未生成 · ${missing} 条待补全`;
+  return `${missing} 条待补全 · 可先查看原始内容`;
+};
 
 export function CommunityWorkspace({
-  runs,
+  runs = noRuns,
+  feed: suppliedFeed,
   sources,
   settings,
   onFeedback,
@@ -95,16 +104,26 @@ export function CommunityWorkspace({
   const [readingError, setReadingError] = useState<string>();
   const [draftBusy, setDraftBusy] = useState(false);
   const [feedbackBusy, setFeedbackBusy] = useState<string>();
-  const [briefingState, setBriefingState] = useState<"idle" | "loading" | "complete" | "error">("idle");
+  const [briefingState, setBriefingState] = useState<BriefingState>("idle");
   const attemptedBriefings = useRef(new Set<string>());
   const readingRequest = useRef(0);
   const readerAnchor = useRef<HTMLDivElement>(null);
+  const listAnchor = useRef<HTMLElement>(null);
+  const returnPosition = useRef({ windowY: 0, mainY: 0 });
+  const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches);
+  const [readerOpen, setReaderOpen] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const changed = () => setCompact(media.matches);
+    changed(); media.addEventListener("change", changed);
+    return () => media.removeEventListener("change", changed);
+  }, []);
 
-  const feed = useMemo(() => composeCommunityFeed(runs, {
+  const feed = useMemo(() => suppliedFeed ?? composeCommunityFeed(runs, {
     expiryHours: 7 * 24,
     limit: 120,
     personalizationEnabled: settings.personalizationEnabled,
-  }), [runs, settings.personalizationEnabled]);
+  }), [runs, settings.personalizationEnabled, suppliedFeed]);
   const availableTopics = useMemo(() => collectionTopics.flatMap((item) => {
     const count = feed.items.filter((entry) => candidateMatchesTopic(entry.candidate, item.id)).length;
     return count ? [{ ...item, count }] : [];
@@ -117,6 +136,10 @@ export function CommunityWorkspace({
   const risingCount = feed.items.filter((entry) => entry.trend?.direction === "rising").length;
   const imageReadyCount = feed.items.filter((entry) => entry.candidate.images.some((image) => Boolean(image.publicPath))).length;
   const communitySources = useMemo(() => sources.filter((source) => source.role === "community"), [sources]);
+  const enabledSources = communitySources.filter(source => source.enabled);
+  const sourceIssues = enabledSources.filter(source => source.health === "error" || source.health === "warning");
+  const unknownSources = enabledSources.filter(source => !source.health || source.health === "unknown");
+  const missingBriefingCount = filteredItems.filter(entry => !entry.candidate.briefing).length;
 
   const pendingBriefingRequests = useMemo(() => {
     const byRun = new Map<string, string[]>();
@@ -188,10 +211,10 @@ export function CommunityWorkspace({
   }, []);
 
   useEffect(() => {
-    if (!selectedEntry) return;
+    if (!selectedEntry || (compact && !readerOpen)) return;
     setDetail(undefined);
     void loadReadingCard(selectedEntry);
-  }, [loadReadingCard, selectedEntry]);
+  }, [loadReadingCard, selectedEntry, compact, readerOpen]);
 
   const updateFeedback = async (entry: CommunityFeedEntry, kind: "interested" | "not_interested" | "restore") => {
     setFeedbackBusy(entry.candidate.id);
@@ -214,58 +237,66 @@ export function CommunityWorkspace({
   };
 
   const selectSignal = (entry: CommunityFeedEntry) => {
+    returnPosition.current = { windowY: window.scrollY, mainY: listAnchor.current?.closest("main")?.scrollTop ?? 0 };
     setSelectedEntry(entry);
-    if (window.matchMedia("(max-width: 820px)").matches) {
-      window.setTimeout(() => readerAnchor.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
-    }
+    setReaderOpen(true);
+    if (compact) requestAnimationFrame(() => readerAnchor.current?.scrollIntoView({ block: "start" }));
+  };
+  const returnToList = () => {
+    setReaderOpen(false);
+    requestAnimationFrame(() => {
+      const main = listAnchor.current?.closest("main");
+      if (main) main.scrollTop = returnPosition.current.mainY;
+      window.scrollTo(0, returnPosition.current.windowY);
+      listAnchor.current?.querySelector<HTMLElement>('[aria-pressed="true"].community-signal-main')?.focus({ preventScroll: true });
+    });
   };
 
   return (
-    <div className="page community-square-page community-workspace-page">
+    <div className={`page community-square-page community-workspace-page ${readerOpen ? "community-reading" : "community-browsing"}`}>
       <header className="community-square-header">
         <div>
-          <span className="community-page-kicker"><MessagesSquare size={15} />COMMUNITY SIGNALS</span>
           <h1>社区广场</h1>
-          <p>左边选线索，右边直接看原文讲解。社区负责发现，来源决定文章写什么。</p>
+          <p>发现讨论线索，阅读原始来源，再决定写什么。</p>
+          <div className="community-header-stats" aria-label="社区广场概览">
+            <span><strong>{feed.items.length}</strong> 条热点</span>
+            <span><strong>{risingCount}</strong> 条升温</span>
+            <span><strong>{imageReadyCount}</strong> 条原图已缓存</span>
+          </div>
         </div>
         <div className="community-update-state" role="status">
-          {briefingState === "loading" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}
-          <span><strong>{briefingState === "loading" ? "正在生成中文速览" : "中文速览已自动准备"}</strong><small>{feed.lastUpdatedAt ? `最近更新 ${formatRelativeTime(feed.lastUpdatedAt)}` : "等待首批社区信号"}</small></span>
+          {briefingState === "loading" && missingBriefingCount ? <LoaderCircle className="spin" size={16} /> : <Clock3 size={16} />}
+          <span><strong>{communityBriefingLabel(briefingState, filteredItems.length, missingBriefingCount)}</strong><small>{feed.lastUpdatedAt ? `最近更新 ${formatRelativeTime(feed.lastUpdatedAt)}` : "还没有读取记录"}</small></span>
         </div>
       </header>
 
-      <section className="community-overview compact" aria-label="社区广场概览">
-        <div><strong>{feed.items.length}</strong><span>条有效热点</span></div>
-        <div><strong>{risingCount}</strong><span>条正在升温</span></div>
-        <div><strong>{imageReadyCount}</strong><span>条原图已缓存</span></div>
-        <p><TrendingUp size={16} />{feed.expiredCount} 条过期内容已退出；社区热度不作为事实证明。</p>
-      </section>
-
-      <section className="community-source-health compact" aria-label="社区来源状态">
-        <span className="community-source-health-label"><Activity size={14} />来源覆盖</span>
+      <details className="community-source-health compact" aria-label="社区来源状态">
+        <summary><span><Activity size={14} />来源状态 <small>{enabledSources.length} 个已启用</small></span>
+          <span className={sourceIssues.length ? "community-source-issues" : undefined}>{sourceIssues.length ? `${sourceIssues.length} 个来源需留意` : unknownSources.length ? `${unknownSources.length} 个来源待读取` : enabledSources.length ? "已启用来源读取正常" : "尚未启用来源"}<ChevronDown size={14} /></span>
+        </summary>
         <div>{communitySources.map((source) => {
           const status = !source.enabled ? "disabled" : source.health || "unknown";
-          return <span key={source.id} className={`community-source-state ${status}`} title={source.lastHealthDetail || source.note}><i />{source.name}</span>;
+          const statusLabel = { disabled: "已停用", unknown: "待读取", healthy: "正常", warning: "有提示", error: "读取失败" }[status];
+          return <span key={source.id} className={`community-source-state ${status}`} title={source.lastHealthDetail || source.note}><i aria-hidden="true" />{source.name}<small>{statusLabel}</small></span>;
         })}</div>
-      </section>
+        <p>{feed.expiredCount} 条过期内容已退出；社区热度不作为事实证明。</p>
+      </details>
 
       <div className="community-filter-bar">
         <div className="community-topic-tabs" aria-label="社区话题">
-          <button type="button" className={topic === "all" ? "active" : ""} onClick={() => setTopic("all")}>全部</button>
-          {availableTopics.map((item) => <button type="button" key={item.id} className={topic === item.id ? "active" : ""} onClick={() => setTopic(item.id)}>{item.label}<small>{item.count}</small></button>)}
+          <button type="button" aria-pressed={topic === "all"} className={topic === "all" ? "active" : ""} onClick={() => setTopic("all")}>全部</button>
+          {availableTopics.map((item) => <button type="button" key={item.id} aria-pressed={topic === item.id} className={topic === item.id ? "active" : ""} onClick={() => setTopic(item.id)}>{item.label}<small>{item.count}</small></button>)}
         </div>
         <div className="community-sort-tabs" aria-label="社区排序">
-          <button type="button" className={sortMode === "recommended" ? "active" : ""} onClick={() => setSortMode("recommended")}><Sparkles size={13} />推荐</button>
-          <button type="button" className={sortMode === "hot" ? "active" : ""} onClick={() => setSortMode("hot")}><Flame size={13} />最热</button>
-          <button type="button" className={sortMode === "latest" ? "active" : ""} onClick={() => setSortMode("latest")}><Clock3 size={13} />最新</button>
+          <button type="button" aria-pressed={sortMode === "recommended"} className={sortMode === "recommended" ? "active" : ""} onClick={() => setSortMode("recommended")}><Sparkles size={13} />推荐</button>
+          <button type="button" aria-pressed={sortMode === "hot"} className={sortMode === "hot" ? "active" : ""} onClick={() => setSortMode("hot")}><Flame size={13} />最热</button>
+          <button type="button" aria-pressed={sortMode === "latest"} className={sortMode === "latest" ? "active" : ""} onClick={() => setSortMode("latest")}><Clock3 size={13} />最新</button>
         </div>
       </div>
 
-      {briefingState === "error" ? <div className="community-inline-warning">部分中文速览暂未生成；点击候选后仍会读取原始来源。</div> : null}
-
       <div className="community-editorial-workspace">
-        <section className="community-signal-list" aria-label="社区候选">
-          <header><div><span>候选</span><strong>{filteredItems.length} 条</strong></div><small>选择后在右侧判断，不跳转原站</small></header>
+        <section ref={listAnchor} className="community-signal-list" aria-label="社区候选">
+          <header><div><span>候选</span><strong>{filteredItems.length} 条</strong></div><small>{compact ? "选择后查看原始来源" : "选择后在右侧判断，不跳转原站"}</small></header>
           {visibleItems.length ? visibleItems.map((entry, index) => {
             const selected = selectedEntry && entryKey(selectedEntry) === entryKey(entry);
             const image = entry.candidate.images.find((candidateImage) => candidateImage.publicPath) ?? entry.candidate.images[0];
@@ -282,7 +313,7 @@ export function CommunityWorkspace({
                   </span>
                 </button>
                 <span className="community-signal-feedback">
-                  <button type="button" disabled={feedbackBusy === entry.candidate.id} className={entry.candidate.userFeedback === "interested" ? "active" : ""} aria-label="感兴趣" onClick={() => void updateFeedback(entry, entry.candidate.userFeedback === "interested" ? "restore" : "interested")}>{feedbackBusy === entry.candidate.id ? <LoaderCircle className="spin" size={12} /> : <ThumbsUp size={12} />}</button>
+                  <button type="button" disabled={feedbackBusy === entry.candidate.id} aria-pressed={entry.candidate.userFeedback === "interested"} className={entry.candidate.userFeedback === "interested" ? "active" : ""} aria-label="感兴趣" onClick={() => void updateFeedback(entry, entry.candidate.userFeedback === "interested" ? "restore" : "interested")}>{feedbackBusy === entry.candidate.id ? <LoaderCircle className="spin" size={12} /> : <ThumbsUp size={12} />}</button>
                   <button type="button" disabled={feedbackBusy === entry.candidate.id} aria-label="不感兴趣" onClick={() => void updateFeedback(entry, "not_interested")}><ThumbsDown size={12} /></button>
                 </span>
               </article>
@@ -292,6 +323,7 @@ export function CommunityWorkspace({
         </section>
 
         <div className="community-reader-slot" ref={readerAnchor}>
+          <button className="community-return" onClick={returnToList}><ArrowLeft size={16} />返回热点列表</button>
           <EditorialReadingPane
             detail={detail}
             loading={readingLoading}

@@ -1,0 +1,27 @@
+/*
+ * Stylesheet entry. Everything written before the 2026-10 redesign lives in the
+ * `legacy` cascade layer, in its original order. The design system below is
+ * unlayered, so it wins over legacy rules without specificity fights and legacy
+ * files can be retired selector by selector.
+ */
+@layer legacy;
+@import "../components/social-delivery.css" layer(legacy);
+@import "../styles.css" layer(legacy);
+@import "../desk-design.css" layer(legacy);
+@import "../reader-design.css" layer(legacy);
+@import "../strategy-design.css" layer(legacy);
+@import "../swiss-design.css" layer(legacy);
+@import "../components/source-radar.css" layer(legacy);
+@import "../settings-design.css" layer(legacy);
+@import "../draft-design.css" layer(legacy);
+@import "../xiaoheihe-delivery.css" layer(legacy);
+@import "../components/primary-delivery.css" layer(legacy);
+@import "../components/editorial-layout.css" layer(legacy);
+@import "../components/reading-pages.css" layer(legacy);
+@import "../workspace-design.css" layer(legacy);
+@import "../components/aggregations.css" layer(legacy);
+@import "./tokens.css";
+@import "./shell.css";
+@import "./controls.css";
+@import "./today.css";
+@import "./pages.css";

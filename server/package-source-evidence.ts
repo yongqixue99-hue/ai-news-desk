@@ -158,8 +158,9 @@ export const preparePackageSourceEvidence = async (
   state: WorkflowState,
   storyId: string,
   progress?: (value: number, stage: string) => void,
-  options: { readSource?: typeof readSourceWithSnapshot } = {},
+  options: { readSource?: typeof readSourceWithSnapshot; signal?: AbortSignal } = {},
 ): Promise<PackageSourceEvidence> => {
+  options.signal?.throwIfAborted();
   const story = storyById(state, storyId);
   if (!story) throw new Error("Story 不存在");
   const signals = selectStoryArticleSources(story);
@@ -168,9 +169,11 @@ export const preparePackageSourceEvidence = async (
   const imageUrls = new Set<string>();
   const readWarnings: string[] = [];
   for (const signal of signals) {
+    options.signal?.throwIfAborted();
     progress?.(0.68, "读取选中原文并保存成稿证据");
     try {
       const read = await (options.readSource ?? readSourceWithSnapshot)({ url: signal.url, imageLimit: 24 });
+      options.signal?.throwIfAborted();
       const reading = sourceReadingContent(read.page);
       const text = reading.text;
       if (text.trim().length < 240) throw new Error("正文不足以核对成稿事实");
@@ -192,6 +195,7 @@ export const preparePackageSourceEvidence = async (
       if (read.fromCache) readWarnings.push(`${signal.sourceName} 本次访问失败，使用 ${read.capturedAt} 保存的正文快照。`);
       if (read.page.textTruncated || text.length > 30_000) readWarnings.push(`读取范围：${signal.sourceName} 正文已截断，本包仅核对已保存内容，未读部分不能视为原文未披露。`);
     } catch (error) {
+      options.signal?.throwIfAborted();
       readWarnings.push(`${signal.sourceName} 原文暂不可读：${error instanceof Error ? error.message.slice(0, 160) : "读取失败"}`);
     }
   }
@@ -228,7 +232,8 @@ export const preparePackageSourceEvidence = async (
       const correctionInstruction = correction ? "\ncorrection 是程序校验反馈，不是新增事实。逐条纠正列出的事实；缺少支持片段时补上正确编号，数字不符时按原文改正，无法证明的候选事实删除。重新检查所有事实后返回完整 JSON；不要沿用错误数值。" : "";
       lastResult = await runGenerationProviderObserved({ provider, codexPrompt: `${instruction}${correctionInstruction}\n只读取任务文件 ${currentJobPath}，不要修改项目文件。`,
         apiSystemPrompt: instruction + correctionInstruction, apiUserPrompt: JSON.stringify(currentPayload), schemaPath, outputPath: currentOutputPath,
-        codexReasoningEffort: "medium", codexTimeoutMs: 240_000 });
+        codexReasoningEffort: "medium", codexTimeoutMs: 240_000, signal: options.signal });
+      options.signal?.throwIfAborted();
       return lastResult.output;
     });
     trace = completeAiRunTrace(trace, { status: "succeeded", completedAt: lastResult?.meta.completedAt,

@@ -4,6 +4,10 @@ import { createSocialDeliveryDesk, socialAccounts, socialDraftUrl, socialRevisio
 import { createDefaultState, upgradeState } from "./defaults.js";
 import type { ArticleDraft, WorkflowState } from "./types.js";
 import type { SocialBridgeMethod } from "./social-bridge.js";
+import type { WeChatImageAsset } from "./wechat-draft.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 const draft = (): ArticleDraft => ({
   id: "d", runId: "r", candidateId: "c", createdAt: "2026-09-20T01:00:00Z", updatedAt: "2026-09-20T01:00:00Z",
@@ -19,8 +23,8 @@ const fixture = () => {
     read: async () => structuredClone(state),
     update: async <T>(mutate: (state: WorkflowState) => T) => mutate(state),
     quality: async () => quality(),
-    loadImage: async () => { throw new Error("unexpected image read"); },
-    bridge: { request: async (method: SocialBridgeMethod) => {
+    loadImage: async (): Promise<WeChatImageAsset> => { throw new Error("unexpected image read"); },
+    bridge: { request: async (method: SocialBridgeMethod, _params?: Record<string, unknown>) => {
       calls.push(method);
       if (method === "checkAuth") return { isAuthenticated: true, username, userId: "uid-1" };
       if (method === "syncArticle") { assert.equal(state.drafts[0]!.socialDeliveries?.[0]?.status, "sending"); return onSync(); }
@@ -30,6 +34,64 @@ const fixture = () => {
   const desk = createSocialDeliveryDesk(dependencies);
   return { desk, dependencies, calls, get state() { return state; }, set state(value: WorkflowState) { state = value; }, setSync: (fn: typeof onSync) => { onSync = fn; }, setUsername: (name: string) => { username = name; }, setQuality: (fn: typeof quality) => { quality = fn; }, send: () => desk.deliver("d", "zhihu", "作者", state.drafts[0]!.updatedAt, "uid-1") };
 };
+
+test("Baijiahao accepts the editor's 2–64 character titles without truncation", async () => {
+  for (const length of [2, 31, 64]) {
+    const f = fixture(); f.state.drafts[0]!.title = "文".repeat(length);
+    f.setSync(async () => ({ results: [{ platform: "baijiahao", success: true, draftOnly: true, postId: "456", postUrl: "https://baijiahao.baidu.com/builder/rc/edit?article_id=456" }] }));
+    const receipt = await f.desk.deliver("d", "baijiahao", "作者", f.state.drafts[0]!.updatedAt, "uid-1");
+    assert.equal(receipt.status, "reported"); assert.equal(receipt.title.length, length);
+  }
+  for (const length of [0, 1, 65]) {
+    const f = fixture(); f.state.drafts[0]!.title = "文".repeat(length);
+    await assert.rejects(f.desk.deliver("d", "baijiahao", "作者", f.state.drafts[0]!.updatedAt, "uid-1"), /2–64/);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test("each platform title is delivered independently without changing the editorial title", async () => {
+  const f = fixture();
+  f.state.drafts[0]!.socialMetadata = { zhihu: { title: "知乎独立标题" }, baijiahao: { title: "百家号独立标题" } };
+  let article: Record<string, unknown> = {};
+  const original = f.dependencies.bridge.request;
+  f.dependencies.bridge.request = async (method, params) => {
+    if (method === "syncArticle") article = params?.article as Record<string, unknown>;
+    return original(method, params);
+  };
+  const receipt = await f.send();
+  assert.equal(receipt.title, "知乎独立标题");
+  assert.equal(article.title, "知乎独立标题");
+  assert.equal(f.state.drafts[0]!.title, "已审定文章");
+  const before = socialRevisionHash(f.state.drafts[0]!, "zhihu");
+  f.state.drafts[0]!.socialMetadata!.baijiahao!.title = "另一个百家号标题";
+  assert.equal(socialRevisionHash(f.state.drafts[0]!, "zhihu"), before);
+  f.state.drafts[0]!.socialMetadata!.zhihu!.title = "另一个知乎标题";
+  assert.notEqual(socialRevisionHash(f.state.drafts[0]!, "zhihu"), before);
+});
+
+test("a selected cover outside the body is governed and uploaded once before article creation", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "newsdesk-social-cover-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const localPath = path.join(root, "cover.png");
+  await writeFile(localPath, "image");
+  const f = fixture(); const local = f.state.drafts[0]!;
+  local.images = [{ id: "cover", afterParagraph: 0, caption: "封面", image: { id: "asset", caption: "封面", url: "/media/cover.png", publicPath: "/media/cover.png", localPath, rights: "owned", selected: true, attribution: "作者", sourceUrl: "https://example.com", allowedPlatforms: ["wechat"] } }];
+  local.socialMetadata = { zhihu: { coverPlacementId: "cover" } };
+  await assert.rejects(f.send(), /图片/);
+  assert.equal(f.calls.includes("uploadImage"), false);
+  local.images[0]!.image.allowedPlatforms = ["*"];
+  let uploads = 0, sentCover: unknown;
+  f.dependencies.loadImage = async () => ({ bytes: Buffer.from("image"), contentType: "image/png", fileName: "cover.png" });
+  const original = f.dependencies.bridge.request;
+  f.dependencies.bridge.request = async (method, params) => {
+    if (method === "uploadImage") { uploads++; return { url: "https://pic.zhimg.com/cover.png" }; }
+    if (method === "syncArticle") sentCover = (params?.article as Record<string, unknown>).cover;
+    return original(method, params);
+  };
+  await f.send();
+  assert.equal(uploads, 1); assert.equal(sentCover, "https://pic.zhimg.com/cover.png");
+  await f.send(); assert.equal(uploads, 1);
+});
 
 test("only verified public adapters are offered, even when helper lists Toutiao", () => {
   const accounts = socialAccounts([{ id: "toutiao", isAuthenticated: true, username: "作者" }, { id: "zhihu", isAuthenticated: true, username: "作者" }]);
@@ -112,4 +174,17 @@ test("same displayed name with a different user ID is rejected", async () => {
   const f = fixture();
   await assert.rejects(f.desk.deliver("d", "zhihu", "作者", f.state.drafts[0]!.updatedAt, "another-uid"), /账号已变化/);
   assert.equal(f.calls.includes("syncArticle"), false);
+});
+
+test("batch content binding allows another channel receipt but rejects a newly edited document", async () => {
+  for (const changed of [false, true]) {
+    const f = fixture();
+    const originalAt = f.state.drafts[0]!.updatedAt;
+    const revision = socialRevisionHash(f.state.drafts[0]!, "zhihu");
+    f.state.drafts[0]!.updatedAt = "2026-10-02T01:00:00Z";
+    if (changed) f.state.drafts[0]!.title = "排队后修改的新标题";
+    const operation = f.desk.deliver("d", "zhihu", "作者", originalAt, "uid-1", revision);
+    if (changed) { await assert.rejects(operation, /草稿已变化/); assert.equal(f.calls.length, 0); }
+    else assert.equal((await operation).status, "reported");
+  }
 });
