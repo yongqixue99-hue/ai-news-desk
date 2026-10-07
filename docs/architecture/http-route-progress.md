@@ -5,8 +5,8 @@
 | 领域 | 状态 | PR | 路由数 | index字节前→后 | 验证 |
 | --- | --- | --- | --- | --- | --- |
 | source | 已合并 | [#35](https://github.com/yongqixue99-hue/ai-news-desk/pull/35) | 15 | 149583→132010 | 原文15/15完全一致；单测1374、编辑22/22、构建、E2E13全过 |
-| story | 进行中 | [#36](https://github.com/yongqixue99-hue/ai-news-desk/pull/36) | 15 | 132010→121261 | 原文15/15完全一致；单测1376、编辑22/22、构建、E2E13全过 |
-| package | 未开始 | — | 6 | — | — |
+| story | 已合并 | [#36](https://github.com/yongqixue99-hue/ai-news-desk/pull/36) | 15 | 132010→121261 | 原文15/15完全一致；单测1376、编辑22/22、构建、E2E13全过 |
+| package | 进行中 | 待建PR | 6 | 121261→115083 | 原文6/6完全一致；单测1378、编辑22/22、构建、E2E13全过 |
 | editorial | 未开始 | — | 7 | — | — |
 | draft | 未开始 | — | 13 | — | — |
 | delivery | 未开始 | — | 14 | — | — |
