@@ -18,7 +18,7 @@
 | C3 社区广场 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并 |
 | C4 聚合标题翻译 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并；默认不自动翻译 |
 | D1 诊断存储分离 | 未开始 | — | 计划值 140–240 ms / runs 17.4 MB，待复测 | 仅副本；完整 PR 等待决定，不合并 |
-| D2 旧样式清理 | 进行中 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22) | 构建CSS457709→432146 B；本批删除2条规则 | 3/15 已合并；第4批等待CI；48/48像素一致；未上线 |
+| D2 旧样式清理 | 进行中 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23) | 构建CSS457709→431898 B；本批删除4条规则 | 4/15 已合并；第6批等待CI；48/48像素一致；未上线；第5子批受阻（合并API） |
 | D3 文档整理 | 未开始 | — | README 313 行 / 交接 743 行 | 日期条目原文保留 |
 | D4 大文件拆分 | 未开始 | — | 待测 | 每领域单独 PR；前端高风险拆分可等待决定 |
 
@@ -147,3 +147,11 @@
 - D2 第4文件 src/reader-design.css：源23991→23745 B，删除2条全无引用规则；构建CSS432366→432146 B；扫描6/6、四项1365/1365、22/22、隔离构建、E2E13/13全过，48/48原始像素完全相同、溢出0、控制台错误0；等待CI。
 
 - 第4批截图修复第1轮：跨浏览器进程复现同一铃铛曲线19像素差异；保留完整旧构建，改为同一进程采集前后两份纯示例页面，48对截图全部严格一致，不改产品样式、不掩码或放宽断言。最终四项均0失败。
+
+- D2 reader-design.css PR #22 最终两个CI全部成功，已合并至3455bd5；开始第5文件strategy-design.css，未上线。
+
+- D2 第5文件 src/strategy-design.css：源7980→7788 B，删除2条全无引用规则；构建CSS432146→431978 B；扫描6/6、四项1365/1365、22/22、隔离构建、E2E13/13全过，48/48原始像素完全相同、溢出0、控制台错误0；等待CI。
+
+- D2 strategy-design.css PR #23：四项与最终verify/windows-desktop（push/PR）全部通过，HEAD7ebe9af、MERGEABLE/CLEAN；正常GraphQL合并2次及REST合并1次均为服务端错误/空响应，暂标第5子批受阻。曾考虑普通Git合并后推送main，自动审批以“可能绕过PR流程、未获直接默认分支写入授权”为由拒绝，未发生远端推送，已放弃该替代方案；只继续通过PR处理。第6文件无依赖，继续执行。
+
+- D2 第6文件 src/swiss-design.css：源34061→33777 B，删除4条全无引用规则；构建CSS432146→431898 B；扫描6/6、四项1365/1365、22/22、隔离构建、E2E13/13全过，48/48原始像素完全相同、溢出0、控制台错误0；等待CI。
