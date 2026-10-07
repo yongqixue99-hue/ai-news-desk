@@ -163,7 +163,7 @@ mkdir -p /tmp/newsdesk-copy && sqlite3 -readonly .workflow/newsdesk.db ".backup 
 
 ### B2. 选题行的信息质量
 
-**依据。** 今日选题每行标题下面的那句话来自 `server/newsworthiness.ts` 的固定文案（例如「从适用任务和使用门槛介绍这个工具」），不同新闻显示同一句。`server/topic-radar.ts` 里 `heat` 在没有信号时一律是「热度未知」，8 行全是。部分来源的摘要只是把标题重复一遍。用户的原话是「想快速看一眼标题，就知道大概讲什么东西」。
+**依据。** 今日选题每行标题下面的那句话是固定文案：实践类选题取 `server/practice-opportunity.ts` 里的 `angles`（例如「从适用任务和使用门槛介绍这个工具」），其余取 `server/newsworthiness.ts` 的 `reason`。不同新闻会显示同一句。`server/topic-radar.ts` 里 `heat` 在没有信号时一律是「热度未知」，8 行全是。部分来源的摘要只是把标题重复一遍。用户的原话是「想快速看一眼标题，就知道大概讲什么东西」。
 
 **目标的行结构。**
 
