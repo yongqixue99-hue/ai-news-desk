@@ -1,0 +1,8 @@
+/* Mobile tasks remain in normal flow, so no reading or navigation is covered. */
+@media (max-width: 720px) {
+  .product-job-center { position: static; width: auto; margin: 0 16px; }
+  .product-job-toggle { width: 100%; min-width: 0; min-height: 36px; justify-content: flex-start; margin: 0; padding: 0 4px; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; background: var(--paper); box-shadow: none; backdrop-filter: none; }
+  .product-job-toggle > svg:last-child { margin-left: auto; }
+  .product-job-center.open .product-job-toggle { border-radius: 0; box-shadow: none; }
+  .product-job-panel { margin-bottom: 8px; border: 1px solid var(--line); border-radius: var(--radius-m); box-shadow: none; backdrop-filter: none; }
+}
