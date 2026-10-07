@@ -98,6 +98,10 @@ app.use("/api", (_req, res) => { res.status(404).json({ error: "示例接口未�
 // builds remain distinct; only their HTML asset prefix is redirected here.
 if (process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST) {
   const beforeRoot = path.resolve(process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST);
+  // Vite's modulepreload map uses absolute /assets paths. Prefer current assets
+  // and fall back to old hashed assets; relative imports still stay in __before.
+  app.use("/assets", express.static(path.join(path.resolve(process.env.AI_NEWS_DESK_DIST_ROOT || ".artifacts/verify/dist"), "assets")));
+  app.use("/assets", express.static(path.join(beforeRoot, "assets")));
   app.use("/__before/assets", express.static(path.join(beforeRoot, "assets"), { fallthrough: false }));
   app.get("/__before/", async (_req, res, next) => {
     try { res.type("html").send((await readFile(path.join(beforeRoot, "index.html"), "utf8")).replaceAll('="/assets/', '="/__before/assets/')); }
