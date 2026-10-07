@@ -15,7 +15,9 @@ test("CSS-only comparison rejects changes to scripts, page structure or a second
       await writeFile(path.join(dir!, "assets", css!), "/* CSS may differ */");
       await writeFile(path.join(dir!, "assets/site.js"), "/* original application */");
     }
-    assert.deepEqual(await verifyCssBuildPair(before, after), { beforeHref: "/__before/assets/old.css", afterHref: "/assets/new.css" });
+    assert.deepEqual(await verifyCssBuildPair(before, after), { beforeHref: "/__before/assets/old.css", afterHref: "/assets/new.css", unchangedCss: true });
+    await writeFile(path.join(after, "assets/new.css"), "body { color: red; }");
+    assert.equal((await verifyCssBuildPair(before, after)).unchangedCss, false);
     await writeFile(path.join(after, "assets/site.js"), "/* changed application */");
     await assert.rejects(verifyCssBuildPair(before, after), /Non-CSS asset changed/u);
     await writeFile(path.join(after, "assets/site.js"), "/* original application */");
@@ -37,7 +39,7 @@ test("bundler hash renames preserve identical code but cannot hide a code change
       await writeFile(path.join(dir!, "assets", `index-${hash}.css`), "/* CSS differs */");
       await writeFile(path.join(dir!, "assets", `index-${hash}.js`), `const stylesheet="index-${hash}.css";const article=42;`);
     }
-    assert.deepEqual(await verifyCssBuildPair(before, after), { beforeHref: "/__before/assets/index-AAAAAAAA.css", afterHref: "/assets/index-BBBBBBBB.css" });
+    assert.deepEqual(await verifyCssBuildPair(before, after), { beforeHref: "/__before/assets/index-AAAAAAAA.css", afterHref: "/assets/index-BBBBBBBB.css", unchangedCss: true });
     await writeFile(path.join(after, "assets/index-BBBBBBBB.js"), 'const stylesheet="index-BBBBBBBB.css";const article=43;');
     await assert.rejects(verifyCssBuildPair(before, after), /Non-CSS asset changed/u);
   } finally { await rm(root, { recursive: true, force: true }); }

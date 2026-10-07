@@ -1,1 +1,1 @@
-export function verifyCssBuildPair(before: string, after: string): Promise<{ beforeHref: string; afterHref: string }>;
+export function verifyCssBuildPair(before: string, after: string): Promise<{ beforeHref: string; afterHref: string; unchangedCss: boolean }>;
