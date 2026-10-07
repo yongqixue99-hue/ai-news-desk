@@ -66,8 +66,6 @@
 .strategy-records .writing-memory-list article { min-width: 0; }
 .strategy-page button, .strategy-page a { transition: background .15s, border-color .15s, opacity .15s; }
 .strategy-page button:disabled { opacity: .5; cursor: default; }
-.today-opportunity { display: block; margin-top: 10px; font-size: 12px; color: #7b7669; line-height: 1.6; }
-.today-opportunity strong { margin-right: 10px; color: #a44838; font-weight: 600; }
 .today-interesting .today-section-heading h2 { color: #556347; }
 .completion-control { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .rich-toolbar .completion-toggle { width: auto; padding: 0 8px; font-size: 11px; gap: 5px; white-space: nowrap; }
