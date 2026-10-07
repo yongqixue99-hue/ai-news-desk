@@ -1,6 +1,7 @@
 /** Synthetic UI only. No storage, worker, credentials, proxy or outbound requests. */
 import express from "express";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { createDefaultState } from "../../server/defaults.js";
 import { bootstrapView } from "../../server/bootstrap-view.js";
 import { buildTodayView } from "../../server/story-desk.js";
@@ -93,6 +94,16 @@ app.use("/api", (req, res, next) => {
   next();
 });
 app.use("/api", (_req, res) => { res.status(404).json({ error: "示例接口未配置" }); });
+// Same-origin comparison keeps SVG rasterization in the same renderer. Both
+// builds remain distinct; only their HTML asset prefix is redirected here.
+if (process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST) {
+  const beforeRoot = path.resolve(process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST);
+  app.use("/__before/assets", express.static(path.join(beforeRoot, "assets"), { fallthrough: false }));
+  app.get("/__before/", async (_req, res, next) => {
+    try { res.type("html").send((await readFile(path.join(beforeRoot, "index.html"), "utf8")).replaceAll('="/assets/', '="/__before/assets/')); }
+    catch (error) { next(error); }
+  });
+}
 app.use(express.static(path.resolve(process.env.AI_NEWS_DESK_DIST_ROOT || ".artifacts/verify/dist")));
 const server = app.listen(0, "127.0.0.1", () => {
   const address = server.address();

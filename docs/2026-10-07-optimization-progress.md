@@ -18,7 +18,7 @@
 | C3 社区广场 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并 |
 | C4 聚合标题翻译 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并；默认不自动翻译 |
 | D1 诊断存储分离 | 未开始 | — | 计划值 140–240 ms / runs 17.4 MB，待复测 | 仅副本；完整 PR 等待决定，不合并 |
-| D2 旧样式清理 | 进行中 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27) | 构建CSS457709→431730 B；本批删除0条规则 | 8/15 已合并；第9批等待CI；48/48像素一致；未上线 |
+| D2 旧样式清理 | 进行中 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27) | 构建CSS457709→431730 B；本批删除0条规则 | 9/15 已合并；第10批等待CI；48/48像素一致；未上线 |
 | D3 文档整理 | 未开始 | — | README 313 行 / 交接 743 行 | 日期条目原文保留 |
 | D4 大文件拆分 | 未开始 | — | 待测 | 每领域单独 PR；前端高风险拆分可等待决定 |
 
@@ -171,3 +171,15 @@
 - D2 PR #26 最终两个CI全部成功，已合并至397852e；共8/15完成，开始第9文件draft-design.css。
 
 - D2 第9文件 src/draft-design.css：源25927→25927 B，删除0条全无引用规则；构建CSS431730→431730 B；扫描6/6、四项1365/1365、22/22、隔离构建、E2E13/13全过，48/48原始像素完全相同、溢出0、控制台错误0；等待CI。
+
+- D2 PR #27 最终两个CI全部成功，已合并至6add149；共9/15完成，开始第10文件xiaoheihe-delivery.css。
+
+- D2 第10批截图修复第1轮：仍复现通知铃铛19像素差异，四项本身全过。怀疑两个端口的跨来源导航带来渲染不确定性；新增同源旧构建入口，旧/新HTML与JS/CSS仍严格分开。先失败的夹具回归404→200，并核对两份不同资产及写接口405；不修改产品样式、不掩码、不放宽像素断言。重新执行四项与完整48对截图。
+
+- 第10批修复第2轮：同源导航仍有相同19像素差异，跨来源不是唯一原因。新增CSS独立构建证明：非CSS文件列表及字节必须完全一致、HTML只能有CSS路径变化，额外CSS/JS/DOM差异均拒绝（先失败再通过）。通过证明后在同一个已渲染DOM里交换完整旧/新CSS，两次仍用shot.mjs比较全部原始像素；E2E另外运行完整新构建。没有修改样式或减小比较范围。
+
+- 第10批修复第3轮（最后一轮）：同DOM换CSS也复现同一铃铛19像素差异，已恢复前后完整页面加载。CSS视口仍为1440/390，截图DPR从1改3，原始像素比较数增加9倍、仍零容忍；整数图标尺寸到24单位SVG的比例可精确二进制表达，验证是否消除分数缩放不确定性。继续保留非CSS构建同一性断言，不改产品CSS。若仍失败则按要求受阻并继续独立文件。
+
+- 第10批第3轮48/48完整截图全部严格一致，溢出0/控制台错误0；同源+DPR3消除本轮重复的分数缩放曲线差异，恢复完整新旧页面加载。增加2项回归，单测总数1367；最终四项重跑后提交。
+
+- D2 第10文件 src/xiaoheihe-delivery.css：源6228→6228 B，删除0条全无引用规则；构建CSS431730→431730 B；扫描6/6、四项1367/1367、22/22、隔离构建、E2E13/13全过，48/48原始像素完全相同、溢出0、控制台错误0；等待CI。

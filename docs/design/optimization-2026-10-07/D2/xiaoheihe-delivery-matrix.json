@@ -1,0 +1,386 @@
+[
+  {
+    "name": "today-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "aggregations-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "community-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "workbench-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "drafts-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "sources-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "editorial-system-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "runs-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "schedule-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "ai-settings-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "reader-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "draft-mode-0-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "draft-mode-1-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "draft-mode-2-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "notifications-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "ai-tab-0-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "ai-tab-1-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "ai-tab-2-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "automation-tab-0-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "automation-tab-1-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "automation-tab-2-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "platform-tab-0-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "platform-tab-1-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "platform-tab-2-1440.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "today-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "aggregations-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "community-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "workbench-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "drafts-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "sources-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "editorial-system-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "runs-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "schedule-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "ai-settings-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "reader-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "draft-mode-0-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "draft-mode-1-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "draft-mode-2-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "notifications-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "ai-tab-0-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "ai-tab-1-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "ai-tab-2-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "automation-tab-0-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "automation-tab-1-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "automation-tab-2-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "platform-tab-0-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "platform-tab-1-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  },
+  {
+    "name": "platform-tab-2-390.png",
+    "overflow": 0,
+    "consoleErrors": 0,
+    "pixelDifference": 0,
+    "deviceScaleFactor": 3,
+    "cssOnlyBuild": true
+  }
+]
