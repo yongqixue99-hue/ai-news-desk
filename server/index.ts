@@ -29,7 +29,7 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import { groupTitleBackfillByRun, titleBackfillTargets } from "./today-title-backfill.js";
+import { createTodayTitleBackfill, enqueueTodayTitleBackfill } from "./today-title-backfill.js";
 import { pruneJobArtifacts } from "./artifact-retention.js";
 import { buildDraftOverview } from "./draft-overview.js";
 import { createLocalSecurityMiddleware } from "./http-security.js";
@@ -567,27 +567,14 @@ app.post("/api/aggregations/:id/select", asyncRoute(async (request, response) =>
   response.json(await updateState(state => retainAggregationEntry(state, id)));
 }));
 
-let todayTitleBackfill: Promise<{ requested: number; completed: number; failed: number }> | undefined;
-// Explicit, bounded translation of the headlines shown first on Today. It reuses
-// the candidate briefing, so original titles and evidence stay untouched.
+const backfillTodayTitles = createTodayTitleBackfill({
+  readView: async () => buildTodayView(await readState()),
+  enrich: enrichCandidateBriefings,
+});
+// Page fallback and collection jobs reuse the same bounded analysis operation.
 app.post(
   "/api/today/titles",
-  asyncRoute(async (_request, response) => {
-    // Isolated test servers must never reach a real provider just by rendering Today.
-    if (process.env.AI_NEWS_DESK_AUTO_TITLES === "0") { response.json({ requested: 0, completed: 0, failed: 0 }); return; }
-    todayTitleBackfill ??= (async () => {
-      const targets = titleBackfillTargets(buildTodayView(await readState()));
-      const total = { requested: 0, completed: 0, failed: 0 };
-      for (const [runId, candidateIds] of groupTitleBackfillByRun(targets)) {
-        try {
-          const result = await enrichCandidateBriefings(runId, { candidateIds });
-          total.requested += result.requested; total.completed += result.completed; total.failed += result.failed;
-        } catch { total.requested += candidateIds.length; total.failed += candidateIds.length; }
-      }
-      return total;
-    })().finally(() => { todayTitleBackfill = undefined; });
-    response.json(await todayTitleBackfill);
-  }),
+  asyncRoute(async (_request, response) => { response.json(await backfillTodayTitles()); }),
 );
 
 app.get(
@@ -3447,7 +3434,17 @@ const durableJobDesk = createJobDesk({
       }
       context.progress(0.98, "整理采集结果");
       const run = (await readState()).runs.find((entry) => entry.id === runId);
+      enqueueTodayTitleBackfill(await getLocalDatabase(), run);
       return { runId, status: run?.status, candidateCount: run?.candidates.length ?? 0 };
+    },
+    "backfill-today-titles": async (payload, context) => {
+      context.progress(0.05, "补充今日中文标题");
+      const result = await backfillTodayTitles(context.signal);
+      if (result.failed) (await getLocalDatabase()).recordWorkflowEvent({
+        type: "today-titles.failed", subjectType: "job", subjectId: context.job.id, payload: { ...result, collection: payload },
+      });
+      context.progress(0.98, "中文标题处理完成");
+      return result;
     },
     "hydrate-story-assets": async (payload, context) => {
       const storyId = payload && typeof payload === "object" && "storyId" in payload

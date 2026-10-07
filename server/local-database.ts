@@ -510,6 +510,11 @@ export class LocalDatabase {
     return row ? jobFromRow(row) : undefined;
   }
 
+  getJobByIdempotencyKey(idempotencyKey: string): DurableJobRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM workflow_jobs WHERE idempotency_key = ?").get(idempotencyKey) as unknown as JobRow | undefined;
+    return row ? jobFromRow(row) : undefined;
+  }
+
   cancelQueuedJob(idempotencyKey: string): DurableJobRecord | undefined {
     const updatedAt = this.now();
     this.db.prepare(`
