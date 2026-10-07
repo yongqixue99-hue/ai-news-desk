@@ -15,7 +15,7 @@
 
 | src/strategy-design.css | [#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23) | 7980→7788 | 2 | 432146→431978 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
 
-| src/swiss-design.css | 待建PR | 34061→33777 | 4 | 432146→431898 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
+| src/swiss-design.css | [#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24) | 34061→33777 | 4 | 432146→431898 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
 
 保留所有没有充分证据能删除的规则。零删除同样是完整审查结果。
 
