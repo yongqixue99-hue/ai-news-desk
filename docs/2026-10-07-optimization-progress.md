@@ -15,7 +15,7 @@
 | B4 手机任务胶囊 | 已合并 | [#17](https://github.com/yongqixue99-hue/ai-news-desk/pull/17) | 覆盖选题按钮 2→0；390 溢出 0 | 四项及两个 CI 全过；合并接口恢复；未上线，效果待用户决定 |
 | C1 今日接口提速 | 已合并 | [#18](https://github.com/yongqixue99-hue/ai-news-desk/pull/18) | 冷读 770→487 ms；暖读 357–386→2.5–2.7 ms | 四项及两个 CI 全过；未上线 |
 | C2 新闻工作台 | 等待用户决定 | [#46](https://github.com/yongqixue99-hue/ai-news-desk/pull/46) | 首条top：1440 422→350；1280 480→350；390 785→435px；手机主动作不可见→可见 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线 |
-| C3 社区广场 | 进行中 | — | 首条top：1440 320→247；390 420→301px；六条候选保持 | 四项全过；截图与方案完成后开待审PR |
+| C3 社区广场 | 等待用户决定 | [#47](https://github.com/yongqixue99-hue/ai-news-desk/pull/47) | 首条top：1440 320→247；390 420→301px；六条候选保持，溢出/错误/写请求均0 | 四项全过；最终CI待确认；保持PR打开、未上线 |
 | C4 聚合标题翻译 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并；默认不自动翻译 |
 | D1 诊断存储分离 | 未开始 | — | 计划值 140–240 ms / runs 17.4 MB，待复测 | 仅副本；完整 PR 等待决定，不合并 |
 | D2 旧样式清理 | 已合并 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27)、[#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28)、[#29](https://github.com/yongqixue99-hue/ai-news-desk/pull/29)、[#30](https://github.com/yongqixue99-hue/ai-news-desk/pull/30)、[#31](https://github.com/yongqixue99-hue/ai-news-desk/pull/31)、[#32](https://github.com/yongqixue99-hue/ai-news-desk/pull/32)、[#33](https://github.com/yongqixue99-hue/ai-news-desk/pull/33) | 构建CSS457709→431197 B（-5.79%）；删除288条全无引用规则 | 15/15独立PR已合并；每批四项/两个CI全过、48/48像素一致；未上线 |
@@ -287,3 +287,5 @@
 - C3 布局回归先失败再实现；六条独立讨论夹具保留去重。浏览器第1轮修复：点击后须等待本次读取响应，避免读取上一条阅读卡；保留全部标题、事实来源及门槛断言。截图均纯示例，溢出0、错误0、写请求0。
 
 - C3 最终四项1396/1396、22/22、隔离构建、E2E14/14，全部0失败0跳过。补齐纯示例阅读卡的社区信号，事实与讨论分栏、有限样本禁用原因均保留。方案和前后截图已准备，PR按授权保持打开。
+
+- C3 完整提案、测试与纯示例截图已提交到 https://github.com/yongqixue99-hue/ai-news-desk/pull/47；等最终verify/windows-desktop后开始下一项。
