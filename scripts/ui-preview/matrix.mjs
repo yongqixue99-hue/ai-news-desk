@@ -69,10 +69,21 @@ try {
         assert.equal(beforeOverflow, 0, `${item.name}-${width}: before overflow`);
         assert.deepEqual(errors, [], `${item.name}-${width}: before errors`);
       }
-      await page.goto(`${origin}/#${item.hash}`, { waitUntil: "networkidle" });
+      if (beforeLocation && cssPair) {
+        // The build proof above rejects any application-code or DOM change.
+        // Keep the fully rendered example and switch the complete stylesheet,
+        // so the comparison measures CSS without navigation rasterization noise.
+        await page.evaluate(async ({ beforeHref, afterHref }) => {
+          const old = [...document.querySelectorAll('link[rel="stylesheet"]')].find(link => new URL(link.href).pathname === beforeHref);
+          if (!old) throw new Error("Verified old stylesheet not found");
+          const next = document.createElement("link"); next.rel = "stylesheet"; next.href = afterHref;
+          const loaded = new Promise((resolve, reject) => { next.onload = resolve; next.onerror = reject; });
+          old.after(next); await loaded; old.remove();
+        }, cssPair);
+      } else await page.goto(`${origin}/#${item.hash}`, { waitUntil: "networkidle" });
       console.log(`capture ${item.name}-${width}`);
       await page.locator(".page, .aggregation-page").first().waitFor();
-      if (item.action) await item.action(page);
+      if (item.action && !(beforeLocation && cssPair)) await item.action(page);
       await page.waitForTimeout(500);
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const name = `${item.name}-${width}.png`;

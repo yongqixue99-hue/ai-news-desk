@@ -1,0 +1,13 @@
+{
+  "file": "src/components/primary-delivery.css",
+  "beforeBytes": 8440,
+  "afterBytes": 7820,
+  "removedSelectors": [
+    ".xhh-primary-actions .publish-secondary-actions",
+    ".xhh-primary-actions .publish-guidance",
+    ".publishing-prep > h3",
+    ".publishing-prep .topic-history",
+    ".publishing-prep > label",
+    ".publishing-prep > label > input"
+  ]
+}

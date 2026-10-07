@@ -26,3 +26,19 @@ test("CSS-only comparison rejects changes to scripts, page structure or a second
     await assert.rejects(verifyCssBuildPair(before, after), /Exactly one CSS bundle/u);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("bundler hash renames preserve identical code but cannot hide a code change", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "newsdesk-css-hashes-"));
+  const before = path.join(root, "before"), after = path.join(root, "after");
+  try {
+    for (const [dir, hash] of [[before, "AAAAAAAA"], [after, "BBBBBBBB"]]) {
+      await mkdir(path.join(dir!, "assets"), { recursive: true });
+      await writeFile(path.join(dir!, "index.html"), `<link rel="stylesheet" href="/assets/index-${hash}.css"><script src="/assets/index-${hash}.js"></script>`);
+      await writeFile(path.join(dir!, "assets", `index-${hash}.css`), "/* CSS differs */");
+      await writeFile(path.join(dir!, "assets", `index-${hash}.js`), `const stylesheet="index-${hash}.css";const article=42;`);
+    }
+    assert.deepEqual(await verifyCssBuildPair(before, after), { beforeHref: "/__before/assets/index-AAAAAAAA.css", afterHref: "/assets/index-BBBBBBBB.css" });
+    await writeFile(path.join(after, "assets/index-BBBBBBBB.js"), 'const stylesheet="index-BBBBBBBB.css";const article=43;');
+    await assert.rejects(verifyCssBuildPair(before, after), /Non-CSS asset changed/u);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

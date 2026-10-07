@@ -14,6 +14,7 @@ test("visual fixture serves distinct old and new builds on one origin without a 
     await writeFile(path.join(dist, "index.html"), `<link href="/assets/site.css" rel="stylesheet"><script src="/assets/site.js"></script><p>${version}</p>`);
     await writeFile(path.join(dist, "assets/site.js"), `console.log("${version}")`);
     await writeFile(path.join(dist, "assets/site.css"), `/* ${version} */`);
+    if (version === "before") await writeFile(path.join(dist, "assets/old-lazy.js"), 'console.log("old lazy")');
   }
   const child = spawn(process.execPath, ["--import", "tsx", "scripts/ui-preview/fixture.ts"], {
     env: { ...process.env, AI_NEWS_DESK_DIST_ROOT: path.join(root, "after"), AI_NEWS_DESK_PREVIEW_BEFORE_DIST: path.join(root, "before") },
@@ -32,6 +33,7 @@ test("visual fixture serves distinct old and new builds on one origin without a 
     assert.equal(await (await fetch(`${origin}/__before/assets/site.js`)).text(), 'console.log("before")');
     assert.equal(await (await fetch(`${origin}/__before/assets/site.css`)).text(), "/* before */");
     assert.equal(await (await fetch(`${origin}/assets/site.js`)).text(), 'console.log("after")');
+    assert.equal(await (await fetch(`${origin}/assets/old-lazy.js`)).text(), 'console.log("old lazy")');
     assert.match(await (await fetch(origin)).text(), /<p>after<\/p>/u);
     assert.equal((await fetch(`${origin}/__before/assets/missing.js`)).status, 404);
     assert.equal((await fetch(`${origin}/api/settings`, { method: "PATCH" })).status, 405);

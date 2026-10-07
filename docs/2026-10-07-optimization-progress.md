@@ -18,7 +18,7 @@
 | C3 社区广场 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并 |
 | C4 聚合标题翻译 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并；默认不自动翻译 |
 | D1 诊断存储分离 | 未开始 | — | 计划值 140–240 ms / runs 17.4 MB，待复测 | 仅副本；完整 PR 等待决定，不合并 |
-| D2 旧样式清理 | 进行中 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27)、[#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28) | 构建CSS457709→431730 B；本批删除0条规则 | 9/15 已合并；第10批等待CI；48/48像素一致；未上线 |
+| D2 旧样式清理 | 进行中 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27)、[#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28) | 构建CSS457709→431197 B；本批删除6条规则 | 10/15 已合并；第11批等待CI；48/48像素一致；未上线 |
 | D3 文档整理 | 未开始 | — | README 313 行 / 交接 743 行 | 日期条目原文保留 |
 | D4 大文件拆分 | 未开始 | — | 待测 | 每领域单独 PR；前端高风险拆分可等待决定 |
 
@@ -183,3 +183,13 @@
 - 第10批第3轮48/48完整截图全部严格一致，溢出0/控制台错误0；同源+DPR3消除本轮重复的分数缩放曲线差异，恢复完整新旧页面加载。增加2项回归，单测总数1367；最终四项重跑后提交。
 
 - D2 第10文件 src/xiaoheihe-delivery.css：源6228→6228 B，删除0条全无引用规则；构建CSS431730→431730 B；扫描6/6、四项1367/1367、22/22、隔离构建、E2E13/13全过，48/48原始像素完全相同、溢出0、控制台错误0；等待CI。
+
+- D2 PR #28 最终两个CI全部成功，已合并至12f237d；共10/15完成，开始第11文件primary-delivery.css。
+
+- D2 第11批验证修复第1轮：CSS更改引起index JS的资源引用及文件哈希联动，非CSS原始文件名比较因此拒绝。先写失败回归，按唯一逻辑文件名配对且只归一化已知资源引用，JS代码、HTML结构、其他资源仍逐字/逐字节比较；故意改42→43的脚本继续拒绝，所有旧拒绝断言保留。新增1项回归，重新执行四项及48对截图。
+
+- 第11批修复第2轮：编译代码确认动态import相对路径不变，但modulepreload映射使用绝对/assets路径，旧哈希资源在新目录不存在产生404。新增先失败的兜底回归；夹具当前资源优先，仅缺失时读取旧构建资产，实际相对模块仍在__before。额外收紧同名非CSS资产必须原始字节相同；不改变产品或屏蔽网络/控制台错误。重新跑四项与完整48对截图。
+
+- 第11批修复第3轮：旧/新完整页面加载只剩工作台空态SVG的2像素、单色阶1差异；JS与DOM严格同一性证明已经通过。在此证明约束下，DPR3同一完整DOM交换完整旧/新CSS，仍比较所有原始像素，E2E仍完整加载新构建。不掩码、不放宽断言；若仍失败则记录受阻。
+
+- D2 第11文件 src/components/primary-delivery.css：源8440→7820 B，删除6条全无引用规则；构建CSS431730→431197 B；扫描6/6、四项1368/1368、22/22、隔离构建、E2E13/13全过，48/48原始像素完全相同、溢出0、控制台错误0；等待CI。
