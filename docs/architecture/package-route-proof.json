@@ -1,0 +1,50 @@
+[
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/editorial-intakes/:runId/:candidateId",
+    "bytes": 810,
+    "sha256": "45513c4c8a303192b4816e707d990c210905fb95aca7d60ac3796f6f5cc7d2a3"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/editorial-intakes/:runId/:candidateId/draft",
+    "bytes": 1660,
+    "sha256": "1c771bfba7d083e8ed81c03fabd9c18a9128891d01b7bddcd68375bf20af31ba"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/stories/:storyId/packages",
+    "bytes": 2225,
+    "sha256": "d2e9341b118dcff9961e6619423bf075bf73984e8404db82e81c8e569feed195"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/packages/:packageId",
+    "bytes": 366,
+    "sha256": "095866e7cf9103cadd46c207dada2ccf04f1d3dd7f3ddfb137097ca37ff4a353"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/packages/:packageId/draft",
+    "bytes": 1018,
+    "sha256": "43cabe537714039377c6f0584dc892a34c5b159a0a27d4e95b6263514b095d6c"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/packages/:packageId/human-draft",
+    "bytes": 290,
+    "sha256": "7968e227f87c82f406bcff05a992733f7ed20458f9b2d37e628c615ea00d87b3"
+  }
+]
