@@ -20,7 +20,7 @@
 | src/components/editorial-layout.css | [#30](https://github.com/yongqixue99-hue/ai-news-desk/pull/30) | 10001→10001 | 0 | 431197→431197 | 48/48，像素差异0 | 单测1368/1368、编辑22/22、构建通过、E2E13/13 |
 | src/components/reading-pages.css | [#31](https://github.com/yongqixue99-hue/ai-news-desk/pull/31) | 16720→16720 | 0 | 431197→431197 | 48/48，像素差异0 | 单测1368/1368、编辑22/22、构建通过、E2E13/13 |
 | src/workspace-design.css | [#32](https://github.com/yongqixue99-hue/ai-news-desk/pull/32) | 6289→6289 | 0 | 431197→431197 | 48/48，像素差异0 | 单测1368/1368、编辑22/22、构建通过、E2E13/13 |
-| src/components/aggregations.css | 待建PR | 11269→11269 | 0 | 431197→431197 | 48/48，像素差异0 | 单测1368/1368、编辑22/22、构建通过、E2E13/13 |
+| src/components/aggregations.css | [#33](https://github.com/yongqixue99-hue/ai-news-desk/pull/33) | 11269→11269 | 0 | 431197→431197 | 48/48，像素差异0 | 单测1368/1368、编辑22/22、构建通过、E2E13/13 |
 
 保留所有没有充分证据能删除的规则。零删除同样是完整审查结果。
 
