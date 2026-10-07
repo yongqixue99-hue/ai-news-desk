@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { chromium } from "playwright-core";
 import { findChromeExecutable } from "../../server/chrome-launch.js";
-import type { ArticleDraft } from "../../server/types.js";
+import type { ArticleDraft, WorkflowState } from "../../server/types.js";
 import { createDefaultState } from "../../server/defaults.js";
 import { rawItemToCandidate } from "../../server/scoring.js";
 import { buildTodayView } from "../../server/story-desk.js";
@@ -92,6 +92,8 @@ test("production routes, strategy controls, completion, draft resumption and mob
   initialState.runs.push({ id: "diagnostic-fixture", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     collectedAt: new Date().toISOString(), status: "ready", stage: "完成", windowHours: 24, sourceIds: ["official"],
     scheduled: false, rawCount: 4, candidates: [], logs: [],
+    discoveryTrace: [{ rawId: "diagnostic-item", title: "隔离诊断示例", url: "https://example.com/diagnostic", stage: "outside-window" }],
+    evidenceCandidates: [], aggregationItems: [],
     collectionFunnel: { rawCount: 4, dateAcceptedCount: 0, matchedCount: 0, uniqueUrlCount: 0, eligibleCount: 0, clusterCount: 0, candidateCount: 0,
       rejections: [{ code: "missing-published-at", label: "缺少原始发布时间", count: 1 }, { code: "outside-window", label: "超出采集时间窗口", count: 3 }] },
     sourceResults: [{ sourceId: "official", sourceName: "测试官方源", status: "warning", healthImpact: "success", rawCount: 4, candidateCount: 0,
@@ -130,6 +132,17 @@ test("production routes, strategy controls, completion, draft resumption and mob
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   try {
     await waitForHealth(origin, () => serverOutput);
+    const bootstrap = await (await fetch(`${origin}/api/bootstrap`)).json() as WorkflowState;
+    const bootRun = bootstrap.runs.find(run => run.id === "diagnostic-fixture");
+    assert.ok(bootRun);
+    for (const key of ["discoveryTrace", "evidenceCandidates", "aggregationItems"]) assert.equal(Object.hasOwn(bootRun, key), false);
+    const diagnosticsResponse = await fetch(`${origin}/api/runs/diagnostic-fixture/diagnostics`);
+    assert.equal(diagnosticsResponse.status, 200);
+    const diagnostics = await diagnosticsResponse.json();
+    assert.deepEqual(diagnostics.discoveryTrace, initialState.runs[0].discoveryTrace);
+    assert.deepEqual(diagnostics.evidenceCandidates, []);
+    assert.deepEqual(diagnostics.aggregationItems, []);
+    assert.equal((await fetch(`${origin}/api/runs/missing/diagnostics`)).status, 404);
     browser = await chromium.launch({ executablePath: await findChromeExecutable(), headless: true });
     const page = await browser.newPage();
     const pageErrors: string[] = [];

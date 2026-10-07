@@ -224,6 +224,7 @@ import {
   workflowMediaRoot,
   workflowRoot,
 } from "./storage.js";
+import { bootstrapView, runDiagnosticsView } from "./bootstrap-view.js";
 import { normalizeTopicIds } from "./topics.js";
 import { sourceRoleFor } from "./source-routing.js";
 import { buildFocusedNewsSearchRequest, buildTopicFeed, communityPlatforms, createZhihuHotlist, retainZhihuTopic } from "./source-desk.js";
@@ -452,20 +453,14 @@ registerAiStyleScoreRoutes(app);
 app.get(
   "/api/bootstrap",
   asyncRoute(async (_request, response) => {
-    const state = await readState();
+    const state = await readStateProjection(bootstrapView);
     const skills = await Promise.all(state.aiSettings.skills.map(async (skill) => ({
       ...skill,
       available: Boolean((await readSkillInstructions(skill, 512)).trim()),
     })));
-    // Revision snapshots are fetched only when the Versions drawer opens;
-    // keeping them out of the initial payload prevents old article bodies from
-    // slowing down every page load as the local archive grows.
     response.json({
       ...state,
       aiSettings: { ...state.aiSettings, skills },
-      draftRevisions: [],
-      draftTrash: [],
-      articleAgentThreads: [],
     });
   }),
 );
@@ -481,6 +476,12 @@ app.get(
     });
   }),
 );
+
+app.get("/api/runs/:runId/diagnostics", asyncRoute(async (request, response) => {
+  const diagnostics = await readStateProjection(state => runDiagnosticsView(state, routeParam(request.params.runId)));
+  if (!diagnostics) { response.status(404).json({ error: "运行记录不存在" }); return; }
+  response.json(diagnostics);
+}));
 
 app.get(
   "/api/drafts/overview",
