@@ -6,6 +6,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
+export async function capturePreview(page, destination, fullPage = false) {
+  await page.evaluate(() => document.fonts.ready);
+  await page.screenshot({ path: destination, fullPage, animations: "disabled", caret: "hide" });
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 const [hash, name, width = "1440", height = "900", full = "", script = ""] = process.argv.slice(2);
 if (!hash || !name) { console.error("usage: shot.mjs <page-hash> <name> [width] [height] [full] [script]"); process.exit(1); }
 const origin = process.env.AI_NEWS_DESK_PREVIEW_ORIGIN || "http://127.0.0.1:4399";
@@ -19,7 +26,7 @@ page.on("pageerror", (error) => errors.push(String(error).slice(0, 200)));
 await page.goto(`${origin}/#${hash}`, { waitUntil: "networkidle", timeout: 30_000 }).catch(() => {});
 await page.waitForTimeout(1_200);
 if (script) { await page.evaluate(script).catch((error) => errors.push(`script: ${error}`)); await page.waitForTimeout(900); }
-await page.screenshot({ path: path.join(shots, `${name}.png`), fullPage: full === "full" });
-const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+const overflow = await capturePreview(page, path.join(shots, `${name}.png`), full === "full");
 console.log(name, "horizontal overflow", overflow, errors.length ? `errors: ${errors.join(" | ")}` : "no console errors");
 await browser.close();
+}
