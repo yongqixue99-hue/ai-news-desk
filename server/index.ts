@@ -258,6 +258,9 @@ import type { AssignmentMode, ContentPackage, EditorialIntent } from "./product-
 
 import { homeLayoutFor, parseHomeLayout } from "./home-layout.js";
 import { retryPackageJob } from "./job-recovery.js";
+import { registerSourceHttpRoutes1, registerSourceHttpRoutes2, registerSourceHttpRoutes3 } from "./source-http-routes.js";
+import type { HttpRouteRuntime } from "./http-route-runtime.js";
+import { asyncRoute, deliveryRoute, validDateInput, sourceKinds, sourceRoles, draftableAssignmentModes, storyEventTypes, routeParam, decodedHeader, decodedHeaderList, storeNewMaterial, respondMaterialError, publisherPreflightFor, decodeHeader, parseScreenshotCropHeader, parseImagePostLinesHeader } from "./http-route-support.js";
 
 const app = express();
 const zhihuHotlist = createZhihuHotlist({
@@ -298,158 +301,48 @@ app.use((request, response, next) => {
 app.use("/media", express.static(workflowMediaRoot, { fallthrough: false }));
 app.use("/materials", express.static(workflowMaterialsRoot, { fallthrough: false }));
 
-const asyncRoute =
-  (handler: (request: express.Request, response: express.Response) => Promise<void>) =>
-  (request: express.Request, response: express.Response, next: express.NextFunction) =>
-    handler(request, response).catch(next);
 
-const deliveryRoute = (handler: (request: express.Request, response: express.Response) => Promise<void>) =>
-  asyncRoute(async (request, response) => {
-    try { await handler(request, response); }
-    catch (error) {
-      const detail = error instanceof Error ? error.message : "发送未完成，请检查连接后重试";
-      response.status(error instanceof PublicationRevisionConflictError ? 409 : 400).json({ error: detail });
-    }
-  });
 
-const validDateInput = (value: string) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-};
 
-const sourceKinds = new Set(["rss", "hackernews", "google_news", "zhihu", "last30days", "github", "x", "documentation"]);
-const sourceRoles = new Set(["official", "verification", "research", "discovery", "community"]);
-const draftableAssignmentModes = new Set<Exclude<AssignmentMode, "watch" | "skip">>([
-  "brief",
-  "synthesis",
-  "community",
-  "playbook",
-  "curate",
-]);
 
-const storyEventTypes = new Set([
-  "opened",
-  "interested",
-  "not_interested",
-  "package_created",
-  "drafted",
-  "synced",
-  "published",
-]);
 
-const routeParam = (value: string | string[]) => Array.isArray(value) ? value[0] : value;
 
-const decodedHeader = (request: express.Request, name: string) => {
-  const raw = request.get(name) || "";
-  if (!raw) return "";
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
-};
 
-const decodedHeaderList = (request: express.Request, name: string) =>
-  decodedHeader(request, name)
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 
-const storeNewMaterial = async (material: ImageMaterial) => {
-  try {
-    await updateState((state) => {
-      assertUniqueMaterialFingerprint(material.fingerprint, state.materials);
-      state.materials.unshift(material);
-    });
-  } catch (error) {
-    // Only this request's just-created file is removed. A previously stored
-    // material referenced by DuplicateMaterialError is never touched.
-    await removeMaterialFile(material);
-    throw error;
-  }
-};
 
-const respondMaterialError = (response: express.Response, error: unknown) => {
-  if (!(error instanceof DuplicateMaterialError)) return false;
-  response.status(error.statusCode).json({
-    error: error.message,
-    code: error.code,
-    duplicateId: error.duplicateId,
-  });
-  return true;
-};
 
-const publisherPreflightFor = async (
-  draft: ArticleDraft,
-  settings: Settings,
-  expectedRevisionHash = publicationRevisionHash(draft, "xiaoheihe"),
-) => {
-  const status = await publisherStatus(settings);
-  const inserted = insertedMediaIds(draft);
-  const captions = publisherImageCaptions(draft);
-  const placementsById = new Map(draft.images.map((placement) => [placement.id, placement]));
-  const inspectedImages = await Promise.all([...inserted].map(async (placementId) => {
-    const placement = placementsById.get(placementId);
-    if (!placement) return { id: placementId, available: false, caption: "" };
-    const inspected = await inspectDraftImageFile(placement);
-    const fingerprintMatches = Boolean(
-      inspected.fingerprint
-      && placement.image.fingerprint
-      && inspected.fingerprint === placement.image.fingerprint,
-    );
-    return {
-      id: placement.id,
-      available: inspected.available && fingerprintMatches,
-      caption: captions.get(placement.id) ?? (placement.caption || placement.image.caption),
-      captionRequired: placement.image.rights !== "user-provided",
-    };
-  }));
-  const selection = draft.xiaoheiheOptions ? xiaoheiheSelection(draft) : undefined;
-  const coverId = selection?.options.creationPlan !== "none" ? selection?.options.coverPlacementId : undefined;
-  const cover = coverId ? placementsById.get(coverId) : undefined;
-  const inspectedCover = cover ? await inspectXiaoheiheCover(cover) : undefined;
-  const preflight = evaluatePublisherPreflight({
-    expectedRevisionHash,
-    runtime: publisherRuntimeFromStatus(status, {
-      loggedIn: status.loggedIn,
-      editorReady: status.editorReady,
-      pageUrl: status.pageUrl,
-    }),
-    draft: {
-      id: draft.id,
-      contentFormat: draft.contentFormat,
-      title: draft.title,
-      bodyHtml: draft.contentFormat === "image-post"
-        ? publisherImagePostBodyHtml(draft)
-        : publisherBodyHtml(draft),
-      community: selection?.communities.join(" · ") ?? draft.community,
-      topics: selection?.topics ?? draft.topics,
-      xiaoheiheOptions: selection?.options,
-      coverProblem: inspectedCover?.reason,
-      coverAvailable: Boolean(inspectedCover?.available && inspectedCover.fingerprint && inspectedCover.fingerprint === cover?.image.fingerprint),
-      images: inspectedImages,
-    },
-    minimumProtocolVersion: MINIMUM_EXTENSION_VERSION,
-  });
-  // Only media actually referenced by the article can block delivery. Drafts
-  // may keep unused source images as a research tray, and those should not
-  // force the editor to clear rights metadata before filling the article.
-  const readiness = evaluateDraftReadiness({
-    ...draft,
-    images: draft.images.filter((placement) => inserted.has(placement.id) || placement.id === coverId),
-  }, "xiaoheihe");
-  const quality = reviewDraftQuality(draft, await getLocalDatabase());
-  readiness.factBlockers.push(...quality.blockers);
-  readiness.blockers.push(...quality.blockers); readiness.ready = readiness.blockers.length === 0;
-  readiness.binding = quality.binding;
-  return appendEditorialReadiness(preflight, readiness);
-};
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 registerSocialDeliveryRoutes(app);
 registerCommunityRoutes(app);
 registerDraftLibraryRoutes(app);
 registerAiStyleScoreRoutes(app);
+
+const httpRouteRuntime: HttpRouteRuntime = {
+  get readState() { return readState; },
+  get readStateProjection() { return readStateProjection; },
+  get updateState() { return updateState; },
+  get replaceState() { return replaceState; },
+  get getLocalDatabase() { return getLocalDatabase; },
+  get deliveryDesk() { return deliveryDesk; },
+  get zhihuHotlist() { return zhihuHotlist; },
+  get wechatDelivery() { return wechatDelivery; },
+  get portableArchiveImportConfirmations() { return portableArchiveImportConfirmations; },
+  get backfillTodayTitles() { return backfillTodayTitles; },
+  get xiaoheiheDelivery() { return xiaoheiheDelivery; },
+};
 
 app.get(
   "/api/bootstrap",
@@ -520,34 +413,7 @@ app.post("/api/product/jobs/:jobId/retry", asyncRoute(async (request, response) 
   response.status(202).json(retryPackageJob(database, oldJob.id, story?.title));
 }));
 
-app.get(
-  "/api/topic-feeds/:platform",
-  asyncRoute(async (request, response) => {
-    const platform = communityPlatforms.find((value) => value === request.params.platform);
-    if (!platform) { response.status(404).json({ error: "未知选题分类" }); return; }
-    response.json(buildTopicFeed(await readState(), platform, platform === "zhihu" ? await zhihuHotlist.read() : undefined));
-  }),
-);
-
-app.post(
-  "/api/topic-feeds/zhihu/refresh",
-  asyncRoute(async (_request, response) => {
-    const hot = await zhihuHotlist.refresh();
-    response.json(buildTopicFeed(await readState(), "zhihu", hot));
-  }),
-);
-
-app.post(
-  "/api/topic-feeds/zhihu/:questionId/select",
-  asyncRoute(async (request, response) => {
-    const snapshot = await zhihuHotlist.read();
-    const item = snapshot.items.find((entry) => entry.id === request.params.questionId);
-    if (!item || !snapshot.capturedAt) { response.status(404).json({ error: "该选题不在已读取榜单中，请重新读取榜单。" }); return; }
-    const capturedAt = snapshot.capturedAt;
-    const ref = await updateState((state) => retainZhihuTopic(state, item, capturedAt));
-    response.json(ref);
-  }),
-);
+registerSourceHttpRoutes1(app, httpRouteRuntime);
 
 app.get("/api/aggregations", asyncRoute(async (_request, response) => {
   response.json(buildAggregationView(await readState()));
@@ -1325,35 +1191,7 @@ app.post(
   }),
 );
 
-app.get(
-  "/api/x/status",
-  asyncRoute(async (_request, response) => {
-    response.json(await readXCredentialStatus({ getBearerToken: getXBearerToken }));
-  }),
-);
-
-app.put(
-  "/api/x/token",
-  asyncRoute(async (request, response) => {
-    const bearerToken = typeof request.body?.bearerToken === "string"
-      ? request.body.bearerToken.trim()
-      : "";
-    if (bearerToken.length < 16) {
-      response.status(400).json({ error: "X API Bearer Token 格式不正确" });
-      return;
-    }
-    const hint = await setXBearerToken(bearerToken);
-    response.json({ configured: true, hint });
-  }),
-);
-
-app.delete(
-  "/api/x/token",
-  asyncRoute(async (_request, response) => {
-    await deleteXBearerToken();
-    response.json({ configured: false });
-  }),
-);
+registerSourceHttpRoutes2(app, httpRouteRuntime);
 
 app.patch(
   "/api/settings",
@@ -1761,262 +1599,7 @@ app.delete(
   }),
 );
 
-app.post(
-  "/api/sources",
-  asyncRoute(async (request, response) => {
-    const body = request.body as Partial<SourceConfig>;
-    if (!body.name?.trim() || !body.kind) {
-      response.status(400).json({ error: "新闻源名称和类型不能为空" });
-      return;
-    }
-    if (!sourceKinds.has(body.kind)) {
-      response.status(400).json({ error: "不支持的新闻源类型" });
-      return;
-    }
-    const spendingState = await readState();
-    assertMeteredSourceAllowed(spendingState, { kind: body.kind, name: body.name.trim() });
-    if (body.kind === "rss" && !body.url) {
-      response.status(400).json({ error: "RSS 新闻源必须填写地址" });
-      return;
-    }
-    if (body.kind === "x" && !accountsForXSource(body).length) {
-      response.status(400).json({ error: "X 官方来源必须填写至少一个有效账号，例如 OpenAI" });
-      return;
-    }
-    for (const candidateUrl of [body.homepageUrl, body.url]) {
-      if (!candidateUrl) continue;
-      try {
-        await validateRemoteUrl(candidateUrl.trim());
-      } catch (error) {
-        response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
-        return;
-      }
-    }
-    const source: SourceConfig = {
-      id: `source_${randomUUID().slice(0, 8)}`,
-      name: body.name.trim(),
-      kind: body.kind,
-      homepageUrl: body.homepageUrl?.trim() || (body.kind === "x" ? "https://x.com/" : undefined),
-      url: body.url?.trim(),
-      query: body.query?.trim(),
-      topicIds: normalizeTopicIds(body.topicIds),
-      enabled: true,
-      selected: true,
-      category: body.category?.trim() || "ai-news",
-      role: body.kind === "x" ? "official" : sourceRoles.has(body.role ?? "") ? body.role : undefined,
-      discoveryOnly: body.kind === "x" ? false : Boolean(body.discoveryOnly),
-      note: body.note?.trim(),
-    };
-    source.role ??= sourceRoleFor(source);
-    await updateState((state) => state.sources.push(source));
-    response.status(201).json(source);
-  }),
-);
-
-app.patch(
-  "/api/sources/batch",
-  asyncRoute(async (request, response) => {
-    const sourceIds: string[] = Array.isArray(request.body?.sourceIds)
-      ? [...new Set<string>((request.body.sourceIds as unknown[]).filter((sourceId): sourceId is string =>
-        typeof sourceId === "string" && sourceId.trim().length > 0))].slice(0, 200)
-      : [];
-    const patch = {
-      ...(typeof request.body?.enabled === "boolean" ? { enabled: request.body.enabled } : {}),
-      ...(typeof request.body?.selected === "boolean" ? { selected: request.body.selected } : {}),
-    };
-    if (!sourceIds.length) {
-      response.status(400).json({ error: "请至少选择一个新闻源" });
-      return;
-    }
-    if (patch.enabled === undefined && patch.selected === undefined) {
-      response.status(400).json({ error: "批量操作必须指定启用状态或默认采集状态" });
-      return;
-    }
-    const spendingState = await readState();
-    if (patch.enabled === true || patch.selected === true) {
-      for (const source of spendingState.sources.filter((entry) => sourceIds.includes(entry.id))) {
-        assertMeteredSourceAllowed(spendingState, source);
-      }
-    }
-    const sources = await updateState((state) => batchUpdateSources(state, sourceIds, patch));
-    response.json({ sources, updated: sources.length });
-  }),
-);
-
-app.patch(
-  "/api/sources/:sourceId",
-  asyncRoute(async (request, response) => {
-    const currentState = await readState();
-    const existing = currentState.sources.find((entry) => entry.id === request.params.sourceId);
-    if (!existing) {
-      response.status(404).json({ error: "新闻源不存在" });
-      return;
-    }
-    const body = request.body as Partial<SourceConfig>;
-    const allowedKeys = [
-      "name",
-      "kind",
-      "homepageUrl",
-      "url",
-      "query",
-      "topicIds",
-      "enabled",
-      "selected",
-      "category",
-      "role",
-      "discoveryOnly",
-      "note",
-    ] as const;
-    const patch: Partial<SourceConfig> = {};
-    for (const key of allowedKeys) {
-      if (body[key] !== undefined) (patch[key] as unknown) = body[key];
-    }
-    const nextKind = patch.kind ?? existing.kind;
-    if (!sourceKinds.has(nextKind)) {
-      response.status(400).json({ error: "不支持的新闻源类型" });
-      return;
-    }
-    const nextUrl = typeof patch.url === "string" ? patch.url.trim() : existing.url;
-    if (nextKind === "rss" && !nextUrl && !existing.routes?.some((route) => route.url || route.query)) {
-      response.status(400).json({ error: "RSS 新闻源必须填写地址" });
-      return;
-    }
-    const nextQuery = typeof patch.query === "string" ? patch.query.trim() : existing.query;
-    if (nextKind === "x" && !accountsForXSource({ query: nextQuery }).length) {
-      response.status(400).json({ error: "X 官方来源必须填写至少一个有效账号，例如 OpenAI" });
-      return;
-    }
-    const nextHomepageUrl = typeof patch.homepageUrl === "string"
-      ? patch.homepageUrl.trim()
-      : existing.homepageUrl;
-    for (const candidateUrl of [patch.url !== undefined ? nextUrl : undefined, patch.homepageUrl !== undefined ? nextHomepageUrl : undefined]) {
-      if (!candidateUrl) continue;
-      try {
-        await validateRemoteUrl(candidateUrl);
-      } catch (error) {
-        response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
-        return;
-      }
-    }
-    if (patch.url !== undefined) patch.url = nextUrl;
-    if (patch.homepageUrl !== undefined) patch.homepageUrl = nextHomepageUrl;
-    if (typeof patch.name === "string") patch.name = patch.name.trim();
-    if (typeof patch.query === "string") patch.query = patch.query.trim();
-    if (patch.topicIds !== undefined) patch.topicIds = normalizeTopicIds(patch.topicIds);
-    if (typeof patch.category === "string") patch.category = patch.category.trim();
-    if (patch.role !== undefined && !sourceRoles.has(patch.role)) {
-      response.status(400).json({ error: "不支持的来源分类" });
-      return;
-    }
-    if (nextKind === "x") {
-      if (patch.enabled === true || patch.selected === true) {
-        assertMeteredSourceAllowed(currentState, { kind: nextKind, name: existing.name });
-      }
-      patch.role = "official";
-      patch.discoveryOnly = false;
-      if (!nextHomepageUrl) patch.homepageUrl = "https://x.com/";
-    }
-    if (typeof patch.note === "string") patch.note = patch.note.trim();
-    const source = await updateState((state) => {
-      const target = state.sources.find((entry) => entry.id === request.params.sourceId);
-      if (!target) return undefined;
-      Object.assign(target, patch, { id: target.id });
-      return target;
-    });
-    if (!source) response.status(404).json({ error: "新闻源不存在" });
-    else response.json(source);
-  }),
-);
-
-app.post(
-  "/api/sources/:sourceId/test",
-  asyncRoute(async (request, response) => {
-    const current = await readState();
-    const source = current.sources.find((entry) => entry.id === request.params.sourceId);
-    if (!source) {
-      response.status(404).json({ error: "新闻源不存在" });
-      return;
-    }
-    assertMeteredSourceAllowed(current, source);
-    const result = await probeSource(source);
-    const updated = await updateState((state) => {
-      const target = state.sources.find((entry) => entry.id === request.params.sourceId);
-      return target ? applySourceProbeResult(target, result) : undefined;
-    });
-    if (!updated) response.status(404).json({ error: "新闻源已被删除" });
-    else response.json({ source: updated, result });
-  }),
-);
-
-app.delete(
-  "/api/sources/:sourceId",
-  asyncRoute(async (request, response) => {
-    const removed = await updateState((state) => {
-      const index = state.sources.findIndex((entry) => entry.id === request.params.sourceId);
-      if (index < 0) return false;
-      state.sources.splice(index, 1);
-      state.sourcePresets = state.sourcePresets.flatMap((preset) => {
-        const sourceIds = preset.sourceIds.filter((sourceId) => sourceId !== request.params.sourceId);
-        return sourceIds.length ? [{ ...preset, sourceIds }] : [];
-      });
-      return true;
-    });
-    response.status(removed ? 204 : 404).end();
-  }),
-);
-
-app.get(
-  "/api/source-presets",
-  asyncRoute(async (_request, response) => {
-    response.json((await readState()).sourcePresets);
-  }),
-);
-
-app.post(
-  "/api/source-presets",
-  asyncRoute(async (request, response) => {
-    const name = typeof request.body?.name === "string" ? request.body.name : "";
-    const sourceIds = Array.isArray(request.body?.sourceIds)
-      ? request.body.sourceIds.filter((sourceId: unknown): sourceId is string => typeof sourceId === "string").slice(0, 200)
-      : [];
-    try {
-      const preset = await updateState((state) => createSourcePreset(state, { name, sourceIds }));
-      response.status(201).json(preset);
-    } catch (error) {
-      response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
-    }
-  }),
-);
-
-app.post(
-  "/api/source-presets/:presetId/apply",
-  asyncRoute(async (request, response) => {
-    const presetId = Array.isArray(request.params.presetId)
-      ? request.params.presetId[0]
-      : request.params.presetId;
-    try {
-      const result = await updateState((state) => {
-        applySourcePreset(state, presetId);
-        const preset = state.sourcePresets.find((entry) => entry.id === presetId) as SourcePreset;
-        return { preset, sources: state.sources };
-      });
-      response.json(result);
-    } catch (error) {
-      response.status(404).json({ error: error instanceof Error ? error.message : String(error) });
-    }
-  }),
-);
-
-app.delete(
-  "/api/source-presets/:presetId",
-  asyncRoute(async (request, response) => {
-    const presetId = Array.isArray(request.params.presetId)
-      ? request.params.presetId[0]
-      : request.params.presetId;
-    const removed = await updateState((state) => deleteSourcePreset(state, presetId));
-    response.status(removed ? 204 : 404).end();
-  }),
-);
+registerSourceHttpRoutes3(app, httpRouteRuntime);
 
 app.post(
   "/api/stories/search",
@@ -2348,35 +1931,11 @@ app.post(
   }),
 );
 
-const decodeHeader = (value: string | undefined, fallback = "") => {
-  if (!value) return fallback;
-  try {
-    return decodeURIComponent(value).replace(/[\u0000-\u001f\u007f]/g, "").trim();
-  } catch {
-    throw new Error("截图图文请求头编码无效");
-  }
-};
 
-const parseScreenshotCropHeader = (value: string | undefined): ScreenshotCropRegion => {
-  const parts = decodeHeader(value).split(",").map((part) => Number(part.trim()));
-  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) {
-    throw new Error("图片裁区必须是 left,top,width,height");
-  }
-  return { left: parts[0], top: parts[1], width: parts[2], height: parts[3] };
-};
 
-const parseImagePostLinesHeader = (value: string | undefined) => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(decodeHeader(value, "[]"));
-  } catch {
-    throw new Error("图文正文必须是 JSON 字符串数组");
-  }
-  if (!Array.isArray(parsed) || parsed.some((line) => typeof line !== "string")) {
-    throw new Error("图文正文必须是 JSON 字符串数组");
-  }
-  return parsed;
-};
+
+
+
 
 app.post(
   "/api/image-posts/from-screenshot",
