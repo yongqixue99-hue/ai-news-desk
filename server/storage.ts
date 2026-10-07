@@ -14,6 +14,9 @@ const statePath = path.join(workflowRoot, "state.json");
 let queue: Promise<unknown> = Promise.resolve();
 let databasePromise: Promise<LocalDatabase> | undefined;
 let stateCache: WorkflowState | undefined;
+// Monotonic within this process; a new process also starts with an empty view cache.
+let stateRevision = 0;
+export const getStateRevision = () => stateRevision;
 
 const ensureDirectories = async () => {
   await mkdir(workflowRoot, { recursive: true });
@@ -56,6 +59,7 @@ const persistState = async (state: WorkflowState) => {
   await ensureDirectories();
   (await localDatabase()).writeState(state);
   stateCache = structuredClone(state);
+  stateRevision += 1;
 };
 
 export const updateState = async <T>(
@@ -104,6 +108,7 @@ export const runStorageExclusive = async <T>(
       replaceDatabaseSnapshot: (snapshotPath) => {
         database.replaceFromSnapshot(snapshotPath);
         stateCache = upgradeState(database.readState<WorkflowState>());
+        stateRevision += 1;
       },
     });
   });

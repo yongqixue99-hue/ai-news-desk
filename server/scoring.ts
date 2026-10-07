@@ -64,8 +64,8 @@ const normalizedStoryTitle = (title: string) => title
   .replace(/\s+/g, " ")
   .trim();
 
-const titleTerms = (title: string) => new Set(
-  normalizedStoryTitle(title)
+const titleTerms = (normalizedTitle: string) => new Set(
+  normalizedTitle
     .split(" ")
     .filter((term) => term.length > 1 && !titleStopWords.has(term)),
 );
@@ -75,12 +75,12 @@ export const titleSimilarity = (left: string, right: string) => {
   const normalizedRight = normalizedStoryTitle(right);
   if (!normalizedLeft || !normalizedRight) return 0;
   if (normalizedLeft === normalizedRight) return 1;
-  const leftTerms = titleTerms(left);
-  const rightTerms = titleTerms(right);
+  const leftTerms = titleTerms(normalizedLeft);
+  const rightTerms = titleTerms(normalizedRight);
   if (!leftTerms.size || !rightTerms.size) return 0;
   let intersection = 0;
   for (const term of leftTerms) if (rightTerms.has(term)) intersection += 1;
-  const union = new Set([...leftTerms, ...rightTerms]).size;
+  const union = leftTerms.size + rightTerms.size - intersection;
   const jaccard = intersection / union;
   const containment = intersection / Math.min(leftTerms.size, rightTerms.size);
   return Math.max(jaccard, containment * 0.88);

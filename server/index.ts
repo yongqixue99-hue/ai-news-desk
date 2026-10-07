@@ -30,6 +30,7 @@ import path from "node:path";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import { createTodayTitleBackfill, enqueueTodayTitleBackfill } from "./today-title-backfill.js";
+import { readTodayView } from "./today-view-cache.js";
 import { pruneJobArtifacts } from "./artifact-retention.js";
 import { buildDraftOverview } from "./draft-overview.js";
 import { createLocalSecurityMiddleware } from "./http-security.js";
@@ -186,7 +187,7 @@ import { createWeChatDelivery } from "./wechat-delivery.js";
 import { createXiaoheiheDelivery } from "./xiaoheihe-delivery.js";
 import { buildWorkflowPerformance } from "./workflow-performance.js";
 import { contentPackageDesk } from "./content-package-desk.js";
-import { buildHomeNews, buildTodayView, storyById, retainStoryForWriting } from "./story-desk.js";
+import { buildHomeNews, storyById, retainStoryForWriting } from "./story-desk.js";
 import { enrichStoryExplanation } from "./story-explanation-service.js";
 import { storyEvidenceDesk } from "./story-evidence-desk.js";
 import {
@@ -568,7 +569,7 @@ app.post("/api/aggregations/:id/select", asyncRoute(async (request, response) =>
 }));
 
 const backfillTodayTitles = createTodayTitleBackfill({
-  readView: async () => buildTodayView(await readState()),
+  readView: readTodayView,
   enrich: enrichCandidateBriefings,
 });
 // Page fallback and collection jobs reuse the same bounded analysis operation.
@@ -580,7 +581,7 @@ app.post(
 app.get(
   "/api/today",
   asyncRoute(async (_request, response) => {
-    const view = buildTodayView(await readState());
+    const view = await readTodayView();
     // Browsing must not enqueue legacy maintenance or invoke a provider.
     if (_request.query.readOnly === "1") { response.json(view); return; }
     const database = await getLocalDatabase();
@@ -3388,7 +3389,7 @@ const initializeOwnedWorkspace = async () => {
       console.warn("Material library seed completed with failures", materialSeed.failed);
     }
   }
-  buildTodayView(await readState());
+  await readTodayView();
   await recoverInterruptedRuns();
 };
 
