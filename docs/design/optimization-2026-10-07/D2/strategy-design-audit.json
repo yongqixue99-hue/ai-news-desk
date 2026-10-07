@@ -1,0 +1,9 @@
+{
+  "file": "src/strategy-design.css",
+  "beforeBytes": 7980,
+  "afterBytes": 7788,
+  "removedSelectors": [
+    ".today-opportunity",
+    ".today-opportunity strong"
+  ]
+}

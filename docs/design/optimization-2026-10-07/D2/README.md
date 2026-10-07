@@ -8,13 +8,9 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | src/components/social-delivery.css | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19) | 6005→6005 | 0 | 457709→457709 | 48/48，像素差异0 | 单测1364/1364、编辑22/22、构建通过、E2E13/13 |
 | src/styles.css | [#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20) | 293668→265786 | 255 | 457709→433511 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
-
 | src/desk-design.css | [#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21) | 30584→29243 | 19 | 433511→432366 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
-
 | src/reader-design.css | [#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22) | 23991→23745 | 2 | 432366→432146 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
-
-| src/strategy-design.css | [#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23) | 7980→7788 | 2 | 432146→431978 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
-
+| src/strategy-design.css | [#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23) | 7980→7788 | 2 | 431898→431730 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
 | src/swiss-design.css | [#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24) | 34061→33777 | 4 | 432146→431898 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
 
 保留所有没有充分证据能删除的规则。零删除同样是完整审查结果。
