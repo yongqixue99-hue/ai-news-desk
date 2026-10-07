@@ -30,6 +30,7 @@ export const createDeliveryBatchDesk = (dependencies: Dependencies) => {
   const running = new Map<DeliveryPlatform, { draftId: string; batchId: string; target: DeliveryBatchTarget;
     controller: AbortController; deadline: number; expired: boolean }>();
   let ticking = false;
+  let lastTickAt: number | undefined;
   const start = async (draftId: string, input: unknown, updatedAt: string, retryOf?: string, accountBindings: Partial<Record<DeliveryPlatform, string>> = {}) => {
     const platforms = selectedDeliveryPlatforms(input);
     if (!accountBindings || typeof accountBindings !== "object" || Array.isArray(accountBindings)
@@ -128,6 +129,14 @@ export const createDeliveryBatchDesk = (dependencies: Dependencies) => {
   const tick = async () => {
     if (ticking) return;
     ticking = true;
+    const timestamp = now();
+    const gap = lastTickAt === undefined ? 0 : timestamp - lastTickAt;
+    lastTickAt = timestamp;
+    // A late polling tick means the process could not make progress while
+    // suspended. Login expiry remains a wall-clock limit on the durable batch.
+    if (gap > 30_000) for (const operation of running.values()) {
+      if (!operation.expired && !operation.controller.signal.aborted) operation.deadline += gap;
+    }
     let work: Promise<void>[] = [];
     try {
       for (const [platform, operation] of running) {
