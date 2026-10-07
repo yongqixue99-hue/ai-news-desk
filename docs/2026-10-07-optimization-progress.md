@@ -18,7 +18,7 @@
 | C3 社区广场 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并 |
 | C4 聚合标题翻译 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并；默认不自动翻译 |
 | D1 诊断存储分离 | 未开始 | — | 计划值 140–240 ms / runs 17.4 MB，待复测 | 仅副本；完整 PR 等待决定，不合并 |
-| D2 旧样式清理 | 进行中 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27)、[#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28)、[#29](https://github.com/yongqixue99-hue/ai-news-desk/pull/29)、[#30](https://github.com/yongqixue99-hue/ai-news-desk/pull/30) | 构建CSS457709→431197 B；本批删除0条规则 | 11/15 已合并；第12批等待CI；48/48像素一致；未上线 |
+| D2 旧样式清理 | 进行中 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27)、[#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28)、[#29](https://github.com/yongqixue99-hue/ai-news-desk/pull/29)、[#30](https://github.com/yongqixue99-hue/ai-news-desk/pull/30) | 构建CSS457709→431197 B；本批删除0条规则 | 12/15 已合并；第13批等待CI；48/48像素一致；未上线 |
 | D3 文档整理 | 未开始 | — | README 313 行 / 交接 743 行 | 日期条目原文保留 |
 | D4 大文件拆分 | 未开始 | — | 待测 | 每领域单独 PR；前端高风险拆分可等待决定 |
 
@@ -201,3 +201,7 @@
 - 第12批修复第2轮：新增构建证明字段的.d.mts声明未同步，TypeScript构建失败；补充严格boolean字段声明，不改变测试或产品行为。
 
 - D2 第12文件 src/components/editorial-layout.css：源10001→10001 B，删除0条全无引用规则；构建CSS431197→431197 B；扫描6/6、四项1368/1368、22/22、隔离构建、E2E13/13全过，48/48原始像素完全相同、溢出0、控制台错误0；等待CI。
+
+- D2 PR #30 最终两个CI全部成功，已合并至9c69f8c；共12/15完成，开始第13文件reading-pages.css。
+
+- D2 第13文件 src/components/reading-pages.css：源16720→16720 B，删除0条全无引用规则；构建CSS431197→431197 B；扫描6/6、四项1368/1368、22/22、隔离构建、E2E13/13全过，48/48原始像素完全相同、溢出0、控制台错误0；等待CI。
