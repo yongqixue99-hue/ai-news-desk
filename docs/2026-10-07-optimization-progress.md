@@ -16,7 +16,7 @@
 | C1 今日接口提速 | 已合并 | [#18](https://github.com/yongqixue99-hue/ai-news-desk/pull/18) | 冷读 770→487 ms；暖读 357–386→2.5–2.7 ms | 四项及两个 CI 全过；未上线 |
 | C2 新闻工作台 | 等待用户决定 | [#46](https://github.com/yongqixue99-hue/ai-news-desk/pull/46) | 首条top：1440 422→350；1280 480→350；390 785→435px；手机主动作不可见→可见 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线 |
 | C3 社区广场 | 等待用户决定 | [#47](https://github.com/yongqixue99-hue/ai-news-desk/pull/47) | 首条top：1440 320→247；390 420→301px；六条候选保持，溢出/错误/写请求均0 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线 |
-| C4 聚合标题翻译 | 进行中 | — | 渲染40→40；手动译文0→20；浏览假调用0、点击/刷新1/1；原始JSON SHA不变 | 四项及纯示例截图完成；等待提交PR，不合并 |
+| C4 聚合标题翻译 | 等待用户决定 | [#48](https://github.com/yongqixue99-hue/ai-news-desk/pull/48) | 渲染40→40；译文0→20；浏览调用0，手动/刷新1/1（假）；原始JSON SHA不变 | 四项全过；最终CI待确认；保持PR打开、未上线 |
 | D1 诊断存储分离 | 未开始 | — | 计划值 140–240 ms / runs 17.4 MB，待复测 | 仅副本；完整 PR 等待决定，不合并 |
 | D2 旧样式清理 | 已合并 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27)、[#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28)、[#29](https://github.com/yongqixue99-hue/ai-news-desk/pull/29)、[#30](https://github.com/yongqixue99-hue/ai-news-desk/pull/30)、[#31](https://github.com/yongqixue99-hue/ai-news-desk/pull/31)、[#32](https://github.com/yongqixue99-hue/ai-news-desk/pull/32)、[#33](https://github.com/yongqixue99-hue/ai-news-desk/pull/33) | 构建CSS457709→431197 B（-5.79%）；删除288条全无引用规则 | 15/15独立PR已合并；每批四项/两个CI全过、48/48像素一致；未上线 |
 | D3 文档整理 | 已合并 | [#34](https://github.com/yongqixue99-hue/ai-news-desk/pull/34) | README331→283行；启动206→9行；交接761→52行；103块/119210 B原文完整 | 四项及最终verify/windows-desktop全过；原文完整；未上线 |
@@ -299,3 +299,5 @@
 - C4 完整首轮四项全部0失败。继续交互审查发现旧空缓存可覆盖刚完成的20条译文，新浏览器回归确实20→0失败；用缓存读取版本排除旧响应，并保留切平台迟到结果断言。不是删改测试或放宽断言。
 
 - C4 最终四项1410/1410、22/22、隔离构建、E2E15/15，0失败0跳过；迟到缓存和平台切换回归全过。1440/390纯示例截图0溢出/错误/真实调用。当前分析模型、费用规则、原始聚合视图保持；新增schema7表，与D1合并顺序需重新基线复验。
+
+- C4 完整提案、测试与纯示例截图已提交到 https://github.com/yongqixue99-hue/ai-news-desk/pull/48；等最终verify/windows-desktop后开始下一项。
