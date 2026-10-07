@@ -42,5 +42,6 @@ export async function verifyCssBuildPair(before, after) {
   const oldHtml = await readFile(path.join(before, "index.html"), "utf8");
   const newHtml = await readFile(path.join(after, "index.html"), "utf8");
   assert.equal(normalize(oldHtml, oldMap, oldCss[0]), normalize(newHtml, newMap, newCss[0]), "HTML changed beyond CSS and bundle references");
-  return { beforeHref: `/__before/${oldCss[0]}`, afterHref: `/${newCss[0]}` };
+  const unchangedCss = Buffer.compare(await readFile(path.join(before, oldCss[0])), await readFile(path.join(after, newCss[0]))) === 0;
+  return { beforeHref: `/__before/${oldCss[0]}`, afterHref: `/${newCss[0]}`, unchangedCss };
 }
