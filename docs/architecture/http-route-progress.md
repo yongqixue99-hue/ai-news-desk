@@ -7,7 +7,7 @@
 | source | 已合并 | [#35](https://github.com/yongqixue99-hue/ai-news-desk/pull/35) | 15 | 149583→132010 | 原文15/15完全一致；单测1374、编辑22/22、构建、E2E13全过 |
 | story | 已合并 | [#36](https://github.com/yongqixue99-hue/ai-news-desk/pull/36) | 15 | 132010→121261 | 原文15/15完全一致；单测1376、编辑22/22、构建、E2E13全过 |
 | package | 已合并 | [#37](https://github.com/yongqixue99-hue/ai-news-desk/pull/37) | 6 | 121261→115083 | 原文6/6完全一致；单测1378、编辑22/22、构建、E2E13全过 |
-| editorial | 进行中 | 待建PR | 7 | 115083→110655 | 原文7/7完全一致；单测1380、编辑22/22、构建、E2E13全过 |
+| editorial | 进行中 | [#38](https://github.com/yongqixue99-hue/ai-news-desk/pull/38) | 7 | 115083→110655 | 原文7/7完全一致；单测1380、编辑22/22、构建、E2E13全过 |
 | draft | 未开始 | — | 13 | — | — |
 | delivery | 未开始 | — | 14 | — | — |
 | learning | 未开始 | — | 18 | — | — |
