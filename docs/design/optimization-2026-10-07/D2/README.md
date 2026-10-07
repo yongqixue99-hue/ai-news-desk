@@ -9,6 +9,6 @@
 | src/components/social-delivery.css | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19) | 6005→6005 | 0 | 457709→457709 | 48/48，像素差异0 | 单测1364/1364、编辑22/22、构建通过、E2E13/13 |
 | src/styles.css | [#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20) | 293668→265786 | 255 | 457709→433511 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
 
-| src/desk-design.css | 待建PR | 30584→29243 | 19 | 433511→432366 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
+| src/desk-design.css | [#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21) | 30584→29243 | 19 | 433511→432366 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
 
 保留所有没有充分证据能删除的规则。零删除同样是完整审查结果。
