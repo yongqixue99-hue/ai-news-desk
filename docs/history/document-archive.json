@@ -1,0 +1,844 @@
+{
+  "originals": [
+    {
+      "path": "README.md",
+      "sha256": "1c172d22a31e7880e0d44838cfff342d5a680406d6dbb773b44557f73ae07d2a",
+      "bytes": 44206,
+      "chunks": [
+        "readme-000",
+        "readme-001",
+        "readme-002",
+        "readme-003",
+        "readme-004",
+        "readme-005",
+        "readme-006",
+        "readme-007",
+        "readme-008",
+        "readme-009",
+        "readme-010",
+        "readme-011",
+        "readme-012",
+        "readme-013",
+        "readme-014",
+        "readme-015",
+        "readme-016",
+        "readme-017",
+        "readme-018",
+        "readme-019",
+        "readme-020",
+        "readme-021",
+        "readme-022",
+        "readme-023",
+        "readme-024",
+        "readme-025",
+        "readme-026",
+        "readme-027",
+        "readme-028",
+        "readme-029",
+        "readme-030",
+        "readme-031",
+        "readme-032",
+        "readme-033",
+        "readme-034",
+        "readme-035",
+        "readme-036",
+        "readme-037",
+        "readme-038",
+        "readme-039"
+      ]
+    },
+    {
+      "path": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "sha256": "81a3402b94521853823d66be9d9e29d0d8a71082cda8fe355748cd430deb20b1",
+      "bytes": 75004,
+      "chunks": [
+        "windows-000",
+        "windows-001",
+        "windows-002",
+        "windows-003",
+        "windows-004",
+        "windows-005",
+        "windows-006",
+        "windows-007",
+        "windows-008",
+        "windows-009",
+        "windows-010",
+        "windows-011",
+        "windows-012",
+        "windows-013",
+        "windows-014",
+        "windows-015",
+        "windows-016",
+        "windows-017",
+        "windows-018",
+        "windows-019",
+        "windows-020",
+        "windows-021",
+        "windows-022",
+        "windows-023",
+        "windows-024",
+        "windows-025",
+        "windows-026",
+        "windows-027",
+        "windows-028",
+        "windows-029",
+        "windows-030",
+        "windows-031",
+        "windows-032",
+        "windows-033",
+        "windows-034",
+        "windows-035",
+        "windows-036",
+        "windows-037",
+        "windows-038",
+        "windows-039",
+        "windows-040",
+        "windows-041",
+        "windows-042",
+        "windows-043",
+        "windows-044",
+        "windows-045",
+        "windows-046",
+        "windows-047",
+        "windows-048",
+        "windows-049",
+        "windows-050",
+        "windows-051",
+        "windows-052",
+        "windows-053",
+        "windows-054",
+        "windows-055",
+        "windows-056",
+        "windows-057",
+        "windows-058",
+        "windows-059",
+        "windows-060",
+        "windows-061",
+        "windows-062"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "id": "windows-010",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "0fb1e80dbc394effeb41bb8cb14f23db658c9e85aa9227b8f24108c8d305e490",
+      "bytes": 575
+    },
+    {
+      "id": "windows-009",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "2aa4e8a74c97c03213455e12c607eb7e8eda7deee0a32d35c3b21b8abbca8bd2",
+      "bytes": 184
+    },
+    {
+      "id": "windows-008",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "75bc020c4d571577122291d96f1952c7c687f5b78b4a29562e3b1a39cbe5c077",
+      "bytes": 202
+    },
+    {
+      "id": "windows-007",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "1570ecd69ec269c99b81b9593554b949b87ed91db5b8145612bf3da4eefba167",
+      "bytes": 200
+    },
+    {
+      "id": "windows-006",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "17a09a8d3d681a2b43fbd19f8e29592b3ccdc73ed66752a4076874cb12a6ad1c",
+      "bytes": 202
+    },
+    {
+      "id": "windows-005",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "7c5d307e84454d21cd20bf034d8f552de1822c8616750faba556b82ceac8d8c2",
+      "bytes": 217
+    },
+    {
+      "id": "windows-004",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "6c8137819e0edd35ea5cd638d7b54b6b551a77527672ea73a378f5b4ff00915a",
+      "bytes": 249
+    },
+    {
+      "id": "windows-003",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "b2e476280844923871d75ac77820a9ae66e4984dd1e54ad0bfb7411459049f3a",
+      "bytes": 205
+    },
+    {
+      "id": "windows-002",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "c07f769840a195b366231722e9b48be72658bc2f0ba5da8f88215c88440b90e3",
+      "bytes": 238
+    },
+    {
+      "id": "windows-001",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-07",
+      "sha256": "446ca1f3499bcb3f660043516ee0d3878bfa0e4a3586b955923cc7f170320496",
+      "bytes": 203
+    },
+    {
+      "id": "readme-010",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "03f983759b4d805e1aebd6e9df46607c547e41850170d817851e8ebad78c53ac",
+      "bytes": 585
+    },
+    {
+      "id": "readme-009",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "656c3442c75d1ba30a3f5788083f185124c57ba1841827e44219cc8c9b2eb782",
+      "bytes": 189
+    },
+    {
+      "id": "readme-008",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "be5b3dc5b3d4e88e0c0e35f027294e125616a99ac9f99e339cbc2e9b987caa4e",
+      "bytes": 207
+    },
+    {
+      "id": "readme-007",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "896639af1ec641f9e7725f58f37551b7cc2546ab3d9dbd6a0db390024961c142",
+      "bytes": 205
+    },
+    {
+      "id": "readme-006",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "f648009a0a2f6989119c2af46df2aad166370e8220a1a5b1687d2f6a12defa5b",
+      "bytes": 207
+    },
+    {
+      "id": "readme-005",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "d918d29921b806018a5393c89541225aa3d0a58db8f1f90e20cacc43dafd14cd",
+      "bytes": 222
+    },
+    {
+      "id": "readme-004",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "d9fc07f51690f5d997eb7370985fcaa8395bf4090c5b4a3724b8df3bf2cdbcab",
+      "bytes": 254
+    },
+    {
+      "id": "readme-003",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "11cfa84b617d9eddaa9ba39cde7b101386267e72348be1bb810f6a0c3f383c49",
+      "bytes": 210
+    },
+    {
+      "id": "readme-002",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "f7bc421d4222ac3d777e2b023bb7009e1e978bbc9224c9b1fe878cbae4f392e9",
+      "bytes": 243
+    },
+    {
+      "id": "readme-001",
+      "source": "README.md",
+      "date": "2026-10-07",
+      "sha256": "8f358e83abe00eb2ec61a797494bd9f719c8f40f72f1e8bafcbfdf8a1d591848",
+      "bytes": 208
+    },
+    {
+      "id": "windows-011",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-03",
+      "sha256": "b3fbb01080e96c48ad1b84e1985c2bf5bffd8787395b561700f8143ac5691892",
+      "bytes": 458
+    },
+    {
+      "id": "readme-011",
+      "source": "README.md",
+      "date": "2026-10-03",
+      "sha256": "4991ffe7fa2d3299512d638641d1c88f8c038c1bfb480d61da1806ca06cea284",
+      "bytes": 391
+    },
+    {
+      "id": "windows-013",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-02",
+      "sha256": "eed5cf4c3cb19adcd167a2338f37289f3dcf8c116462cc7638235352c59b8c72",
+      "bytes": 573
+    },
+    {
+      "id": "windows-012",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-10-02",
+      "sha256": "8f9d5d5ac10876d35ae1308c9236f615ea1e9cf8dab14053914f97c7af949ace",
+      "bytes": 592
+    },
+    {
+      "id": "readme-013",
+      "source": "README.md",
+      "date": "2026-10-02",
+      "sha256": "2ab370bdd5ccb8e5379ea1313c15daddeee9a72d0aced5bddc6045b2ce9544aa",
+      "bytes": 565
+    },
+    {
+      "id": "readme-012",
+      "source": "README.md",
+      "date": "2026-10-02",
+      "sha256": "fb086514be085e3a9141e8bb2d59f9387398dae96dc8c8fa1d799f055bf7ada3",
+      "bytes": 376
+    },
+    {
+      "id": "windows-062",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-22",
+      "sha256": "5b38bc14cb1fbee4c9eee66fdcd60c6ab89ff9eb022f13c6febe562eaef6e074",
+      "bytes": 1454
+    },
+    {
+      "id": "windows-014",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-22",
+      "sha256": "1fe4a3ebc71964bd0a0f7de4bd84de216fae721f51de0e9db6da3317bd33bb3e",
+      "bytes": 543
+    },
+    {
+      "id": "readme-017",
+      "source": "README.md",
+      "date": "2026-09-22",
+      "sha256": "c87a262757f653767fa8fb5512a1407d9f2b27d59b6483182b04a41243bdfab1",
+      "bytes": 259
+    },
+    {
+      "id": "readme-016",
+      "source": "README.md",
+      "date": "2026-09-22",
+      "sha256": "d655da52173a705f7b4300bc92d23bea18e2c0cddbc22bf337a37890d37a2043",
+      "bytes": 335
+    },
+    {
+      "id": "readme-015",
+      "source": "README.md",
+      "date": "2026-09-22",
+      "sha256": "2017d54e722985a82f060c7c32d7983c66cb69f0d8453df6a1dd93586f4a2e12",
+      "bytes": 408
+    },
+    {
+      "id": "readme-014",
+      "source": "README.md",
+      "date": "2026-09-22",
+      "sha256": "ae28d01d92fdb5f17753dd764741f91715746ce123d48eb5d122a5ffac8fb469",
+      "bytes": 424
+    },
+    {
+      "id": "windows-061",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-20",
+      "sha256": "ff6fc416a3fa589665bcc7e4aea09389ff46471809f241349ab00bdf4738de6c",
+      "bytes": 610
+    },
+    {
+      "id": "windows-060",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-20",
+      "sha256": "0b480cc828a74ea01288764a9b438fb65961b4389fb3472d79571f9080ced4ea",
+      "bytes": 364
+    },
+    {
+      "id": "windows-059",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-20",
+      "sha256": "07ed99cbddbc939ec3b4388d23da173fb6597fc9728cb4304f480f1a161c8fb3",
+      "bytes": 581
+    },
+    {
+      "id": "windows-058",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-20",
+      "sha256": "ca512188bf4602257c990e57ae0fae539fc7b8c02214d91f08783707c7b387f9",
+      "bytes": 590
+    },
+    {
+      "id": "windows-057",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-20",
+      "sha256": "0538ebbcb6a531a87532549918175e936090cc21d5f7359fdf4baa37305896b2",
+      "bytes": 483
+    },
+    {
+      "id": "windows-056",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-20",
+      "sha256": "d2ad32d33c6ce9dd5d85036e5f1f8ae2cf5985bb9712a855fbd35cda7be21c35",
+      "bytes": 473
+    },
+    {
+      "id": "windows-055",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-20",
+      "sha256": "81f07a8fe39114cec82c47bc6d268b7cd077686001dcf74437b117b1dde3183f",
+      "bytes": 482
+    },
+    {
+      "id": "windows-054",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-20",
+      "sha256": "e45d42e67ca7879cd1d8339b38b77da21f46b739a0d1a9d5865af929b36e85ce",
+      "bytes": 504
+    },
+    {
+      "id": "readme-020",
+      "source": "README.md",
+      "date": "2026-09-20",
+      "sha256": "424c7916db57d78767e333e8253a3f55a4e9f46bc09679fe99b48e5ad74b3171",
+      "bytes": 427
+    },
+    {
+      "id": "readme-019",
+      "source": "README.md",
+      "date": "2026-09-20",
+      "sha256": "bb604fb338fff69e54819233dbe3718757ab20eb7f9e1d08b0829f3e63c01f92",
+      "bytes": 358
+    },
+    {
+      "id": "readme-018",
+      "source": "README.md",
+      "date": "2026-09-20",
+      "sha256": "acd3c838a4e99c97acf05623e4c0aece065133a9c1536c45a77844268edb14e8",
+      "bytes": 229
+    },
+    {
+      "id": "windows-053",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-18",
+      "sha256": "eee326ae20c0a2886bc6e0aae43663d5ee96b7bbf4d6c8a7dffaedfb96450e22",
+      "bytes": 1981
+    },
+    {
+      "id": "windows-018",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-10",
+      "sha256": "d2872968c1f555ded32772123a7ff37202101d39f34057383d47a4091e0399f2",
+      "bytes": 1497
+    },
+    {
+      "id": "windows-017",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-10",
+      "sha256": "f77fc0e0ecf54afffb8a0c017454402a72a803a752d0615fe689377cdcbe0e91",
+      "bytes": 1335
+    },
+    {
+      "id": "windows-016",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-10",
+      "sha256": "945e30b88997b790a8060eb34aedbba1adeaca65813bd7db282da786458cbddd",
+      "bytes": 1200
+    },
+    {
+      "id": "windows-015",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-10",
+      "sha256": "bbdb727129e6cab1395df989eb19248bd50e7300da9c0297457e88a5804fd91f",
+      "bytes": 1081
+    },
+    {
+      "id": "readme-024",
+      "source": "README.md",
+      "date": "2026-09-10",
+      "sha256": "69fa365bb2b17f5e507bbb6b1967dbbfcfea85f885a55dd692b64bcafc50f551",
+      "bytes": 643
+    },
+    {
+      "id": "readme-023",
+      "source": "README.md",
+      "date": "2026-09-10",
+      "sha256": "93a220539d45aff29232ba133992461de0712d9e16ac965ef9198a1d349aad43",
+      "bytes": 543
+    },
+    {
+      "id": "readme-022",
+      "source": "README.md",
+      "date": "2026-09-10",
+      "sha256": "e659a35fbe81c282c9d796052a37f6b60b5825fb6b24d9388e405f3da4e5b6ba",
+      "bytes": 557
+    },
+    {
+      "id": "readme-021",
+      "source": "README.md",
+      "date": "2026-09-10",
+      "sha256": "c449d670e92e435c21f5e77cb28b3bf7bf4181374ce615244b2a5d37f5ccbe04",
+      "bytes": 465
+    },
+    {
+      "id": "windows-021",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-09",
+      "sha256": "4ef2526fb482f5c3be1f876a1b052e8e2e9cc7abeebcad1248abd122400652b0",
+      "bytes": 1694
+    },
+    {
+      "id": "windows-020",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-09",
+      "sha256": "1d5f0a5c42c58d32ce48912f5e70a59cf46c5ae3a391f3d5948c7462d6bdc710",
+      "bytes": 1205
+    },
+    {
+      "id": "windows-019",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-09",
+      "sha256": "643d3784423b00af9f8e8979fdbcd0009c7bf5d7919aca63d10fd786198d87ba",
+      "bytes": 1427
+    },
+    {
+      "id": "readme-027",
+      "source": "README.md",
+      "date": "2026-09-09",
+      "sha256": "c7bbde0440faed5745b7004cde37587a7e0547d986ddb7f0b9bf36bc3e9d3bd8",
+      "bytes": 410
+    },
+    {
+      "id": "readme-026",
+      "source": "README.md",
+      "date": "2026-09-09",
+      "sha256": "dcbe75db72b97f72a03393584e5b8f32953e697aedf34b1ec927632bb208b2d4",
+      "bytes": 396
+    },
+    {
+      "id": "readme-025",
+      "source": "README.md",
+      "date": "2026-09-09",
+      "sha256": "c471cf6e119c3ac834139c2d6fe514879c5bcba3b476ca97beb3cdd241e36287",
+      "bytes": 367
+    },
+    {
+      "id": "windows-024",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-08",
+      "sha256": "08621b6a3100a2b3c973928d43c190e54aac0a8264ea632558bf1d72f7336cc9",
+      "bytes": 2139
+    },
+    {
+      "id": "windows-023",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-08",
+      "sha256": "2649a54c8bcdedb8a82414ebccbd4a94d22263054916dda0e0f8a290e35f5508",
+      "bytes": 1921
+    },
+    {
+      "id": "windows-022",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-08",
+      "sha256": "c02b585fb178e3882528f67dfb8a16a5328b02c4c4c5c85d90cf0c19bca7afc9",
+      "bytes": 1650
+    },
+    {
+      "id": "readme-030",
+      "source": "README.md",
+      "date": "2026-09-08",
+      "sha256": "56027f4903f68ca2df1c006fb562f2e2658aa4d5ae4576b387b34ab20a0d0a67",
+      "bytes": 534
+    },
+    {
+      "id": "readme-029",
+      "source": "README.md",
+      "date": "2026-09-08",
+      "sha256": "0ae7518b972c5f6ca52303d03c118042b90e982289d92bb35572ec1e36c67ea8",
+      "bytes": 272
+    },
+    {
+      "id": "readme-028",
+      "source": "README.md",
+      "date": "2026-09-08",
+      "sha256": "c7033eef35df67dd53b2277b0066646bf4ae4adba1ad0c305589c5a40437727d",
+      "bytes": 415
+    },
+    {
+      "id": "windows-025",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-07",
+      "sha256": "d251430a0008b2bb2e64fdef8ac3a4174bcfac2002b86393d16972f4ff5c2c0d",
+      "bytes": 1249
+    },
+    {
+      "id": "readme-031",
+      "source": "README.md",
+      "date": "2026-09-07",
+      "sha256": "000de2a4ae0cc36926385a3c24a98155341988e2869da5ba7f97679bbab68874",
+      "bytes": 533
+    },
+    {
+      "id": "windows-030",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-05",
+      "sha256": "44e2a961eced613ec91dfa787385d0f0ea405a01fb5393407ecae228c9d4423a",
+      "bytes": 1635
+    },
+    {
+      "id": "windows-029",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-05",
+      "sha256": "76b2188eaf2f751fcecb149d1ea043fe0d0cdd3bc724809d1247c28ea29905fd",
+      "bytes": 2383
+    },
+    {
+      "id": "windows-028",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-05",
+      "sha256": "7db5cd0b317229c805134f9f27420d1aaaf56b4b75b34ecf2fabf6b4cfb62e67",
+      "bytes": 1359
+    },
+    {
+      "id": "windows-027",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-05",
+      "sha256": "5e794d2f3a5ef4c67fa056c715f83aac5db657dab2facbd9cc0cbc11e425973f",
+      "bytes": 2005
+    },
+    {
+      "id": "windows-026",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-05",
+      "sha256": "0aac76c49a89775824a4d0eb2e58e29529daef6784a47e1fd99ee0bc13803c80",
+      "bytes": 1537
+    },
+    {
+      "id": "readme-036",
+      "source": "README.md",
+      "date": "2026-09-05",
+      "sha256": "3580f98be6f51207ddcd5d96a98f1cef544ff34c73c4c5d374e094f7aa29d5c7",
+      "bytes": 518
+    },
+    {
+      "id": "readme-034",
+      "source": "README.md",
+      "date": "2026-09-05",
+      "sha256": "a90f49ebb1c6a40a75b94d6295b610dfcbc1e5bd6552b49bedd34c70ede73150",
+      "bytes": 416
+    },
+    {
+      "id": "readme-033",
+      "source": "README.md",
+      "date": "2026-09-05",
+      "sha256": "e93b957594d69665cd533fe310a7fd058511ed1645f40e28eac852696a323e6c",
+      "bytes": 401
+    },
+    {
+      "id": "readme-032",
+      "source": "README.md",
+      "date": "2026-09-05",
+      "sha256": "62ec196e984a4dd05a8b87af1a021eb0cc066fe256f3902746ea6083b66909d1",
+      "bytes": 513
+    },
+    {
+      "id": "windows-052",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-04",
+      "sha256": "f5109d072743e4763addd72e803557dbd5b0384802ba698db862ddbea73b4521",
+      "bytes": 1849
+    },
+    {
+      "id": "windows-051",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-04",
+      "sha256": "b965958e8260c15f561719278b1488f6efe04db89b32c308b56e85e534c2fcac",
+      "bytes": 3146
+    },
+    {
+      "id": "windows-050",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-04",
+      "sha256": "037ece785b1b506c6c8ab3121678f210c3e127a2da0b4b57fe2df2e85bff6249",
+      "bytes": 1484
+    },
+    {
+      "id": "windows-049",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-04",
+      "sha256": "4fbba430d9bb8d34a167a42be09bf259c665237ac6c2c5f798a41f08ea3b0b1e",
+      "bytes": 2327
+    },
+    {
+      "id": "windows-048",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-04",
+      "sha256": "b5021f428462e619e75b5fd6c2ec3395bb3b008feacb677703b23efcfadb3c21",
+      "bytes": 2967
+    },
+    {
+      "id": "windows-047",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-04",
+      "sha256": "7e1b1f41b8990d71007d8ffca3474804f8ecac7aecfb3a118b65d6414b1b36cf",
+      "bytes": 2021
+    },
+    {
+      "id": "windows-046",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-03",
+      "sha256": "67dc905f0680efc9217035291d9a1e3ca8d82ef9bd3d90edec3cc85b6920ddd0",
+      "bytes": 2441
+    },
+    {
+      "id": "windows-037",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-02",
+      "sha256": "12c9a344b8082b58534d61d5369add885a253812d8616c4b15c498dc366a94d7",
+      "bytes": 1822
+    },
+    {
+      "id": "windows-036",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-02",
+      "sha256": "a110883a6da972d0c1651bc7ee094009556241d26abf3a62f6698b6336268a3c",
+      "bytes": 1545
+    },
+    {
+      "id": "windows-031",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-02",
+      "sha256": "77f967c63296bf9c5cda33a7b98e3bb9836b2730e2970da743ce131ad65d2061",
+      "bytes": 1069
+    },
+    {
+      "id": "windows-035",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "2026-09-01",
+      "sha256": "cfc0205e8846bc5d3bf68fc3133a83ae68c2f7353c4ace607a56a7946b5a9207",
+      "bytes": 1430
+    },
+    {
+      "id": "windows-045",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "865fb5b73c26a4f24fb8b585353f0be3722bda45f59d37e33004ec00c3f49b24",
+      "bytes": 979
+    },
+    {
+      "id": "windows-044",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "92443cca212f536661f505cf0551e93fba2a012cb45c4cb115719db186a6f15c",
+      "bytes": 719
+    },
+    {
+      "id": "windows-043",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "2f90010a8a0d3cc07fe03a38df6eec61a697910e213558e0644055f5d5bf1dd3",
+      "bytes": 697
+    },
+    {
+      "id": "windows-042",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "f483dbd2cc6264a82867f611e60bb692c8a621d4d3b5a60e844cdf246b98fc5a",
+      "bytes": 1787
+    },
+    {
+      "id": "windows-041",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "8163592fe2550ff97285ba194b912f65d99fca787d22898870f6e4957658c14c",
+      "bytes": 1786
+    },
+    {
+      "id": "windows-040",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "644b13ae1f4ad311dddbc05458c2a9727b809016619e3f1b4541c7724920e1fe",
+      "bytes": 554
+    },
+    {
+      "id": "windows-039",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "95472f5829dc7dd376a353a9fe302ced59ee82922ef9bd510663d1698661cedd",
+      "bytes": 845
+    },
+    {
+      "id": "windows-038",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "407bff210b65803f04c7c41b971e1bf9c7f28baddc379c78ec78792a2cb1fdb7",
+      "bytes": 1282
+    },
+    {
+      "id": "windows-034",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "d1ce44cc0bba8b7c9ac4ad5d95dc49c49102b5b535bb6375a0fac90247d6fd8d",
+      "bytes": 26
+    },
+    {
+      "id": "windows-033",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "74764cb7155a961d613e6030d73c5ac6f3db3ae817004eafc17418a1a8ca5e6d",
+      "bytes": 5792
+    },
+    {
+      "id": "windows-032",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "6455bc1f9b5b3a03963253d0346e822ba44de35104830c3ec14a9ac3c63da38f",
+      "bytes": 913
+    },
+    {
+      "id": "windows-000",
+      "source": "docs/WINDOWS-DEVELOPMENT-HANDOFF.md",
+      "date": "0000-00-00",
+      "sha256": "de84e1c3897fbb1aa8f9e1dab75ce8f541fbbac1fef00a2012be6375efec94a7",
+      "bytes": 43
+    },
+    {
+      "id": "readme-039",
+      "source": "README.md",
+      "date": "0000-00-00",
+      "sha256": "ec36ad26f1bd4a6901b42a737a91bc817eef58418f3c6a47d6cebab9aba26b57",
+      "bytes": 30065
+    },
+    {
+      "id": "readme-038",
+      "source": "README.md",
+      "date": "0000-00-00",
+      "sha256": "41f1abe3628271f01e42e363b8bd496acc5ba02734429d75ff5ababad52e05b4",
+      "bytes": 198
+    },
+    {
+      "id": "readme-037",
+      "source": "README.md",
+      "date": "0000-00-00",
+      "sha256": "abb77d7385b5cf678faebe96f8a69a060063742c15e6bdc799bb9b73795d379e",
+      "bytes": 137
+    },
+    {
+      "id": "readme-035",
+      "source": "README.md",
+      "date": "0000-00-00",
+      "sha256": "2d7eab24cf9ec28db72e9f20abad2e6591aa281f82ce82fa7c024f601c61d262",
+      "bytes": 505
+    },
+    {
+      "id": "readme-000",
+      "source": "README.md",
+      "date": "0000-00-00",
+      "sha256": "8925d7b6b13d0919e54b5566c7c4f251ca1aa3d3e1be515cf3396ceb45302df9",
+      "bytes": 16
+    }
+  ]
+}

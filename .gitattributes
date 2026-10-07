@@ -1,0 +1,3 @@
+# Preserve canonical archived bytes across Windows and macOS checkouts.
+/CHANGELOG.md text eol=lf
+/docs/history/document-archive.json text eol=lf
