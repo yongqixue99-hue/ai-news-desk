@@ -19,7 +19,7 @@ const origin = await new Promise((resolve, reject) => {
   child.stderr.on("data", chunk => { output += chunk; });
   child.once("exit", code => reject(new Error(`Fixture exited ${code}: ${output}`)));
 });
-const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--disable-gpu", "--force-color-profile=srgb"] });
+const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--disable-gpu", "--force-color-profile=srgb", "--disable-skia-runtime-opts", "--disable-lcd-text", "--disable-font-subpixel-positioning"] });
 const pages = ["today", "aggregations", "community", "workbench", "drafts", "sources", "editorial-system", "runs", "schedule", "ai-settings"];
 const cases = pages.map(hash => ({ name: hash, hash }));
 cases.push(

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { auditLegacyCss } from "../scripts/legacy-css-analysis.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { auditLegacyCss, collectLegacyCssReferences } from "../scripts/legacy-css-analysis.js";
 
 test("CSS audit removes only rules whose every class is unreferenced", () => {
   const css = ".gone { color: red }\n.used, .also-gone { color: blue }\ninput, .missing { color: green }";
@@ -35,4 +38,21 @@ test("CSS audit is idempotent and does not remove declarations from retained rul
   const first = auditLegacyCss(css, ["live"]);
   assert.ok(first.css.includes(".live { color: red; width: 10px; }"));
   assert.equal(auditLegacyCss(first.css, ["live"]).css, first.css);
+});
+
+test("CSS reference collection preserves SVG and imported JSON markup while excluding stylesheets", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "legacy-css-references-"));
+  try {
+    await Promise.all([
+      writeFile(path.join(root, "icon.svg"), '<svg><path class="svg-only" /></svg>'),
+      writeFile(path.join(root, "content.json"), JSON.stringify({ html: '<p class="json-only">Example</p>' })),
+      writeFile(path.join(root, "styles.css"), ".css-not-reference { color: red }"),
+    ]);
+    const references = await collectLegacyCssReferences([root]);
+    const css = ".svg-only { fill: red }\n.json-only { color: blue }\n.css-not-reference { color: red }";
+    const result = auditLegacyCss(css, references);
+    assert.deepEqual(result.removedSelectors, [".css-not-reference"]);
+    assert.ok(result.css.includes(".svg-only"));
+    assert.ok(result.css.includes(".json-only"));
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

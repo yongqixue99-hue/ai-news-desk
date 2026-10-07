@@ -1,4 +1,18 @@
 import postcss, { type Rule, type Container, type Document } from "postcss";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+
+/** Include textual assets as well as code; imported markup also owns class names. */
+export async function collectLegacyCssReferences(directories: string[]): Promise<string[]> {
+  const filesIn = async (directory: string): Promise<string[]> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    return (await Promise.all(entries.map(entry => {
+      const file = path.join(directory, entry.name);
+      return entry.isDirectory() ? filesIn(file) : Promise.resolve(/\.(?:tsx?|[cm]?js|html|svg|json|md|txt)$/u.test(file) ? [file] : []);
+    }))).flat();
+  };
+  return Promise.all((await Promise.all(directories.map(filesIn))).flat().map(file => readFile(file, "utf8")));
+}
 
 /** Conservative evidence of use. CSS is deliberately not reference material. */
 export function auditLegacyCss(css: string, references: string[]) {
