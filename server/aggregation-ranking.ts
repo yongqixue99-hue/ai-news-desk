@@ -6,21 +6,23 @@ const timestamp = (entry: AggregationEntry) => Date.parse(entry.publishedAt || e
 const versions = (text: string) => [...text.toLowerCase().matchAll(/\d+(?:\.\d+)+/g)].map(m => m[0]).sort().join(',');
 const modelKeys = (text: string) => [...text.replace(/(\d(?:\.\d+)+)\s+([A-Z][a-z]+[A-Z][A-Za-z]+)/g, '$1-$2').matchAll(/[a-z][a-z0-9]*[ -]?\d+(?:\.\d+)+(?:-[a-z][a-z0-9]*)*/gi)].map(m=>m[0].toLowerCase().replace(/ /g,''));
 const actions = (text: string) => /降价|涨价|价格|pricing|price|cost/iu.test(text) ? 'price' : /漏洞|入侵|泄露|breach|hack|vulnerability/iu.test(text) ? 'security' : /发布|推出|开源|release|launch|introduc|unveil/iu.test(text) ? 'release' : /latency|translation lag|speech|吞吐|延迟|同传/iu.test(text) ? 'performance' : 'other';
+const headlineFeatures = (title: string) => ({ action: actions(title), models: modelKeys(title), versions: versions(title) });
 export const nativeOrder = (a: AggregationEntry, b: AggregationEntry) => {
   const lane = (e: AggregationEntry) => e.native?.channel === 'hot' ? 0 : e.native?.channel === 'selected' ? 1 : 2;
   return lane(a) - lane(b) || (a.native?.rank ?? a.native?.order ?? 99999) - (b.native?.rank ?? b.native?.order ?? 99999) || a.id.localeCompare(b.id);
 };
 
 /** Conservative grouping: exact originals or near-identical event headlines, never just a model name. */
-export function sameAggregationEvent(a: AggregationEntry, b: AggregationEntry) {
+export function sameAggregationEvent(a: AggregationEntry, b: AggregationEntry, features = headlineFeatures) {
   if (a.url === b.url) return true;
   if (a.kind !== 'news' || b.kind !== 'news') return false;
   if (a.native?.eventUrl && a.native.eventUrl === b.native?.eventUrl) return true;
-  const leftAction=actions(a.title), rightAction=actions(b.title);
-  const modelMatch=modelKeys(a.title).some(key=>modelKeys(b.title).includes(key));
+  const left=features(a.title), right=features(b.title);
+  const leftAction=left.action, rightAction=right.action;
+  const modelMatch=left.models.some(key=>right.models.includes(key));
   const productUpdate=modelMatch && [leftAction,rightAction].every(action=>['release','performance'].includes(action))
     && !/review|tutorial|commentary|实测|评测|教程|评论|解读|提示词/iu.test(`${a.title} ${b.title}`);
-  if (!productUpdate && (versions(a.title) !== versions(b.title) || leftAction !== rightAction)) return false;
+  if (!productUpdate && (left.versions !== right.versions || leftAction !== rightAction)) return false;
   if (!Number.isFinite(timestamp(a)) || !Number.isFinite(timestamp(b)) || Math.abs(timestamp(a) - timestamp(b)) > 48 * 3600000) return false;
   return mayShareEditorialEvent(a.title, b.title) && (productUpdate || titleSimilarity(a.title, b.title) >= 0.88);
 }
@@ -51,9 +53,17 @@ export function rankAggregations(entries: AggregationEntry[], now: number) {
     return {...entry, ranking: {score: importance + heat + freshness + curated, heat, eligible, reasons}};
   });
   const groups: typeof evaluated[] = [];
+  // A headline participates in many pair comparisons. Parse its immutable
+  // features once per ranking call without retaining state across requests.
+  const parsed = new Map<string, ReturnType<typeof headlineFeatures>>();
+  const features = (title: string) => {
+    let value = parsed.get(title);
+    if (!value) { value = headlineFeatures(title); parsed.set(title, value); }
+    return value;
+  };
   // Prefer substance to the wrapper, regardless of the catalog's platform order.
   for (const entry of evaluated.sort((a,b) => b.ranking.score - a.ranking.score || a.id.localeCompare(b.id))) {
-    const group = groups.find(g => g.every(other => sameAggregationEvent(other, entry)));
+    const group = groups.find(g => g.every(other => sameAggregationEvent(other, entry, features)));
     if (group) group.push(entry); else groups.push([entry]);
   }
   return groups.map(group => {

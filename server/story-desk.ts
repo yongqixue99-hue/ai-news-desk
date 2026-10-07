@@ -134,7 +134,7 @@ const titleSimilarity = (left: string, right: string) => {
   if (!leftTokens.size || !rightTokens.size) return 0;
   let intersection = 0;
   for (const token of leftTokens) if (rightTokens.has(token)) intersection += 1;
-  const union = new Set([...leftTokens, ...rightTokens]).size;
+  const union = leftTokens.size + rightTokens.size - intersection;
   return Math.max(intersection / union, (intersection / Math.min(leftTokens.size, rightTokens.size)) * 0.9);
 };
 
