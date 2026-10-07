@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createDefaultState } from "../../server/defaults.js";
 import type { Candidate, WorkflowRun } from "../../server/types.js";
 import { Workbench } from "./Workbench.js";
+import { load } from "cheerio";
 
 const candidate = (publishedAt: string): Candidate => ({
   id: "candidate-1",
@@ -31,6 +32,61 @@ const candidate = (publishedAt: string): Candidate => ({
   selected: false,
   status: "candidate",
   topicIds: ["ai"],
+});
+
+const layoutFixture = () => {
+  const state = createDefaultState();
+  const now = new Date().toISOString();
+  const items = Array.from({ length: 10 }, (_, index) => ({
+    ...candidate(now), id: `layout-${index}`, rawId: `layout-${index}`,
+    title: `Original source headline ${index}`, url: `https://example.com/layout/${index}`,
+    canonicalUrl: `https://example.com/layout/${index}`, recommendationScore: 90 - index,
+    selected: index < 2, briefing: { titleZh: `隔离候选 ${index}`, summaryZh: "只有来源支持的信息才能进入文章。", basis: "full-source" as const, generatedAt: now, providerId: "fixture" },
+  }));
+  return renderToStaticMarkup(createElement(Workbench, {
+    settings: state.settings, sources: [], activeProvider: state.aiSettings.providers[0]!,
+    run: { id: "layout-run", createdAt: now, updatedAt: now, status: "ready", stage: "完成", windowHours: 48, sourceIds: [], scheduled: false, rawCount: 10, candidates: items, logs: [] },
+    busy: false, feedbackCount: 0,
+    onSettings: () => undefined, onSourceToggle: () => undefined, onAddSource: () => undefined,
+    onCollect: () => undefined, onCancel: () => undefined, onSelect: () => undefined,
+    onFeedback: async () => undefined, onRestoreFeedback: async () => undefined,
+    onTogglePersonalization: async () => undefined, onClearFeedback: async () => undefined,
+    onGenerate: () => undefined, onCommunityDraft: async () => undefined, onOpenDrafts: () => undefined,
+    onClearCandidates: async () => undefined, onBriefCandidates: async () => undefined,
+    onQuickDraftUrl: async () => { throw new Error("fixture only"); },
+    onQuickDraftXPost: async () => { throw new Error("fixture only"); },
+    onQuickDraftScreenshot: async () => { throw new Error("fixture only"); },
+    onConfirmQuickDraftReview: async () => undefined, onOpenAiSettings: () => undefined,
+  }));
+};
+
+test("collection dates stay available in a closed disclosure with the original input labels", () => {
+  const $ = load(layoutFixture());
+  const dates = $('input[aria-label="开始日期"]').closest("details");
+  assert.equal(dates.length, 1);
+  assert.equal(dates.attr("open"), undefined);
+  assert.equal(dates.find('input[aria-label="结束日期"]').length, 1);
+  assert.match(dates.find("summary").text(), /搜寻日期/u);
+  assert.equal($('input[type="search"]').length, 1);
+  assert.match($(".collect-actions").text(), /开始采集/u);
+});
+
+test("all candidate rows preserve original headlines, source links, selection and editorial actions", () => {
+  const $ = load(layoutFixture());
+  assert.equal($(".candidate-table").length, 0);
+  for (let index = 0; index < 10; index++) {
+    const row = $(`#candidate-layout-${index}`);
+    assert.equal(row.prop("tagName"), "ARTICLE");
+    assert.equal(row.find("h4").text(), `隔离候选 ${index}`);
+    assert.match(row.text(), new RegExp(`Original source headline ${index}`));
+    assert.equal(row.find(`a[href="https://example.com/layout/${index}"]`).length, 1);
+    assert.equal(row.attr("tabindex"), "0");
+  }
+  assert.equal($('[aria-label="感兴趣：Original source headline 9"]').length, 1);
+  assert.equal($('[aria-label="不感兴趣：Original source headline 9"]').length, 1);
+  assert.equal($('[aria-label="加入待写：隔离候选 9"]').length, 1);
+  assert.match($(".selection-summary").text(), /Example News · 媒体报道/u);
+  assert.match($(".run-rail-actions").text(), /生成 2 篇草稿/u);
 });
 
 test("candidate card keeps the original headline while the Chinese summary is being generated", () => {
