@@ -1,0 +1,106 @@
+[
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/drafts/overview",
+    "bytes": 155,
+    "sha256": "fd62d51cdb8f79690e10451d867a6580add7a18ef20d40cc0b49aa9a94a03333"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/drafts/:draftId/quality-check",
+    "bytes": 347,
+    "sha256": "b8c002389b29516348b04ba72cab2a95a70c5b34d049931b6adc5957665cf5aa"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/review-fact",
+    "bytes": 980,
+    "sha256": "f19791606d104b0d034d41ecd6005177f759a939c5ec1f99e7b3be22f7d1a959"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/review-source-change",
+    "bytes": 1334,
+    "sha256": "4f27b66c9379f15ac76894f71e56f6f6e8ae75e48e06614eb62cc8e725b1421f"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/drafts/:draftId",
+    "bytes": 294,
+    "sha256": "f9225140052439962eccba27881453d4b4dfe2fd8db3095e489da5cd77f3cc79"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/confirm",
+    "bytes": 1118,
+    "sha256": "826b319fd37590adf0a2b407f6f816a1455b452874bad9eb9536cb97ee59d363"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/drafts/:draftId",
+    "bytes": 3851,
+    "sha256": "aa6a5388f4cce2519422cdaa7706fc223a026214879bf6ed6861ad34cb9cfaf1"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/completions",
+    "bytes": 5618,
+    "sha256": "a197969f909b1024325b8c447eba2cb7fe7200fd7bdf932faf6638b7cbfcc084"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/drafts/:draftId/agent/threads",
+    "bytes": 288,
+    "sha256": "2711c760853b148cdc215c5b67899615df74c2b9b1e0851ef27d5a5e7e23d5d6"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/agent/threads",
+    "bytes": 634,
+    "sha256": "748e3f8255ce01183e25d3d8f51fe1f2fb779a146f23ed29c88bb8e5e8b55283"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/agent/threads/:threadId/messages",
+    "bytes": 743,
+    "sha256": "99fd031f49f82529e03114b1e62c88306257602696b7c613f714e6d241012db5"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/drafts/:draftId/revisions",
+    "bytes": 458,
+    "sha256": "2c10f0002990b48c799fdfcff8ac50652970a4cbd08578ce4fa71be1b99a39db"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/revisions/:revisionId/restore",
+    "bytes": 924,
+    "sha256": "a275c30f2c1fb67c08dea0182ab2254f9f3ecb69e3752ff22a92808152b0baa9"
+  }
+]
