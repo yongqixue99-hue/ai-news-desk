@@ -1,0 +1,657 @@
+[
+  {
+    "method": "register",
+    "path": "registerSocialDeliveryRoutes",
+    "domain": "existing"
+  },
+  {
+    "method": "register",
+    "path": "registerCommunityRoutes",
+    "domain": "existing"
+  },
+  {
+    "method": "register",
+    "path": "registerDraftLibraryRoutes",
+    "domain": "existing"
+  },
+  {
+    "method": "register",
+    "path": "registerAiStyleScoreRoutes",
+    "domain": "existing"
+  },
+  {
+    "method": "get",
+    "path": "/api/bootstrap",
+    "domain": "workflow"
+  },
+  {
+    "method": "get",
+    "path": "/api/shell",
+    "domain": "workflow"
+  },
+  {
+    "method": "get",
+    "path": "/api/runs/:runId/diagnostics",
+    "domain": "workflow"
+  },
+  {
+    "method": "get",
+    "path": "/api/drafts/overview",
+    "domain": "draft"
+  },
+  {
+    "method": "get",
+    "path": "/api/discovery/trace",
+    "domain": "story"
+  },
+  {
+    "method": "get",
+    "path": "/api/home-news",
+    "domain": "story"
+  },
+  {
+    "method": "get",
+    "path": "/api/home-layout",
+    "domain": "story"
+  },
+  {
+    "method": "patch",
+    "path": "/api/home-layout",
+    "domain": "story"
+  },
+  {
+    "method": "post",
+    "path": "/api/product/jobs/:jobId/retry",
+    "domain": "workflow"
+  },
+  {
+    "method": "get",
+    "path": "/api/topic-feeds/:platform",
+    "domain": "source"
+  },
+  {
+    "method": "post",
+    "path": "/api/topic-feeds/zhihu/refresh",
+    "domain": "source"
+  },
+  {
+    "method": "post",
+    "path": "/api/topic-feeds/zhihu/:questionId/select",
+    "domain": "source"
+  },
+  {
+    "method": "get",
+    "path": "/api/aggregations",
+    "domain": "story"
+  },
+  {
+    "method": "post",
+    "path": "/api/aggregations/refresh",
+    "domain": "story"
+  },
+  {
+    "method": "post",
+    "path": "/api/aggregations/:id/select",
+    "domain": "story"
+  },
+  {
+    "method": "post",
+    "path": "/api/today/titles",
+    "domain": "story"
+  },
+  {
+    "method": "get",
+    "path": "/api/today",
+    "domain": "story"
+  },
+  {
+    "method": "get",
+    "path": "/api/stories/:storyId",
+    "domain": "story"
+  },
+  {
+    "method": "get",
+    "path": "/api/stories/:storyId/reading",
+    "domain": "story"
+  },
+  {
+    "method": "get",
+    "path": "/api/editorial-intakes/:runId/:candidateId",
+    "domain": "package"
+  },
+  {
+    "method": "post",
+    "path": "/api/editorial-intakes/:runId/:candidateId/draft",
+    "domain": "package"
+  },
+  {
+    "method": "post",
+    "path": "/api/stories/:storyId/explanation",
+    "domain": "story"
+  },
+  {
+    "method": "post",
+    "path": "/api/stories/:storyId/events",
+    "domain": "learning"
+  },
+  {
+    "method": "delete",
+    "path": "/api/stories/:storyId/feedback",
+    "domain": "learning"
+  },
+  {
+    "method": "post",
+    "path": "/api/stories/:storyId/assets",
+    "domain": "story"
+  },
+  {
+    "method": "post",
+    "path": "/api/stories/:storyId/packages",
+    "domain": "package"
+  },
+  {
+    "method": "get",
+    "path": "/api/packages/:packageId",
+    "domain": "package"
+  },
+  {
+    "method": "post",
+    "path": "/api/packages/:packageId/draft",
+    "domain": "package"
+  },
+  {
+    "method": "post",
+    "path": "/api/packages/:packageId/human-draft",
+    "domain": "package"
+  },
+  {
+    "method": "get",
+    "path": "/api/product/jobs",
+    "domain": "workflow"
+  },
+  {
+    "method": "get",
+    "path": "/api/product/jobs/:jobId",
+    "domain": "workflow"
+  },
+  {
+    "method": "get",
+    "path": "/api/product/feedback",
+    "domain": "learning"
+  },
+  {
+    "method": "get",
+    "path": "/api/events",
+    "domain": "workflow"
+  },
+  {
+    "method": "get",
+    "path": "/api/editorial-system",
+    "domain": "learning"
+  },
+  {
+    "method": "post",
+    "path": "/api/editorial-memories/preview",
+    "domain": "learning"
+  },
+  {
+    "method": "patch",
+    "path": "/api/editorial-system/profile",
+    "domain": "learning"
+  },
+  {
+    "method": "post",
+    "path": "/api/editorial-system/suggestions/:suggestionId/decision",
+    "domain": "learning"
+  },
+  {
+    "method": "patch",
+    "path": "/api/editorial-memories/:memoryId",
+    "domain": "learning"
+  },
+  {
+    "method": "delete",
+    "path": "/api/editorial-memories/:memoryId",
+    "domain": "learning"
+  },
+  {
+    "method": "patch",
+    "path": "/api/notifications/:notificationId/read",
+    "domain": "learning"
+  },
+  {
+    "method": "post",
+    "path": "/api/notifications/read-all",
+    "domain": "learning"
+  },
+  {
+    "method": "get",
+    "path": "/api/data/export",
+    "domain": "data"
+  },
+  {
+    "method": "get",
+    "path": "/api/data/archive",
+    "domain": "data"
+  },
+  {
+    "method": "post",
+    "path": "/api/data/archive/inspect",
+    "domain": "data"
+  },
+  {
+    "method": "post",
+    "path": "/api/data/archive/import",
+    "domain": "data"
+  },
+  {
+    "method": "get",
+    "path": "/api/data/storage",
+    "domain": "data"
+  },
+  {
+    "method": "post",
+    "path": "/api/data/restore",
+    "domain": "data"
+  },
+  {
+    "method": "get",
+    "path": "/api/desktop/status",
+    "domain": "workflow"
+  },
+  {
+    "method": "get",
+    "path": "/api/health",
+    "domain": "workflow"
+  },
+  {
+    "method": "post",
+    "path": "/api/stories/:storyId/evidence",
+    "domain": "story"
+  },
+  {
+    "method": "get",
+    "path": "/api/x/status",
+    "domain": "source"
+  },
+  {
+    "method": "put",
+    "path": "/api/x/token",
+    "domain": "source"
+  },
+  {
+    "method": "delete",
+    "path": "/api/x/token",
+    "domain": "source"
+  },
+  {
+    "method": "patch",
+    "path": "/api/settings",
+    "domain": "settings"
+  },
+  {
+    "method": "patch",
+    "path": "/api/wechat/settings",
+    "domain": "delivery"
+  },
+  {
+    "method": "post",
+    "path": "/api/wechat/test",
+    "domain": "delivery"
+  },
+  {
+    "method": "patch",
+    "path": "/api/ai/providers/:providerId",
+    "domain": "settings"
+  },
+  {
+    "method": "post",
+    "path": "/api/ai/providers/:providerId/test",
+    "domain": "settings"
+  },
+  {
+    "method": "patch",
+    "path": "/api/ai/agent-roles",
+    "domain": "settings"
+  },
+  {
+    "method": "patch",
+    "path": "/api/ai/writing-review",
+    "domain": "settings"
+  },
+  {
+    "method": "patch",
+    "path": "/api/ai/skills/:skillId",
+    "domain": "settings"
+  },
+  {
+    "method": "post",
+    "path": "/api/ai/skills/import",
+    "domain": "settings"
+  },
+  {
+    "method": "post",
+    "path": "/api/materials",
+    "domain": "media"
+  },
+  {
+    "method": "post",
+    "path": "/api/materials/from-url",
+    "domain": "media"
+  },
+  {
+    "method": "delete",
+    "path": "/api/materials/:materialId",
+    "domain": "media"
+  },
+  {
+    "method": "post",
+    "path": "/api/sources",
+    "domain": "source"
+  },
+  {
+    "method": "patch",
+    "path": "/api/sources/batch",
+    "domain": "source"
+  },
+  {
+    "method": "patch",
+    "path": "/api/sources/:sourceId",
+    "domain": "source"
+  },
+  {
+    "method": "post",
+    "path": "/api/sources/:sourceId/test",
+    "domain": "source"
+  },
+  {
+    "method": "delete",
+    "path": "/api/sources/:sourceId",
+    "domain": "source"
+  },
+  {
+    "method": "get",
+    "path": "/api/source-presets",
+    "domain": "source"
+  },
+  {
+    "method": "post",
+    "path": "/api/source-presets",
+    "domain": "source"
+  },
+  {
+    "method": "post",
+    "path": "/api/source-presets/:presetId/apply",
+    "domain": "source"
+  },
+  {
+    "method": "delete",
+    "path": "/api/source-presets/:presetId",
+    "domain": "source"
+  },
+  {
+    "method": "post",
+    "path": "/api/stories/search",
+    "domain": "story"
+  },
+  {
+    "method": "post",
+    "path": "/api/runs/collect",
+    "domain": "workflow"
+  },
+  {
+    "method": "post",
+    "path": "/api/runs/:runId/cancel",
+    "domain": "workflow"
+  },
+  {
+    "method": "post",
+    "path": "/api/runs/:runId/retry",
+    "domain": "workflow"
+  },
+  {
+    "method": "post",
+    "path": "/api/runs/:runId/briefings",
+    "domain": "workflow"
+  },
+  {
+    "method": "patch",
+    "path": "/api/runs/:runId/candidates/:candidateId",
+    "domain": "workflow"
+  },
+  {
+    "method": "post",
+    "path": "/api/runs/:runId/candidates/:candidateId/feedback",
+    "domain": "learning"
+  },
+  {
+    "method": "delete",
+    "path": "/api/runs/:runId/candidates/:candidateId/feedback",
+    "domain": "learning"
+  },
+  {
+    "method": "delete",
+    "path": "/api/candidate-feedback",
+    "domain": "learning"
+  },
+  {
+    "method": "delete",
+    "path": "/api/runs/:runId/candidates",
+    "domain": "workflow"
+  },
+  {
+    "method": "post",
+    "path": "/api/intakes/url",
+    "domain": "editorial"
+  },
+  {
+    "method": "post",
+    "path": "/api/intakes/screenshot",
+    "domain": "editorial"
+  },
+  {
+    "method": "get",
+    "path": "/api/intakes/reviews",
+    "domain": "editorial"
+  },
+  {
+    "method": "post",
+    "path": "/api/intakes/reviews/:reviewId/confirm",
+    "domain": "editorial"
+  },
+  {
+    "method": "post",
+    "path": "/api/runs/:runId/candidates/:candidateId/community-draft",
+    "domain": "editorial"
+  },
+  {
+    "method": "post",
+    "path": "/api/runs/:runId/generate",
+    "domain": "editorial"
+  },
+  {
+    "method": "post",
+    "path": "/api/image-posts/from-screenshot",
+    "domain": "media"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/edit-observation",
+    "domain": "learning"
+  },
+  {
+    "method": "get",
+    "path": "/api/drafts/:draftId/rework",
+    "domain": "learning"
+  },
+  {
+    "method": "get",
+    "path": "/api/source-changes",
+    "domain": "learning"
+  },
+  {
+    "method": "get",
+    "path": "/api/drafts/:draftId/quality-check",
+    "domain": "draft"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/review-fact",
+    "domain": "draft"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/review-source-change",
+    "domain": "draft"
+  },
+  {
+    "method": "get",
+    "path": "/api/drafts/:draftId",
+    "domain": "draft"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/confirm",
+    "domain": "draft"
+  },
+  {
+    "method": "patch",
+    "path": "/api/drafts/:draftId",
+    "domain": "draft"
+  },
+  {
+    "method": "patch",
+    "path": "/api/ai/completion-provider",
+    "domain": "settings"
+  },
+  {
+    "method": "post",
+    "path": "/api/intakes/x-post",
+    "domain": "editorial"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/completions",
+    "domain": "draft"
+  },
+  {
+    "method": "get",
+    "path": "/api/drafts/:draftId/agent/threads",
+    "domain": "draft"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/agent/threads",
+    "domain": "draft"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/agent/threads/:threadId/messages",
+    "domain": "draft"
+  },
+  {
+    "method": "get",
+    "path": "/api/drafts/:draftId/revisions",
+    "domain": "draft"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/revisions/:revisionId/restore",
+    "domain": "draft"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/media",
+    "domain": "media"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/media-from-url",
+    "domain": "media"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/materials/:materialId",
+    "domain": "media"
+  },
+  {
+    "method": "get",
+    "path": "/api/drafts/:draftId/delivery-status",
+    "domain": "delivery"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/wechat-attempts/:attemptId/resolve",
+    "domain": "delivery"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/wechat-sync",
+    "domain": "delivery"
+  },
+  {
+    "method": "get",
+    "path": "/api/drafts/:draftId/published-images/material-status",
+    "domain": "media"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/images/:placementId/save-material",
+    "domain": "media"
+  },
+  {
+    "method": "get",
+    "path": "/api/publisher/status",
+    "domain": "delivery"
+  },
+  {
+    "method": "get",
+    "path": "/api/drafts/:draftId/publisher-preflight",
+    "domain": "delivery"
+  },
+  {
+    "method": "get",
+    "path": "/api/publisher/extension/bootstrap",
+    "domain": "delivery"
+  },
+  {
+    "method": "post",
+    "path": "/api/publisher/extension/heartbeat",
+    "domain": "delivery"
+  },
+  {
+    "method": "get",
+    "path": "/api/publisher/extension/jobs/next",
+    "domain": "delivery"
+  },
+  {
+    "method": "post",
+    "path": "/api/publisher/extension/jobs/:jobId/result",
+    "domain": "delivery"
+  },
+  {
+    "method": "post",
+    "path": "/api/publisher/launch",
+    "domain": "delivery"
+  },
+  {
+    "method": "register",
+    "path": "registerDeliveryBatchRoutes",
+    "domain": "existing"
+  },
+  {
+    "method": "get",
+    "path": "/api/workflow/performance",
+    "domain": "learning"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/fill",
+    "domain": "delivery"
+  },
+  {
+    "method": "post",
+    "path": "/api/drafts/:draftId/publish-confirmed",
+    "domain": "delivery"
+  }
+]

@@ -1,0 +1,122 @@
+[
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/topic-feeds/:platform",
+    "bytes": 402,
+    "sha256": "5fed65a9302671ae57bfafc0d925e92d9f32eddf505144448d959e99e2dd5b42"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/topic-feeds/zhihu/refresh",
+    "bytes": 213,
+    "sha256": "ac14d5daec50236a250bc598a202d9e3d0c598de067ea55217074ba999917530"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/topic-feeds/zhihu/:questionId/select",
+    "bytes": 556,
+    "sha256": "d087a5ab85c444eceb83b73f39dc8bbc8533142245fe917af6a5de1e8d02fba8"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/x/status",
+    "bytes": 166,
+    "sha256": "59836c3682a5d3cec5afe63cbd017887169f332033d0b1960b07718185462fed"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "put",
+    "path": "/api/x/token",
+    "bytes": 438,
+    "sha256": "ce1cb6a540909ddd7f7824b54a8e2ed82d39d05f25f29d816116a76f43b1a30c"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "delete",
+    "path": "/api/x/token",
+    "bytes": 157,
+    "sha256": "8b5847f165097fc40e19fb5412918cf402979b86732be5d8b00063ac54c63c25"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/sources",
+    "bytes": 2022,
+    "sha256": "1df7b109eba706addb31b15d941767d2dea8d3b1c63412d6b9027eb8f5759b87"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/sources/batch",
+    "bytes": 1337,
+    "sha256": "ba7547f5519571b3f4c119a96e00baf5b374cab658b52e3fd1ec45364f28513b"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/sources/:sourceId",
+    "bytes": 3482,
+    "sha256": "67a2e9b8945927fcbec6dc0e4ef218ecb8abc0436d9c71e8b66babf05b772c6d"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/sources/:sourceId/test",
+    "bytes": 781,
+    "sha256": "2845effb24ae6c0fa9923c548f2cf1f7276c47dbef82f8811839deba51d90828"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "delete",
+    "path": "/api/sources/:sourceId",
+    "bytes": 635,
+    "sha256": "09d834f5222ce8419942daf6ba96c3a507e9349f54a400ff92c86e9495bf39b1"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/source-presets",
+    "bytes": 141,
+    "sha256": "c5d9a0f51e3394a3dcbd4fbf6053abce1dcb802184eb78cfe2de04c6b903ec31"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/source-presets",
+    "bytes": 645,
+    "sha256": "45682896173a803b8e0f561a6f5a26683fcf768fbb6e7de0945fbd0fdf48457e"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/source-presets/:presetId/apply",
+    "bytes": 654,
+    "sha256": "d27bcf52dd6da703dde60f6e7a719654d2b833e4cc716b97e4cce57bc522701a"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "delete",
+    "path": "/api/source-presets/:presetId",
+    "bytes": 362,
+    "sha256": "cde9b7d1513d3fd1549c66acc39809719a59f8fda33bdbc7375ee1009f7d76a7"
+  }
+]

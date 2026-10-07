@@ -19,8 +19,8 @@
 | C4 聚合标题翻译 | 未开始 | — | 待测 | 完整 PR 等待决定，不合并；默认不自动翻译 |
 | D1 诊断存储分离 | 未开始 | — | 计划值 140–240 ms / runs 17.4 MB，待复测 | 仅副本；完整 PR 等待决定，不合并 |
 | D2 旧样式清理 | 已合并 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27)、[#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28)、[#29](https://github.com/yongqixue99-hue/ai-news-desk/pull/29)、[#30](https://github.com/yongqixue99-hue/ai-news-desk/pull/30)、[#31](https://github.com/yongqixue99-hue/ai-news-desk/pull/31)、[#32](https://github.com/yongqixue99-hue/ai-news-desk/pull/32)、[#33](https://github.com/yongqixue99-hue/ai-news-desk/pull/33) | 构建CSS457709→431197 B（-5.79%）；删除288条全无引用规则 | 15/15独立PR已合并；每批四项/两个CI全过、48/48像素一致；未上线 |
-| D3 文档整理 | 进行中 | [#34](https://github.com/yongqixue99-hue/ai-news-desk/pull/34) | README331→283行；启动206→9行；交接761→52行；103块/119210 B原文完整 | 四项1371/1371、22/22、隔离构建、E2E13/13全过；等待CI；未上线 |
-| D4 大文件拆分 | 未开始 | — | 待测 | 每领域单独 PR；前端高风险拆分可等待决定 |
+| D3 文档整理 | 已合并 | [#34](https://github.com/yongqixue99-hue/ai-news-desk/pull/34) | README331→283行；启动206→9行；交接761→52行；103块/119210 B原文完整 | 四项及最终verify/windows-desktop全过；原文完整；未上线 |
+| D4 大文件拆分 | 进行中 | [#35](https://github.com/yongqixue99-hue/ai-news-desk/pull/35) | index149583→132010 B；内联API126→111；source原文15/15一致 | 0/11领域已合并；本批等CI；前端另审；未上线 |
 
 ## 执行记录
 
@@ -217,3 +217,7 @@
 - D2 PR #33 最终verify/windows-desktop全部成功，15/15文件审查完成；删除288条规则、源文件减少30565 B、构建CSS减少26512 B，所有改动未上线。开始D3，文档现状比计划各多18行，按当前原文完整归档。
 
 - D3 三条归档与入口回归均先失败再通过；按原块字节数/SHA-256/原始顺序重建README与交接全文119210 B，103块一字未删。README331→283行、启动入口206→9；交接761→52行。未标日期明确标为原始参考，文中日期只作排序提示；.gitattributes固定归档LF确保跨OS字节校验。四项1371/1371、编辑22/22、隔离构建、E2E13/13全过；等最终双CI后正常合并，不部署。
+
+- D3 PR #34 最终两个CI全部通过并已合并；进入D4。从126个内联API路由和5个既有注册器建立顺序基线，保留启动/服务初始化次序；不启动真实数据服务。
+
+- D4 source领域：先失败回归后搬迁15个路由，依赖仅在原使用点接入，还原后逐段原文完全相同；126个原API及5个旧注册器顺序一致，注册无IO。index 149583→132010 B、剩111个内联API；四项单测1374/1374、编辑22/22、隔离构建、E2E13/13全过；等待最终CI，未上线。
