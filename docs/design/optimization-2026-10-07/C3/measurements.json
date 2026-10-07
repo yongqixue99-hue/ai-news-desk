@@ -1,0 +1,62 @@
+{
+  "fixture": "6 fictional items; 3 fictional sources; no storage or providers",
+  "instant": "2026-10-07T12:00:00.000Z",
+  "measurements": [
+    {
+      "version": "before",
+      "width": 1440,
+      "height": 900,
+      "firstCandidateTop": 320.390625,
+      "candidates": 6,
+      "statsVisible": true,
+      "sortingVisible": true,
+      "sourceIssues": 1,
+      "unknownSources": 1,
+      "overflow": 0,
+      "consoleErrors": 0,
+      "writes": 0
+    },
+    {
+      "version": "after",
+      "width": 1440,
+      "height": 900,
+      "firstCandidateTop": 247.1875,
+      "candidates": 6,
+      "statsVisible": false,
+      "sortingVisible": false,
+      "sourceIssues": 1,
+      "unknownSources": 1,
+      "overflow": 0,
+      "consoleErrors": 0,
+      "writes": 0
+    },
+    {
+      "version": "before",
+      "width": 390,
+      "height": 844,
+      "firstCandidateTop": 419.953125,
+      "candidates": 6,
+      "statsVisible": true,
+      "sortingVisible": true,
+      "sourceIssues": 1,
+      "unknownSources": 1,
+      "overflow": 0,
+      "consoleErrors": 0,
+      "writes": 0
+    },
+    {
+      "version": "after",
+      "width": 390,
+      "height": 844,
+      "firstCandidateTop": 301.15625,
+      "candidates": 6,
+      "statsVisible": false,
+      "sortingVisible": false,
+      "sourceIssues": 1,
+      "unknownSources": 1,
+      "overflow": 0,
+      "consoleErrors": 0,
+      "writes": 0
+    }
+  ]
+}

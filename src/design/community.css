@@ -1,0 +1,26 @@
+/* Keep discovery visible; source health and statistics remain one disclosure. */
+.community-workspace-page .community-square-header { min-height: 0; padding-bottom: 0; margin-bottom: 12px; align-items: flex-start; gap: 16px; }
+.community-workspace-page .community-square-header h1 { margin-bottom: 6px; }
+.community-workspace-page .community-square-header p { margin: 0; font-size: 12px; line-height: 1.6; }
+.community-workspace-page .community-update-state { padding: 0; border: 0; background: none; box-shadow: none; min-width: 0; }
+.community-workspace-page .community-update-state strong { font-size: 12px; }
+.community-workspace-page .community-update-state small { font-size: 11px; }
+.community-workspace-page .community-source-health { margin-top: 0; margin-bottom: 10px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface-subtle); }
+.community-workspace-page .community-source-health > summary { min-height: 36px; padding: 8px 12px; font-size: 12px; gap: 12px; }
+.community-workspace-page .community-source-health > summary small { font-size: 11px; color: var(--muted); }
+.community-workspace-page .community-source-health > .community-overview-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border-top: 1px solid var(--line-soft); }
+.community-workspace-page .community-header-stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; padding: 0; }
+.community-workspace-page .community-header-stats > span { font-size: 11px; }
+.community-workspace-page .community-header-stats strong { font-size: 13px; color: var(--ink); }
+.community-workspace-page .community-filter-bar { margin-top: 0; padding: 0; min-height: 0; }
+.community-workspace-page .community-topic-tabs { width: 100%; }
+.community-workspace-page .community-editorial-workspace { margin-top: 10px; }
+@media (max-width: 720px) {
+  .community-workspace-page .community-square-header { gap: 8px; margin-bottom: 10px; }
+  .community-workspace-page .community-update-state { align-self: flex-start; }
+  .community-workspace-page .community-update-state > span { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .community-workspace-page .community-source-health > summary { flex-wrap: wrap; gap: 4px 10px; }
+  .community-workspace-page .community-source-health > summary > span { gap: 6px; }
+  .community-workspace-page .community-source-health > .community-overview-controls { gap: 10px; }
+  .community-workspace-page .community-sort-tabs { width: 100%; }
+}

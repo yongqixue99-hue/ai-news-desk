@@ -258,11 +258,7 @@ export function CommunityWorkspace({
         <div>
           <h1>社区广场</h1>
           <p>发现讨论线索，阅读原始来源，再决定写什么。</p>
-          <div className="community-header-stats" aria-label="社区广场概览">
-            <span><strong>{feed.items.length}</strong> 条热点</span>
-            <span><strong>{risingCount}</strong> 条升温</span>
-            <span><strong>{imageReadyCount}</strong> 条原图已缓存</span>
-          </div>
+
         </div>
         <div className="community-update-state" role="status">
           {briefingState === "loading" && missingBriefingCount ? <LoaderCircle className="spin" size={16} /> : <Clock3 size={16} />}
@@ -271,9 +267,21 @@ export function CommunityWorkspace({
       </header>
 
       <details className="community-source-health compact" aria-label="社区来源状态">
-        <summary><span><Activity size={14} />来源状态 <small>{enabledSources.length} 个已启用</small></span>
+        <summary><span><Activity size={14} />概览与来源 <small>{enabledSources.length} 个已启用 · {sortMode === "recommended" ? "推荐" : sortMode === "hot" ? "最热" : "最新"}</small></span>
           <span className={sourceIssues.length ? "community-source-issues" : undefined}>{sourceIssues.length ? `${sourceIssues.length} 个来源需留意` : unknownSources.length ? `${unknownSources.length} 个来源待读取` : enabledSources.length ? "已启用来源读取正常" : "尚未启用来源"}<ChevronDown size={14} /></span>
         </summary>
+        <div className="community-overview-controls">
+          <div className="community-header-stats" aria-label="社区广场概览">
+            <span><strong>{feed.items.length}</strong> 条热点</span>
+            <span><strong>{risingCount}</strong> 条升温</span>
+            <span><strong>{imageReadyCount}</strong> 条原图已缓存</span>
+          </div>
+        <div className="community-sort-tabs" aria-label="社区排序">
+          <button type="button" aria-pressed={sortMode === "recommended"} className={sortMode === "recommended" ? "active" : ""} onClick={() => setSortMode("recommended")}><Sparkles size={13} />推荐</button>
+          <button type="button" aria-pressed={sortMode === "hot"} className={sortMode === "hot" ? "active" : ""} onClick={() => setSortMode("hot")}><Flame size={13} />最热</button>
+          <button type="button" aria-pressed={sortMode === "latest"} className={sortMode === "latest" ? "active" : ""} onClick={() => setSortMode("latest")}><Clock3 size={13} />最新</button>
+        </div>
+        </div>
         <div>{communitySources.map((source) => {
           const status = !source.enabled ? "disabled" : source.health || "unknown";
           const statusLabel = { disabled: "已停用", unknown: "待读取", healthy: "正常", warning: "有提示", error: "读取失败" }[status];
@@ -287,11 +295,7 @@ export function CommunityWorkspace({
           <button type="button" aria-pressed={topic === "all"} className={topic === "all" ? "active" : ""} onClick={() => setTopic("all")}>全部</button>
           {availableTopics.map((item) => <button type="button" key={item.id} aria-pressed={topic === item.id} className={topic === item.id ? "active" : ""} onClick={() => setTopic(item.id)}>{item.label}<small>{item.count}</small></button>)}
         </div>
-        <div className="community-sort-tabs" aria-label="社区排序">
-          <button type="button" aria-pressed={sortMode === "recommended"} className={sortMode === "recommended" ? "active" : ""} onClick={() => setSortMode("recommended")}><Sparkles size={13} />推荐</button>
-          <button type="button" aria-pressed={sortMode === "hot"} className={sortMode === "hot" ? "active" : ""} onClick={() => setSortMode("hot")}><Flame size={13} />最热</button>
-          <button type="button" aria-pressed={sortMode === "latest"} className={sortMode === "latest" ? "active" : ""} onClick={() => setSortMode("latest")}><Clock3 size={13} />最新</button>
-        </div>
+
       </div>
 
       <div className="community-editorial-workspace">
