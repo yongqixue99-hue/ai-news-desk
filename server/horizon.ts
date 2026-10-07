@@ -20,7 +20,7 @@ import { extractPage } from "./extractor.js";
 import { mergeVisualImages } from "./visual-desk.js";
 import { selectTopAndGenerate } from "./generator.js";
 import { findActiveCollectionRun, isCollectionActive } from "./run-policy.js";
-import { applySourceRunResult, sourceResultsForRun, collectionCoverageWarning } from "./source-health.js";
+import { applySourceRunResult, applySourceCollectionFailure, sourceResultsForRun, collectionCoverageWarning } from "./source-health.js";
 import {
   dynamicTopicQuery,
   eligibleSourcesForTopics,
@@ -494,12 +494,20 @@ export const recoverInterruptedRuns = async () => {
   });
 };
 
-export const executeCollection = async (runId: string) => {
+export const executeCollection = async (runId: string, options: { signal?: AbortSignal; progress?: (value: number, stage: string) => void } = {}) => {
   if (runControllers.has(runId)) return;
+  options.signal?.throwIfAborted();
   const controller = new AbortController();
+  const abort = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", abort, { once: true });
+  const progress = (value: number, stage: string) => {
+    controller.signal.throwIfAborted();
+    options.progress?.(value, stage);
+  };
   runControllers.set(runId, controller);
   let selectedSources: SourceConfig[] = [];
   let briefingCount = 0;
+  let sourcesRead = false;
   try {
     const state = await updateState((current) => current);
     const run = state.runs.find((entry) => entry.id === runId);
@@ -512,6 +520,7 @@ export const executeCollection = async (runId: string) => {
     if (!selectedSources.length) throw new Error("至少选择一个新闻源");
 
     await patchRun(runId, { status: "collecting", stage: "采集原始条目", error: undefined });
+    progress(0.08, "采集原始条目");
     await appendLog(runId, "采集原始条目", `正在读取 ${selectedSources.length} 个新闻源`);
     const topicIds = normalizeTopicIds(run.topicIds);
     const filters = { dateFrom: run.dateFrom, dateTo: run.dateTo, keywords: run.keywords };
@@ -529,6 +538,7 @@ export const executeCollection = async (runId: string) => {
       filters,
       signal: controller.signal,
     });
+    sourcesRead = true;
     if (controller.signal.aborted) throw new Error("采集已取消");
     for (const [sourceId, message] of Object.entries(batch.failures)) {
       const sourceName = selectedSources.find((source) => source.id === sourceId)?.name ?? sourceId;
@@ -552,6 +562,7 @@ export const executeCollection = async (runId: string) => {
     );
 
     const preferenceState = await readState();
+    progress(0.35, "去重与评分");
     const { candidates, funnel, trace, evidenceCandidates } = collectDiscoveryCandidates(rawItems, {
       windowHours: run.windowHours, topicIds, now: Date.now(),
       filters: { dateFrom: run.dateFrom, dateTo: run.dateTo, keywords: run.keywords },
@@ -568,8 +579,10 @@ export const executeCollection = async (runId: string) => {
     }
     const checkedAt = now();
     await updateState((current) => {
+      controller.signal.throwIfAborted();
       const targetRun = current.runs.find((entry) => entry.id === runId);
       if (targetRun) {
+        if (targetRun.status === "cancelled") return;
         targetRun.candidates = candidates;
         targetRun.sourceResults = sourceResults;
         targetRun.status = "extracting";
@@ -590,10 +603,12 @@ export const executeCollection = async (runId: string) => {
       `日期与关键词筛选后保留 ${funnel.matchedCount} 条，得到 ${candidates.length} 条${topicLabels(normalizeTopicIds(run.topicIds)).join("／")}候选`,
       candidates.length ? "success" : "warning",
     );
+    progress(0.55, "提取来源原图");
     const extractedSourceText = (run.collectionPurpose === "official-monitor" || run.collectionPurpose === "aggregation") ? new Map<string, string>() : await probeImages(runId, controller.signal);
     if (controller.signal.aborted) throw new Error("采集已取消");
     if (candidates.length && !run.collectionPurpose) {
       await patchRun(runId, { stage: "生成中文速读" });
+      progress(0.7, "生成中文速读");
       try {
         const briefingResult = await enrichCandidateBriefings(runId, { extractedSourceText, signal: controller.signal });
         briefingCount = briefingResult.completed;
@@ -606,8 +621,10 @@ export const executeCollection = async (runId: string) => {
         );
       }
     }
+    progress(0.95, "保存采集结果");
     const completedAt = now();
     await updateState((current) => {
+      controller.signal.throwIfAborted();
       const targetRun = current.runs.find((entry) => entry.id === runId);
       if (!targetRun) return;
       if (!markCollectionReady(targetRun, completedAt)) return;
@@ -647,12 +664,14 @@ export const executeCollection = async (runId: string) => {
       await selectTopAndGenerate(runId, run.autoGenerateCount);
     }
   } catch (error) {
-    const cancelled = controller.signal.aborted;
-    const message = cancelled ? "已由用户取消" : error instanceof Error ? error.message : String(error);
+    let cancelled = controller.signal.aborted && !options.signal?.aborted;
+    const failure = options.signal?.aborted ? options.signal.reason : error;
+    const message = cancelled ? "已由用户取消" : failure instanceof Error ? failure.message : String(failure);
     const timestamp = now();
     await updateState((state) => {
       const run = state.runs.find((entry) => entry.id === runId);
       if (run) {
+        if (run.status === "cancelled") { cancelled = true; return; }
         run.status = cancelled ? "cancelled" : "failed";
         run.stage = cancelled ? "已取消" : "采集失败";
         run.error = message;
@@ -673,14 +692,12 @@ export const executeCollection = async (runId: string) => {
         }, { createdAt: timestamp });
       }
       for (const source of state.sources.filter((entry) => selectedSources.some((selected) => selected.id === entry.id))) {
-        source.health = cancelled ? "warning" : "error";
-        source.lastCheckedAt = timestamp;
-        source.lastHealthDetail = message;
-        if (!cancelled) source.consecutiveFailures = (source.consecutiveFailures ?? 0) + 1;
+        applySourceCollectionFailure(source, { cancelled, sourcesRead, message, at: timestamp });
       }
     });
     if (!cancelled) throw error;
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     runControllers.delete(runId);
   }
 };

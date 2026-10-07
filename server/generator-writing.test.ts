@@ -9,6 +9,16 @@ import {
   validateSourceFirstNewsFrame,
 } from "./generator.js";
 import type { ContentPackage } from "./product-types.js";
+import { createDraftFromPackage } from "./draft-desk.js";
+
+test("cancelled draft jobs stop before reading the workspace or invoking a model", async () => {
+  const controller = new AbortController();
+  const reason = new Error("任务已超时，停止生成");
+  controller.abort(reason);
+  await assert.rejects(createDraftFromPackage("unused-package", undefined, { signal: controller.signal }), error => error === reason);
+  await assert.rejects(generateCandidateDraft("unused", {} as never, {} as never, [], undefined,
+    { extractedText: "", skipExtraction: true, signal: controller.signal }), error => error === reason);
+});
 
 test("paragraph evidence cannot substitute a different dated update on the same official page", () => {
   const sourceUrl = "https://ai.google.dev/gemini-api/docs/changelog#09-03-2026";

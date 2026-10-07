@@ -216,6 +216,8 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
   const [detail, setDetail] = useState<StoryDetailResult>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [translatingTitles, setTranslatingTitles] = useState(false);
+  const translatedTitleSetsRef = useRef(new Set<string>());
   const [error, setError] = useState<string>();
   const [explanationLoading, setExplanationLoading] = useState(false);
   const [explanationError, setExplanationError] = useState<string>();
@@ -618,6 +620,20 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
     })();
   }, [activeStoryJob, loadToday, onNotice]);
 
+  // Headlines still in the source language get a Chinese title once per set of
+  // stories; a failed attempt is not repeated until the list itself changes.
+  const titleTargets = (today ? [...(today.radar ?? []).flatMap(row => row.story ? [row.story] : []), ...(today.pending ?? [])] : [])
+    .filter(story => !/[\u3400-\u9fff]/u.test(story.title)).map(story => story.id).sort().join(",");
+  useEffect(() => {
+    if (!titleTargets || translatedTitleSetsRef.current.has(titleTargets)) return;
+    translatedTitleSetsRef.current.add(titleTargets);
+    setTranslatingTitles(true);
+    void api.translateTodayTitles()
+      .then(result => result.completed ? loadToday() : undefined)
+      .catch(() => undefined)
+      .finally(() => setTranslatingTitles(false));
+  }, [titleTargets, loadToday]);
+
   const submitSearch = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const query = searchQuery.trim();
@@ -725,7 +741,7 @@ export function TodayPage({ onNavigate, onNotice, onOpenDraft, onSearch, request
               </div></details>
             </div>
             <section className="today-section today-must-read">
-              <div className="today-section-heading today-list-heading"><div><div className="today-list-title"><h2>{activeColumn.keyword ? activeColumn.label : "今日选题"}</h2><small>{showRadar ? radarRows.length : visibleNews.length} 条</small></div><p className="news-scope">{activeColumn.keyword ? `近 7 天已采集新闻 · 关键词「${activeColumn.keyword}」` : showRadar ? "按重要性、时效与已知热点精选，最多 8 条" : "新闻 48 小时 · 发布 7 天 · 实践 30 天"}</p></div></div>
+              <div className="today-section-heading today-list-heading"><div><div className="today-list-title"><h2>{activeColumn.keyword ? activeColumn.label : "今日选题"}</h2><small>{showRadar ? radarRows.length : visibleNews.length} 条</small></div>{translatingTitles ? <p className="title-translation-status" role="status"><RefreshCw className="spin" size={12} />正在补中文标题…</p> : null}<p className="news-scope">{activeColumn.keyword ? `近 7 天已采集新闻 · 关键词「${activeColumn.keyword}」` : showRadar ? "按重要性、时效与已知热点精选，最多 8 条" : "新闻 48 小时 · 发布 7 天 · 实践 30 天"}</p></div></div>
               {keywordLoading ? <p role="status">正在读取已保存内容…</p> : keywordError ? <p role="alert">{keywordError}</p> : showRadar && radarRows.length ? <TopicRadar rows={radarRows} busy={busy} onOpen={openStory} onQueue={queueStory} onRetain={retainRadar} /> : !showRadar && visibleNews.length ? <div className="today-featured-list">{visibleNews.map((story, index) => <StoryRow key={story.id} story={story} featured={index === 0} busy={busy} onOpen={openStory} onQueue={queueStory} onQuickDraft={quickWrite} />)}</div>
                 : <div className="today-empty"><Eye size={24} /><div><strong>{listQuery || listView !== "all" || listTime !== "all" ? "当前筛选没有结果" : today?.collection ? "本轮没有符合条件的推荐" : "还没有读取新闻"}</strong><p>{activeColumn.keyword ? "已采集新闻中暂无匹配内容。可用上方搜索补充线索。" : "可以调整筛选，或去工作台读取来源。没有合格选题时保留空位。"}</p></div><button className="secondary-button" onClick={() => { if (listQuery || listView !== "all" || listTime !== "all") { setListQuery(""); setListView("all"); setListTime("all"); } else onNavigate("workbench"); }}>{listQuery || listView !== "all" || listTime !== "all" ? "清除筛选" : "打开新闻工作台"}</button></div>}
             </section>

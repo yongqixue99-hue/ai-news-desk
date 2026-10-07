@@ -23,7 +23,8 @@ const basisRank = { "full-source": 3, excerpt: 2, title: 1 } as const;
  * It deliberately enriches only the best factual source: the remaining source
  * summaries stay visible for comparison, while one click costs one model pass.
  */
-export const enrichStoryExplanation = async (storyId: string) => {
+export const enrichStoryExplanation = async (storyId: string, abortSignal?: AbortSignal) => {
+  abortSignal?.throwIfAborted();
   const state = await readState();
   const story = storyById(state, storyId);
   if (!story) throw new Error("Story 不存在");
@@ -40,16 +41,21 @@ export const enrichStoryExplanation = async (storyId: string) => {
   const extractedSourceText = new Map<string, string>();
   try {
     const page = await extractPage(candidate.canonicalUrl || candidate.url, 0);
+    abortSignal?.throwIfAborted();
     if (candidate.technicalArticle) await updateState(current => {
+      abortSignal?.throwIfAborted();
       const target = candidateFromRun(current.runs.find(entry => entry.id === run.id), candidate.id);
       if (target) applyTechnicalSourceMetadata(target, page);
     });
     if (page.text.trim().length >= 80) extractedSourceText.set(candidate.id, page.text.slice(0, 12_000));
   } catch {
+    abortSignal?.throwIfAborted();
     try {
       const page = await extractRenderedPageText(candidate.canonicalUrl || candidate.url, 12_000);
+      abortSignal?.throwIfAborted();
       extractedSourceText.set(candidate.id, page.text);
     } catch {
+      abortSignal?.throwIfAborted();
       // RSS excerpts and public community text remain a safe fallback. The model
       // receives an explicit evidence basis and may not pretend it read the page.
     }
@@ -60,7 +66,9 @@ export const enrichStoryExplanation = async (storyId: string) => {
     candidateIds: [candidate.id],
     extractedSourceText,
     force: true,
+    signal: abortSignal,
   });
+  abortSignal?.throwIfAborted();
   if (!result.completed) throw new Error("正文讲解生成失败，请稍后重试");
   const updatedStory = storyById(await readState(), storyId);
   if (!updatedStory?.explanation || updatedStory.explanation.status !== "ready") {

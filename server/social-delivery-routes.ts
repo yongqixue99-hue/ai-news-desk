@@ -12,8 +12,8 @@ import { loadWeChatPlacementImage } from "./wechat-image.js";
 const bridge = new SocialBridge();
 const desk = createSocialDeliveryDesk({
   bridge, read: readState, update: updateState, loadImage: loadWeChatPlacementImage,
-  quality: async draft => {
-    const review = reviewDraftQuality(draft, await getLocalDatabase());
+  quality: async (draft, deliveryTitle) => {
+    const review = reviewDraftQuality(draft, await getLocalDatabase(), { deliveryTitle });
     if (!review.ready) throw new Error(review.blockers.join("；"));
   },
 });
@@ -53,6 +53,7 @@ const openReceipt = (receipt: import("./social-delivery-types.js").SocialDeliver
   return openRegularChromeUrls([url]);
 };
 const queue = createSocialDeliveryQueue({ read: readState, update: updateState, status, deliver: desk.deliver, open: openPlatforms, openReceipt });
+export const socialDeliveryServices = { status, deliver: desk.deliver };
 let polling: ReturnType<typeof setInterval> | undefined;
 export const registerSocialDeliveryRoutes = (app: Express) => {
   polling ??= setInterval(() => { void queue.tick().catch(() => undefined); }, 5_000).unref();

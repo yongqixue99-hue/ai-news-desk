@@ -2,6 +2,8 @@ import { XiaoheiheDeliveryPanel } from "./XiaoheiheDeliveryPanel";
 import { xiaoheiheSelection } from "../../server/xiaoheihe-publishing";
 import { wechatMetadataFor } from "../../server/wechat-metadata.js";
 import { MultiDeliveryPanel } from "./MultiDeliveryPanel";
+import { deliveryPreparationPatch } from "../draft-delivery-preparation";
+import type { DeliveryPlatform } from "../../server/delivery-batch-types.js";
 import { DraftLibraryActions } from "./DraftLibraryActions";
 import { SettingsTabs } from "./SettingsTabs";
 import { filterDraftLibrary, type DraftFilter, type DraftSort } from "../draft-library-view";
@@ -9,6 +11,7 @@ import type { DraftLibrarySelection, DraftTrashSelection } from "../../server/dr
 import { socialPlatforms } from "../../server/social-delivery-types";
 import { EditObservationForm } from "./EditObservationForm";
 import { DraftQualityPanel } from "./DraftQualityPanel";
+import { AiStyleScorePanel } from "./AiStyleScorePanel";
 import { confirmationTextDiff } from "../confirmation-diff";
 import { draftDocumentKey } from "../../server/draft-document.js";
 import { api } from "../api";
@@ -62,6 +65,8 @@ import {
   editableDraftContent,
   isCurrentDraftOperation,
   mergeSavedDraftMetadata,
+  mergeDeliveryDraftMetadata,
+  isDeliveryAcknowledgement,
   persistDraftRecoverySnapshot,
   restoreDraftFromRecovery,
   switchDraftSafely,
@@ -746,6 +751,15 @@ export function DraftWorkspace({
     setPreflight(undefined);
   };
 
+  const prepareMultiDelivery = async (platforms: DeliveryPlatform[]) => {
+    const current = editingRef.current;
+    if (!current || current.id !== editing.id || managementLock.current) return undefined;
+    const patch = deliveryPreparationPatch(current, platforms, deliveryView?.xiaoheiheNextCompanion);
+    if (patch) updateEditing(patch);
+    if (activeSaveRef.current) await activeSaveRef.current.catch(() => undefined);
+    if (editingRef.current?.id !== current.id) return undefined;
+    return dirtyRef.current ? save("manual") : editingRef.current;
+  };
 
 
   const updateWechatMetadata = (metadata: WeChatDraftMetadata) => {
@@ -1620,6 +1634,7 @@ export function DraftWorkspace({
             <div className="utility-drawer-scroll">
               {utilityTab === "agent" ? (
                 <div className="article-agent-panel">
+                  <AiStyleScorePanel draft={editing} />
                   <details className="external-writer-bridge">
                     <summary>用 Gemini 网页版协作 <ExternalLink size={13} /></summary>
                     <p>把当前草稿、来源链接、事实边界和待核对项复制成一份约束提示词；在你已有的 Google 账号里运行，再把结果贴回编辑器。</p>
@@ -1858,7 +1873,7 @@ export function DraftWorkspace({
 
               {utilityTab === "history" ? (
                 <>
-                  <EditObservationForm draft={editing} dirty={dirty} />
+                  <EditObservationForm key={editing.id} draft={editing} dirty={dirty} />
                   <section className="utility-section history-current-card">
                     <span className="history-current-mark"><Cloud size={15} />当前内容</span>
                     <strong>{editing.title || "未命名草稿"}</strong>
@@ -2013,7 +2028,17 @@ export function DraftWorkspace({
                       onConfirmPublished={() => confirmPublication("wechat")}
                       onOpenSettings={() => onOpenPublisherSettings("wechat")}
                     />
-                  ) : <MultiDeliveryPanel key={editing.id} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} save={() => save("manual")} onBusy={setDeliveryBusy} onOpenSettings={() => onOpenPublisherSettings("social")} />}
+                  ) : <MultiDeliveryPanel key={editing.id} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} prepare={prepareMultiDelivery} onChange={updateEditing} onBusy={setDeliveryBusy} onOpenSettings={() => onOpenPublisherSettings("social")} onDelivered={(latest, sent) => {
+                    if (!isDeliveryAcknowledgement(latest, sent)) return;
+                    const acknowledgedAt = acknowledgedDraftTimestamp(editingRef.current?.id, sent.id, persistedUpdatedAt.current, sent.updatedAt, latest.updatedAt);
+                    if (acknowledgedAt) persistedUpdatedAt.current = acknowledgedAt;
+                    setEditing(current => {
+                      const next = mergeDeliveryDraftMetadata(current, latest, sent, acknowledgedAt);
+                      editingRef.current = next;
+                      return next;
+                    });
+                    if (editingRef.current?.id === sent.id && acknowledgedAt) setLastSavedAt(acknowledgedAt);
+                  }} />}
                 </>
               ) : null}
             </div>

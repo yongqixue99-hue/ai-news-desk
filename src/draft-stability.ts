@@ -51,6 +51,7 @@ type DraftRecoveryContent = Pick<
   ArticleDraft,
   | "xiaoheiheOptions"
   | "wechatMetadata"
+  | "socialMetadata"
   | "aiAssistedSinceConfirmation"
   | "title"
   | "contentFormat"
@@ -82,6 +83,7 @@ export const draftRecoveryKey = (draftId: string) => `${RECOVERY_KEY_PREFIX}${dr
 export const editableDraftContent = (draft: ArticleDraft): DraftRecoveryContent => ({
   xiaoheiheOptions: draft.xiaoheiheOptions,
   wechatMetadata: draft.wechatMetadata,
+  socialMetadata: draft.socialMetadata,
   aiAssistedSinceConfirmation: draft.aiAssistedSinceConfirmation,
   contentFormat: draft.contentFormat,
   imagePostImageIds: draft.imagePostImageIds,
@@ -110,6 +112,22 @@ export const mergeSavedDraftMetadata = (
   return { ...current, status: saved.status, publicationConfirmations: saved.publicationConfirmations,
     updatedAt: saved.updatedAt, revisionId: saved.revisionId, editorialBaseline: saved.editorialBaseline, aiAssistedSinceConfirmation: saved.aiAssistedSinceConfirmation,
     qualityWarnings: saved.qualityWarnings, factClaims: saved.factClaims, writingBrief: saved.writingBrief };
+};
+
+const deliveredDocument = (draft: ArticleDraft) => {
+  const { status: _status, ...content } = editableDraftContent(draft);
+  return JSON.stringify(content);
+};
+export const isDeliveryAcknowledgement = (latest: ArticleDraft, sent: ArticleDraft) => latest.id === sent.id && deliveredDocument(latest) === deliveredDocument(sent);
+
+/** Receipts may arrive after another keystroke; never replace the editable body. */
+export const mergeDeliveryDraftMetadata = (current: ArticleDraft | undefined, latest: ArticleDraft, sent: ArticleDraft, updatedAt?: string): ArticleDraft | undefined => {
+  if (!current || current.id !== sent.id || !isDeliveryAcknowledgement(latest, sent)) return current;
+  return { ...current, updatedAt: updatedAt ?? current.updatedAt,
+    status: deliveredDocument(current) === deliveredDocument(sent) ? latest.status : current.status,
+    fillResult: latest.fillResult, publisherReceipt: latest.publisherReceipt, wechatDraft: latest.wechatDraft,
+    wechatSyncAttempts: latest.wechatSyncAttempts, socialDeliveries: latest.socialDeliveries, deliveryBatches: latest.deliveryBatches,
+    publicationConfirmations: latest.publicationConfirmations };
 };
 
 export const persistDraftRecoverySnapshot = (

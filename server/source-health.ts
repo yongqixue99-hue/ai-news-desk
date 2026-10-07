@@ -1,5 +1,14 @@
 import type { Candidate, CollectionSummary, RawHorizonItem, SourceConfig, SourceRouteResult, SourceRunResult, WorkflowRun } from "./types.js";
 
+/** Model/illustration failure is not evidence that a successfully read feed is broken. */
+export const applySourceCollectionFailure = (source: SourceConfig, input: { cancelled: boolean; sourcesRead: boolean; message: string; at: string }) => {
+  if (input.cancelled || input.sourcesRead) return;
+  source.health = "error";
+  source.lastCheckedAt = input.at;
+  source.lastHealthDetail = input.message;
+  source.consecutiveFailures = (source.consecutiveFailures ?? 0) + 1;
+};
+
 /** Empty results with failed inputs are not evidence of an absent event. */
 export const collectionCoverageWarning = (run: Pick<WorkflowRun, "sourceResults">): string | undefined => {
   const affected = (run.sourceResults ?? []).filter((source) => source.status === "error"

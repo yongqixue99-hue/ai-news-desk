@@ -31,12 +31,15 @@ export type XiaoheiheDeliveryResponse = {
  * Only in-flight work is shared: a later request must inspect the platform again.
  */
 export const createXiaoheiheDelivery = (dependencies: XiaoheiheDeliveryDependencies) => ({
-  async deliver(draft: ArticleDraft, settings: Settings): Promise<XiaoheiheDeliveryResponse> {
+  async deliver(draft: ArticleDraft, settings: Settings, signal?: AbortSignal): Promise<XiaoheiheDeliveryResponse> {
+    signal?.throwIfAborted();
     const snapshot = structuredClone(draft);
     const revision = publicationRevisionHash(snapshot, "xiaoheihe");
     return dependencies.deliveryDesk.sync<XiaoheiheDeliveryResponse>({ draftId: snapshot.id, channel: "xiaoheihe", revision }, async () => {
       await dependencies.connect(settings);
+      signal?.throwIfAborted();
       const preflight = await dependencies.preflight(snapshot, settings, revision);
+      signal?.throwIfAborted();
       const attempt = createPublisherAttempt(preflight);
       if (!preflight.canQueueFill) {
         const receipt = completePublisherAttempt(attempt, { steps: [] });

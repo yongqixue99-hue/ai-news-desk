@@ -274,13 +274,14 @@ export const createHumanDraftInState = ({
 
 export type DraftProgressReporter = (progress: number, stage: string) => void;
 
-interface DraftCreationOptions { draftId?: string; intake?: ArticleDraft["intake"]; }
+interface DraftCreationOptions { draftId?: string; intake?: ArticleDraft["intake"]; signal?: AbortSignal; }
 
 const create = async (
   packageId: string,
   onProgress?: DraftProgressReporter,
   options: DraftCreationOptions = {},
 ): Promise<{ draft: ArticleDraft; reused: boolean }> => {
+  options.signal?.throwIfAborted();
   onProgress?.(0.08, "校验冻结素材包");
   const database = await getLocalDatabase();
   const contentPackage = database.getContentPackage<ContentPackage>(packageId);
@@ -346,6 +347,7 @@ const create = async (
         autoReviewVoice: contentPackage.intent === "community",
         codexReasoningEffort: "high",
         onProgress,
+        signal: options.signal,
       },
     );
     draft.provenance.writingMemory = preferencePlan;
@@ -372,7 +374,10 @@ const create = async (
         draft,
         qualityReport,
       });
-      await updateState((state) => recordDraftGenerationAttempt(state, blockedAttempt));
+      await updateState((state) => {
+        options.signal?.throwIfAborted();
+        recordDraftGenerationAttempt(state, blockedAttempt);
+      });
       throw new ClassifiedJobError(
         `草稿质量门未通过：${qualityReport.blockers.map((item) => item.message).join("；")}`,
         "deterministic",
@@ -394,6 +399,7 @@ const create = async (
     });
     onProgress?.(0.96, "保存草稿与修订记录");
     const saved = await updateState((state) => {
+      options.signal?.throwIfAborted();
       recordDraftGenerationAttempt(state, generationAttempt);
       const duplicate = state.drafts.find((entry) => entry.provenance.contentPackageId === packageId
         && entry.provenance.generatorRevision === editorialGeneratorRevision);
@@ -444,6 +450,7 @@ const create = async (
  * cannot silently expand the article's fact boundary.
  */
 export const createDraftFromPackage = (packageId: string, onProgress?: DraftProgressReporter, options: DraftCreationOptions = {}) => {
+  if (options.signal?.aborted) return Promise.reject(options.signal.reason);
   const current = inFlight.get(packageId);
   if (current) return current;
   const operation = create(packageId, onProgress, options).finally(() => inFlight.delete(packageId));
@@ -503,7 +510,8 @@ export const createHumanDraftFromPackage = (packageId: string) => {
 };
 
 /** Source mode is a literal private working copy; no model call is needed. */
-export const createSourceDraftFromPackage = async (packageId: string) => {
+export const createSourceDraftFromPackage = async (packageId: string, options: { signal?: AbortSignal } = {}) => {
+  options.signal?.throwIfAborted();
   const database = await getLocalDatabase();
   const contentPackage = database.getContentPackage<ContentPackage>(packageId);
   if (!contentPackage || contentPackage.intent !== "source" || contentPackage.status !== "ready" || contentPackage.blockers.length || !contentPackage.sourceMaterials?.length) {
@@ -511,6 +519,7 @@ export const createSourceDraftFromPackage = async (packageId: string) => {
   }
   const images = await sourceImagesFromContentPackage(contentPackage);
   return updateState((state) => {
+    options.signal?.throwIfAborted();
     const existing = state.drafts.find((draft) => draft.provenance.contentPackageId === packageId);
     if (existing) return { draft: existing, reused: true };
     const result = createHumanDraftInState({ state, contentPackage, images });

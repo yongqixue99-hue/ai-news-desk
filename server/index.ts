@@ -1,17 +1,23 @@
 import { inspectXiaoheiheCover } from "./xiaoheihe-cover.js";
 import { normalizeXiaoheiheOptions, reserveXiaoheiheDefaults, xiaoheiheSelection } from "./xiaoheihe-publishing.js";
 import { ensurePublisherConnected } from "./publishing.js";
-import type { WeChatDraftSyncReceipt } from "./types.js";
-import { primaryDeliveryStatus, wechatPreflight, beginWeChatAttempt, resolveWeChatAttempt, unresolvedWeChatAttempt } from "./primary-delivery.js";
-import { WeChatApiError } from "./wechat-http.js";
-import { normalizeWeChatMetadata, wechatMetadataFor } from "./wechat-metadata.js";
+import { primaryDeliveryStatus, wechatPreflight, resolveWeChatAttempt } from "./primary-delivery.js";
+import { normalizeWeChatMetadata } from "./wechat-metadata.js";
+import { normalizeSocialMetadata } from "./social-metadata.js";
 import { registerDraftLibraryRoutes } from "./draft-library-routes.js";
-import { registerSocialDeliveryRoutes, startSocialBridge } from "./social-delivery-routes.js";
+import { registerAiStyleScoreRoutes } from "./ai-style-score-routes.js";
+import { registerSocialDeliveryRoutes, startSocialBridge, socialDeliveryServices } from "./social-delivery-routes.js";
+import { createDeliveryBatchDesk, pendingDeliveryBatchJobs } from "./delivery-batch-desk.js";
+import { createDeliveryBatchDrivers } from "./delivery-batch-drivers.js";
+import { registerDeliveryBatchRoutes } from "./delivery-batch-routes.js";
+import { deliveryPlatforms, type DeliveryPlatform } from "./delivery-batch-types.js";
+import { openRegularChromeUrls } from "./chrome-launch.js";
 import { registerCommunityRoutes } from "./community-routes.js";
 import { buildAggregationView, retainAggregationEntry } from "./aggregation-desk.js";
 import { aggregationSourceIds } from "./aggregation-catalog.js";
 import { writingPreferencePlan } from "./writing-preference-retrieval.js";
 import { recordEditObservation } from "./edit-observation.js";
+import { draftReworkChanges, readReworkObservations, summarizeReworkObservations } from "./draft-rework.js";
 import { reviewDraftQuality, bindReviewedParagraph } from "./draft-quality-review.js";
 import { affectedDraftsForSourceChanges } from "./source-change-impact.js";
 import { traceDiscoveryUrl } from "./discovery-trace.js";
@@ -23,6 +29,7 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 import express from "express";
 import { createServer as createViteServer } from "vite";
+import { groupTitleBackfillByRun, titleBackfillTargets } from "./today-title-backfill.js";
 import { pruneJobArtifacts } from "./artifact-retention.js";
 import { buildDraftOverview } from "./draft-overview.js";
 import { createLocalSecurityMiddleware } from "./http-security.js";
@@ -175,7 +182,9 @@ import { createWeChatDraftDesk } from "./wechat-draft.js";
 import { createWeChatHttpGateway } from "./wechat-http.js";
 import { loadWeChatPlacementImage } from "./wechat-image.js";
 import { createDeliveryDesk } from "./delivery-desk.js";
+import { createWeChatDelivery } from "./wechat-delivery.js";
 import { createXiaoheiheDelivery } from "./xiaoheihe-delivery.js";
+import { buildWorkflowPerformance } from "./workflow-performance.js";
 import { contentPackageDesk } from "./content-package-desk.js";
 import { buildHomeNews, buildTodayView, storyById, retainStoryForWriting } from "./story-desk.js";
 import { enrichStoryExplanation } from "./story-explanation-service.js";
@@ -206,6 +215,7 @@ import {
 import {
   getLocalDatabase,
   readState,
+  readStateProjection,
   replaceState,
   runStorageExclusive,
   updateState,
@@ -256,6 +266,12 @@ const zhihuHotlist = createZhihuHotlist({
 app.disable("x-powered-by");
 const port = Number(process.env.AI_NEWS_DESK_PORT || 4317);
 const deliveryDesk = createDeliveryDesk();
+const wechatDelivery = createWeChatDelivery({
+  deliveryDesk, read: readState, update: updateState,
+  gateway: async (appId, signal) => createWeChatHttpGateway({ appId, appSecret: await getWeChatAppSecret(), signal }),
+  review: async draft => reviewDraftQuality(draft, await getLocalDatabase()),
+  loadImage: loadWeChatPlacementImage,
+});
 const portableArchiveImportConfirmations = createPortableArchiveImportConfirmationDesk();
 
 app.use(createLocalSecurityMiddleware(port, { publisherExtensionToken: () => extensionPublisherBridge.token }));
@@ -431,6 +447,7 @@ const publisherPreflightFor = async (
 registerSocialDeliveryRoutes(app);
 registerCommunityRoutes(app);
 registerDraftLibraryRoutes(app);
+registerAiStyleScoreRoutes(app);
 
 app.get(
   "/api/bootstrap",
@@ -548,6 +565,29 @@ app.post("/api/aggregations/:id/select", asyncRoute(async (request, response) =>
   if (!buildAggregationView(await readState()).entries.some(e => e.id === id)) { response.status(404).json({error: "条目已不在当前快照，请刷新列表。"}); return; }
   response.json(await updateState(state => retainAggregationEntry(state, id)));
 }));
+
+let todayTitleBackfill: Promise<{ requested: number; completed: number; failed: number }> | undefined;
+// Explicit, bounded translation of the headlines shown first on Today. It reuses
+// the candidate briefing, so original titles and evidence stay untouched.
+app.post(
+  "/api/today/titles",
+  asyncRoute(async (_request, response) => {
+    // Isolated test servers must never reach a real provider just by rendering Today.
+    if (process.env.AI_NEWS_DESK_AUTO_TITLES === "0") { response.json({ requested: 0, completed: 0, failed: 0 }); return; }
+    todayTitleBackfill ??= (async () => {
+      const targets = titleBackfillTargets(buildTodayView(await readState()));
+      const total = { requested: 0, completed: 0, failed: 0 };
+      for (const [runId, candidateIds] of groupTitleBackfillByRun(targets)) {
+        try {
+          const result = await enrichCandidateBriefings(runId, { candidateIds });
+          total.requested += result.requested; total.completed += result.completed; total.failed += result.failed;
+        } catch { total.requested += candidateIds.length; total.failed += candidateIds.length; }
+      }
+      return total;
+    })().finally(() => { todayTitleBackfill = undefined; });
+    response.json(await todayTitleBackfill);
+  }),
+);
 
 app.get(
   "/api/today",
@@ -2385,6 +2425,12 @@ app.post("/api/drafts/:draftId/edit-observation", asyncRoute(async (request,resp
   if(!draft){response.status(404).json({error:"草稿不存在"});return;}
   response.json(recordEditObservation(await getLocalDatabase(),draft,request.body));
 }));
+app.get("/api/drafts/:draftId/rework", asyncRoute(async (request, response) => {
+  const draft = (await readState()).drafts.find(item => item.id === routeParam(request.params.draftId));
+  if (!draft) { response.status(404).json({ error: "草稿不存在" }); return; }
+  const observations = readReworkObservations(await getLocalDatabase(), { draftId: draft.id });
+  response.json({ changes: draftReworkChanges(draft), observations: summarizeReworkObservations(observations), window: observations.window });
+}));
 app.get("/api/source-changes", asyncRoute(async (_request, response) => {
   response.json(affectedDraftsForSourceChanges((await readState()).drafts, await getLocalDatabase()));
 }));
@@ -2464,6 +2510,7 @@ app.patch(
       }
       target.images = target.images.map(placement => ({ ...placement, image: normalizeLegacyUserUpload(placement.image) }));
       if (body.wechatMetadata !== undefined) target.wechatMetadata = normalizeWeChatMetadata(body.wechatMetadata);
+      if (body.socialMetadata !== undefined) target.socialMetadata = normalizeSocialMetadata(body.socialMetadata);
       if (body.imagePostImageIds !== undefined && (!Array.isArray(body.imagePostImageIds) || body.imagePostImageIds.some(id => typeof id !== "string" || !target.images.some(image => image.id === id)) || new Set(body.imagePostImageIds).size !== body.imagePostImageIds.length || body.imagePostImageIds.length > 18)) throw new Error("图集包含无效、重复或过多图片，请重新选择");
       if (body.topics !== undefined) {
         if (!Array.isArray(body.topics) || body.topics.some(topic => typeof topic !== "string")) throw new Error("话题格式无效");
@@ -2867,71 +2914,7 @@ app.post(
       response.status(400).json({ error: "请先在自动化 → 平台连接中连接微信公众号" });
       return;
     }
-    const result = await deliveryDesk.sync({ draftId, channel: "wechat", revision: request.body?.updatedAt || draft.updatedAt }, async () => {
-      const latestState = await readState();
-      const latestDraft = latestState.drafts.find((entry) => entry.id === draftId);
-      if (!latestDraft) throw new Error("同步开始前本地草稿已被删除");
-      const database = await getLocalDatabase();
-      const quality = reviewDraftQuality(latestDraft, database);
-      if (!quality.ready) throw new Error(quality.blockers.join("；"));
-      const deliveryHash = publicationRevisionHash(latestDraft,"wechat");
-      if (request.body?.updatedAt && request.body.updatedAt !== latestDraft.updatedAt) throw new Error("草稿已在其他窗口变化，请刷新后重新同步");
-      if (unresolvedWeChatAttempt(latestDraft, latestState.settings.wechat.appId)) throw new Error("上次微信发送结果尚未核对，请先检查草稿箱；本次没有重复发送");
-      const { author, digest, contentSourceUrl, coverPlacementId } = wechatMetadataFor(latestDraft, latestState.settings.wechat);
-      const preflight = wechatPreflight(latestDraft, latestState.settings.wechat, quality.blockers);
-      if (!preflight.ready) throw new Error(preflight.blockers.join("；"));
-      const gateway = createWeChatHttpGateway({
-        appId: latestState.settings.wechat.appId,
-        appSecret: await getWeChatAppSecret(),
-      });
-      let attemptId: string | undefined;
-      let receipt: WeChatDraftSyncReceipt;
-      try { receipt = await createWeChatDraftDesk({
-        gateway,
-        loadImage: loadWeChatPlacementImage,
-        beforeCommit: async () => {
-          const currentState = await readState();
-          if (currentState.settings.wechat.appId !== latestState.settings.wechat.appId) throw new Error("公众号账号已变化，请重新检查后同步");
-          const current = currentState.drafts.find(draft => draft.id === latestDraft.id);
-          if (!current) throw new Error("草稿已不存在");
-          assertPublicationRevision(current,"wechat",deliveryHash);
-          const currentQuality = reviewDraftQuality(current,database);
-          if (!currentQuality.ready || currentQuality.binding.documentHash !== quality.binding.documentHash || currentQuality.binding.packageHash !== quality.binding.packageHash) throw new Error("正文或来源在交付准备期间变化，请重新核对");
-        },
-        beforeRemoteWrite: async (operation, mediaId) => {
-          await updateState(current => {
-            const target = current.drafts.find(item => item.id === draftId);
-            if (!target) throw new Error("草稿已不存在");
-            assertPublicationRevision(target, "wechat", deliveryHash);
-            attemptId = beginWeChatAttempt(target, latestState.settings.wechat.appId, operation, mediaId).id;
-          });
-        },
-      }).syncDraft({
-        draft: latestDraft,
-        author,
-        digest,
-        contentSourceUrl,
-        coverPlacementId,
-        previousReceipt: !latestDraft.wechatDraft?.appId || latestDraft.wechatDraft.appId === latestState.settings.wechat.appId ? latestDraft.wechatDraft : undefined,
-      }); } catch (error) {
-        if (attemptId) await updateState(current => {
-          const attempt = (current.drafts.find(item => item.id === draftId) ?? current.draftTrash?.find(item => item.draft.id === draftId)?.draft)?.wechatSyncAttempts?.find(item => item.id === attemptId);
-          if (attempt) { attempt.status = error instanceof WeChatApiError && error.definitive ? "failed" : "unknown"; attempt.detail = error instanceof Error ? error.message : "微信未返回明确结果"; }
-        });
-        throw error;
-      }
-      receipt.appId = latestState.settings.wechat.appId;
-      receipt.revisionHash = publicationRevisionHash(latestDraft, "wechat");
-      const updatedDraft = await updateState((current) => {
-        const target = current.drafts.find((entry) => entry.id === draftId) ?? current.draftTrash?.find(item => item.draft.id === draftId)?.draft;
-        if (!target) return undefined;
-        attachWeChatDeliveryReceipt(target, receipt, receipt.syncedAt);
-        const attempt = target.wechatSyncAttempts?.find(item => item.id === attemptId);
-        if (attempt) { attempt.status = "complete"; attempt.mediaId = receipt.mediaId; attempt.detail = receipt.verificationDetail; }
-        return target;
-      });
-      return { receipt, draft: updatedDraft };
-    });
+    const result = await wechatDelivery.deliver(draftId, request.body?.updatedAt || draft.updatedAt);
     if (!result.draft) {
       response.status(409).json({ error: "同步完成，但本地草稿已被删除；请到公众号草稿箱确认" });
       return;
@@ -3203,6 +3186,26 @@ const xiaoheiheDelivery = createXiaoheiheDelivery({
   }),
 });
 
+const batchDrivers = createDeliveryBatchDrivers({ wechat: wechatDelivery, xiaoheihe: xiaoheiheDelivery,
+  publisherStatus: () => extensionPublisherBridge.status(), socialStatus: socialDeliveryServices.status,
+  socialDeliver: socialDeliveryServices.deliver });
+const openBatchPlatforms = async (platforms: DeliveryPlatform[]) => {
+  const urls: string[] = platforms.map(id => deliveryPlatforms.find(item => item.id === id)!.url);
+  if (platforms.includes("xiaoheihe") && !extensionPublisherBridge.status().ok) urls.unshift(`http://127.0.0.1:${port}/#drafts`);
+  await openRegularChromeUrls(urls);
+};
+const deliveryBatchDesk = createDeliveryBatchDesk({ read: readState, update: updateState, drivers: batchDrivers, open: openBatchPlatforms,
+  pending: () => readStateProjection(pendingDeliveryBatchJobs) });
+registerDeliveryBatchRoutes(app, { desk: deliveryBatchDesk, read: readState, open: openBatchPlatforms });
+app.get("/api/workflow/performance", asyncRoute(async (request, response) => {
+  const days = Number(request.query.days ?? 30);
+  if (!Number.isInteger(days) || days < 1 || days > 365) { response.status(400).json({ error: "统计窗口应为 1–365 天" }); return; }
+  const urls = typeof request.query.url === "string" ? [request.query.url] : Array.isArray(request.query.url) ? request.query.url.filter((value): value is string => typeof value === "string") : [];
+  const now = new Date().toISOString();
+  const rework = readReworkObservations(await getLocalDatabase(), { days, now });
+  response.json(await readStateProjection(state => buildWorkflowPerformance(state, { days, now, benchmarkUrls: urls, rework })));
+}));
+
 app.post(
   "/api/drafts/:draftId/fill",
   deliveryRoute(async (request, response) => {
@@ -3407,6 +3410,7 @@ await startOwnedServer({
   startScheduler,
 });
 void startSocialBridge().catch(() => undefined);
+setInterval(() => { void deliveryBatchDesk.tick().catch(() => undefined); }, 5_000).unref();
 const durableJobDesk = createJobDesk({
   database: await getLocalDatabase(),
   leaseMs: 30 * 60_000,
@@ -3420,9 +3424,9 @@ const durableJobDesk = createJobDesk({
       if (!runId) throw new Error("任务缺少采集 Run ID");
       context.progress(0.03, "启动新闻采集");
       try {
-        await executeCollection(runId);
+        await executeCollection(runId, { signal: context.signal, progress: context.progress });
       } catch (error) {
-        if (context.job.attempts < context.job.maxAttempts) {
+        if (!context.signal.aborted && context.job.attempts < context.job.maxAttempts) {
           await updateState((state) => {
             const run = state.runs.find((entry) => entry.id === runId);
             if (!run || run.status === "cancelled") return;
@@ -3454,7 +3458,7 @@ const durableJobDesk = createJobDesk({
       if (!storyId) throw new Error("任务缺少 Story ID");
       context.progress(0.08, "读取来源图片");
       const scope = payload && typeof payload === "object" && "scope" in payload && payload.scope === "article" ? "article" : "preview";
-      const result = await hydrateStoryAssets(storyId, Number.isFinite(minimumImages) ? minimumImages : 2, { scope, progress: context.progress });
+      const result = await hydrateStoryAssets(storyId, Number.isFinite(minimumImages) ? minimumImages : 2, { scope, progress: context.progress, signal: context.signal });
       context.progress(0.96, "保存来源图片");
       return result;
     },
@@ -3464,7 +3468,7 @@ const durableJobDesk = createJobDesk({
         : "";
       if (!storyId) throw new Error("任务缺少 Story ID");
       context.progress(0.08, "读取新闻正文");
-      const story = await enrichStoryExplanation(storyId);
+      const story = await enrichStoryExplanation(storyId, context.signal);
       context.progress(0.96, "整理证据说明");
       return { storyId: story.id, explanationStatus: story.explanation.status };
     },
@@ -3476,6 +3480,7 @@ const durableJobDesk = createJobDesk({
       context.progress(0.05, "准备补强独立来源");
       return storyEvidenceDesk.supplement(storyId, {
         progress: (progress, stage) => context.progress(progress, stage),
+        signal: context.signal,
       });
     },
     "build-content-package": async (payload, context) => {
@@ -3498,6 +3503,8 @@ const durableJobDesk = createJobDesk({
         mode,
         (progress, stage) => context.progress(progress, stage),
         Number.isFinite(minimumImages) ? minimumImages : 2,
+        undefined,
+        { signal: context.signal },
       );
       context.progress(0.98, "素材包已保存，可开始成稿");
       return {
@@ -3513,14 +3520,14 @@ const durableJobDesk = createJobDesk({
         : "";
       if (!packageId) throw new Error("任务缺少素材包 ID");
       context.progress(0.05, "准备生成草稿");
-      const result = await createDraftFromPackage(packageId, (progress, stage) => context.progress(progress, stage));
+      const result = await createDraftFromPackage(packageId, (progress, stage) => context.progress(progress, stage), { signal: context.signal });
       context.progress(0.98, "完成草稿入库");
       return { draftId: result.draft.id, reused: result.reused, imageCount: result.draft.images.length };
     },
     "draft-from-intake-review": async (payload, context) => {
       const input = payload as { reviewId?: string };
       if (!input?.reviewId) throw new ClassifiedJobError("任务缺少导入复核 ID", "deterministic");
-      return executeReviewGeneration(input.reviewId, context.progress);
+      return executeReviewGeneration(input.reviewId, context.progress, context.signal);
     },
     "draft-from-editorial-intake": async (payload, context) => {
       const input = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
@@ -3533,6 +3540,7 @@ const durableJobDesk = createJobDesk({
       const result = await editorialIntakeDesk.createDraft(
         { runId, candidateId, intent, sourceMode: ["source", "translation", "curation"].includes(String(input.sourceMode)) ? input.sourceMode as "source" | "translation" | "curation" : undefined },
         (progress, stage) => context.progress(progress, stage),
+        { signal: context.signal },
       );
       context.progress(0.99, "统一成稿链路已完成");
       return {

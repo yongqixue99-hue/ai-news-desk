@@ -208,6 +208,7 @@ const canDownload = (image: SourceImage) => /^https?:\/\//iu.test(image.url.trim
 export interface VisualHydrationOptions {
   scope?: "preview" | "article";
   progress?: (value: number, stage: string) => void;
+  signal?: AbortSignal;
 }
 
 const collectArticleVisuals = async (storyId: string, dependencies: VisualHydrationDependencies, options: VisualHydrationOptions) => {
@@ -262,6 +263,27 @@ export const runVisualHydration = async (
   dependencies: VisualHydrationDependencies,
   options: VisualHydrationOptions = {},
 ): Promise<VisualHydrationResult> => {
+  options.signal?.throwIfAborted();
+  if (options.signal) {
+    const original = dependencies;
+    const guard = async <T>(operation: () => Promise<T>) => {
+      options.signal!.throwIfAborted();
+      const result = await operation();
+      options.signal!.throwIfAborted();
+      return result;
+    };
+    const search = original.searchOnline, stylize = original.stylizeIdentity, generate = original.generateFallback;
+    dependencies = { ...original,
+      getStory: () => guard(original.getStory),
+      extract: (...args) => guard(() => original.extract(...args)),
+      localize: (...args) => guard(() => original.localize(...args)),
+      capture: (...args) => guard(() => original.capture(...args)),
+      persistExtraction: (...args) => guard(() => original.persistExtraction(...args)),
+      persistImages: (...args) => guard(() => original.persistImages(...args)),
+      searchOnline: search ? (...args) => guard(() => search(...args)) : undefined,
+      stylizeIdentity: stylize ? (...args) => guard(() => stylize(...args)) : undefined,
+      generateFallback: generate ? (...args) => guard(() => generate(...args)) : undefined };
+  }
   if (options.scope === "article") return collectArticleVisuals(storyId, dependencies, options);
   const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
   let story = await dependencies.getStory();
@@ -425,6 +447,7 @@ export const createVisualHydrationStorage = (storyId: string, dependencies: {
   project: typeof readStateProjection;
   update: typeof updateState;
   findStory?: (state: Readonly<WorkflowState>, id: string) => VisualStorySnapshot | undefined;
+  signal?: AbortSignal;
 }) => {
   let currentStory: VisualStorySnapshot | undefined;
   let resolved = false;
@@ -447,6 +470,7 @@ export const createVisualHydrationStorage = (storyId: string, dependencies: {
     const story = await getStory();
     if (!story) return;
     await dependencies.update(state => {
+      dependencies.signal?.throwIfAborted();
       for (const image of images) {
         let matched = false;
         for (const signal of story.signals) {
@@ -466,6 +490,7 @@ export const createVisualHydrationStorage = (storyId: string, dependencies: {
   };
   const persistExtraction = async (signal: StorySignalView, page: ExtractedPage) => {
     await dependencies.update(state => {
+      dependencies.signal?.throwIfAborted();
       const candidate = candidateForSignal(state, signal);
       if (!candidate) return;
       candidate.canonicalUrl = page.canonicalUrl;
@@ -478,8 +503,8 @@ export const createVisualHydrationStorage = (storyId: string, dependencies: {
   return { getStory, persistImages, persistExtraction };
 };
 
-const productionDependencies = (storyId: string): VisualHydrationDependencies => ({
-  ...createVisualHydrationStorage(storyId, { project: readStateProjection, update: updateState }),
+const productionDependencies = (storyId: string, signal?: AbortSignal): VisualHydrationDependencies => ({
+  ...createVisualHydrationStorage(storyId, { project: readStateProjection, update: updateState, signal }),
   extract: extractPage,
   localize: downloadSourceImage,
   capture: captureRenderedPageImages,
@@ -509,6 +534,7 @@ export const hydrateStoryAssets = (
   minimumImages = 2,
   options: VisualHydrationOptions = {},
 ) => {
+  options.signal?.throwIfAborted();
   const minimum = Math.max(0, Math.min(8, Math.floor(minimumImages)));
   const key = `${storyId}:${minimum}:${options.scope ?? "preview"}`;
   const existing = inFlight.get(key);
@@ -521,7 +547,7 @@ export const hydrateStoryAssets = (
   const report = (value: number, stage: string) => {
     for (const listener of listeners) listener(value, stage);
   };
-  const operation = runVisualHydration(storyId, minimum, productionDependencies(storyId), { ...options, progress: report })
+  const operation = runVisualHydration(storyId, minimum, productionDependencies(storyId, options.signal), { ...options, progress: report })
     .finally(() => inFlight.delete(key));
   inFlight.set(key, { promise: operation, listeners });
   return operation;

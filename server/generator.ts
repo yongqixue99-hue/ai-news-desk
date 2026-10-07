@@ -600,6 +600,7 @@ const autoReviewGeneratedArticle = async ({
   aiSettings,
   schemaPath,
   includeVoiceShaping,
+  signal,
 }: {
   runId: string;
   candidateId: string;
@@ -608,7 +609,9 @@ const autoReviewGeneratedArticle = async ({
   aiSettings: Awaited<ReturnType<typeof readState>>["aiSettings"];
   schemaPath: string;
   includeVoiceShaping: boolean;
+  signal?: AbortSignal;
 }) => {
+  signal?.throwIfAborted();
   const before = assessWritingQuality({
     title: article.title,
     paragraphs: article.paragraphs,
@@ -667,6 +670,7 @@ const autoReviewGeneratedArticle = async ({
       outputPath,
       codexReasoningEffort: "medium",
       codexTimeoutMs: 600_000,
+      signal,
     });
     const reviewed = parseGeneratedArticle(observed.output);
     const revisedArticle = acceptGeneratedReview(article, reviewed);
@@ -726,8 +730,10 @@ export const generateCandidateDraft = async (
     autoReviewVoice?: boolean;
     codexReasoningEffort?: "low" | "medium" | "high" | "xhigh";
     onProgress?: (progress: number, stage: string) => void;
+    signal?: AbortSignal;
   },
 ): Promise<ArticleDraft> => {
+  evidenceOverride?.signal?.throwIfAborted();
   if (!evidenceOverride?.contentPackage || evidenceOverride.contentPackage.status !== "ready" || evidenceOverride.contentPackage.blockers.length) {
     throw new Error("成稿必须通过 DraftDesk 使用已冻结且通过预检的 ContentPackage");
   }
@@ -898,6 +904,7 @@ export const generateCandidateDraft = async (
       schemaPath,
       outputPath,
       codexReasoningEffort: evidenceOverride?.codexReasoningEffort,
+      signal: evidenceOverride?.signal,
     });
     rendered = observed.output;
     evidenceOverride?.onProgress?.(0.78, "校验模型结果");
@@ -943,6 +950,7 @@ export const generateCandidateDraft = async (
         aiSettings: state.aiSettings,
         schemaPath,
         includeVoiceShaping: evidenceOverride.autoReviewVoice === true,
+        signal: evidenceOverride.signal,
       });
       article = reviewed.article;
       reviewTraceId = reviewed.reviewTraceId;
@@ -950,6 +958,7 @@ export const generateCandidateDraft = async (
       // A style pass is optional. If it changes protected facts or fails to
       // improve the draft, keep the already validated original instead of
       // rerunning the entire expensive generation job.
+      evidenceOverride.signal?.throwIfAborted();
       await appendRunLog(
         runId,
         "文风审校",

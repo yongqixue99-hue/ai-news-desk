@@ -3,7 +3,6 @@ import { Bookmark, Check, ChevronDown, ExternalLink, RefreshCw, Search } from 'l
 import { api } from '../api';
 import type { AggregationView } from '../../server/aggregation-desk.js';
 import type { AppPage } from '../types';
-import './aggregations.css';
 import { useAggregationReading } from '../hooks/useAggregationReading';
 
 const date = (value?: string) => value && Number.isFinite(Date.parse(value))

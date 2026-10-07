@@ -1,0 +1,55 @@
+/* Design tokens: warm paper, ink hierarchy, one vermilion accent. */
+:root {
+  --canvas: #f6f5f1;
+  --canvas-deep: #efede8;
+  --paper: #ffffff;
+  --surface: #ffffff;
+  --surface-subtle: #f6f5f1;
+  --ink: #1a1918;
+  --text: #1a1918;
+  --text-secondary: #45423d;
+  --muted: #736e67;
+  --faint: #a39d95;
+  --line: #e3e0da;
+  --line-soft: #eeece7;
+  --border: #e3e0da;
+  --accent: #cf2e27;
+  --accent-deep: #a5211b;
+  --accent-soft: #fcefed;
+  --accent-line: #f2c8c4;
+  --success: #1c7a4b;
+  --success-soft: #eaf5ee;
+  --warning: #96580a;
+  --warning-soft: #fbf3e2;
+  --danger: #b42318;
+  --danger-soft: #fdeeec;
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 14px;
+  --desk-radius: 8px;
+  --shadow-1: 0 1px 2px rgb(26 25 24 / 6%);
+  --shadow-2: 0 6px 20px rgb(26 25 24 / 8%), 0 1px 2px rgb(26 25 24 / 4%);
+  --shadow-3: 0 20px 56px rgb(26 25 24 / 16%), 0 2px 6px rgb(26 25 24 / 6%);
+  --desk-shadow: var(--shadow-2);
+  --ease: cubic-bezier(.2, .7, .2, 1);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-display: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", var(--font-sans);
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --desk-sans: var(--font-sans);
+  --desk-serif: var(--font-sans);
+
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: var(--canvas);
+  -webkit-font-smoothing: antialiased;
+}
+
+body { background: var(--canvas); color: var(--text); font-family: var(--font-sans); }
+::selection { background: #f7d6d2; color: var(--ink); }
+time, .radar-meta, .today-collection-status, table { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

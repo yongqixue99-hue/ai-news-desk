@@ -142,7 +142,7 @@ export const legacyDraftBodyHtml = (draft: ArticleDraft) => {
 export const normalizedDraftBodyHtml = (draft: ArticleDraft) =>
   sanitizeDraftHtml(draft.bodyHtml?.trim() || legacyDraftBodyHtml(draft));
 
-const parseEditedCaption = ($: ReturnType<typeof cheerio.load>, image: ReturnType<ReturnType<typeof cheerio.load>>) => {
+export const parseEditedCaption = ($: ReturnType<typeof cheerio.load>, image: ReturnType<ReturnType<typeof cheerio.load>>) => {
   const captionParagraph = image.next("p").first();
   const captionText = captionParagraph.text().replace(/\s+/g, " ").trim();
   if (!captionText.startsWith("图：")) return undefined;

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { ClassifiedJobError, createJobDesk } from "./job-desk.js";
+import { ClassifiedJobError, createJobDesk, type JobContext } from "./job-desk.js";
 import { LocalDatabase } from "./local-database.js";
 
 test("JobDesk executes a persisted job and records durable progress", async () => {
@@ -222,4 +222,119 @@ test("maintenance cannot occupy the capacity reserved for a later user task", as
     assert.equal(database.getJob(user.id)?.status, "complete");
     assert.equal(database.getJob(second.id)?.status, "queued");
   } finally { release(); await first; desk.stop(); database.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("heartbeats alone cannot keep a stalled job running forever, and late completion cannot revive it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "newsdesk-stalled-job-"));
+  const database = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({ version: 11 }) });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let tick: Promise<void> | undefined;
+  let beat: ReturnType<typeof setInterval> | undefined;
+  const desk = createJobDesk({ database, progressTimeoutMs: 30, watchdogMs: 5, handlers: {
+    stalled: async (_payload, context) => {
+      context.progress(0.03, "读取原文");
+      beat = setInterval(() => context.heartbeat(), 5);
+      await gate;
+      return { staleResult: true };
+    },
+  } });
+  try {
+    const job = database.enqueueJob({ type: "stalled", idempotencyKey: "stalled-heartbeat", payload: {}, maxAttempts: 1 }).job;
+    tick = desk.tick();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    const failed = database.getJob(job.id);
+    assert.equal(failed?.status, "failed", "an automatic heartbeat is not business progress");
+    assert.match(failed?.error ?? "", /读取原文.*进展|进展.*读取原文/);
+    release();
+    await tick;
+    assert.equal(database.getJob(job.id)?.status, "failed", "late results must not overwrite a timed-out task");
+    assert.equal(database.getJob(job.id)?.result, undefined);
+  } finally {
+    if (beat) clearInterval(beat);
+    release();
+    await tick;
+    desk.stop(); database.close(); await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("real progress extends the idle deadline, repeated progress does not, and cooperative abort frees capacity", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "newsdesk-progress-deadline-"));
+  const database = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({ version: 11 }) });
+  let clock = 0;
+  let context!: JobContext;
+  const desk = createJobDesk({ database, now: () => clock, progressTimeoutMs: 100, totalTimeoutMs: 1_000, watchdogMs: 5, handlers: {
+    slow: async (_payload, current) => {
+      context = current;
+      current.progress(0.1, "读取资料");
+      await new Promise<void>((_resolve, reject) => current.signal.addEventListener("abort", () => reject(current.signal.reason), { once: true }));
+    },
+    next: async () => ({ ready: true }),
+  } });
+  let tick: Promise<void> | undefined;
+  try {
+    const job = database.enqueueJob({ type: "slow", idempotencyKey: "progress", payload: {} }).job;
+    tick = desk.tick();
+    clock = 80; context.progress(0.5, "读取资料");
+    clock = 160;
+    await new Promise(resolve => setTimeout(resolve, 15));
+    assert.equal(database.getJob(job.id)?.status, "running");
+    context.progress(0.5, "读取资料");
+    clock = 190;
+    await Promise.all([tick, new Promise(resolve => setTimeout(resolve, 20))]);
+    assert.equal(database.getJob(job.id)?.status, "failed");
+    assert.equal(context.signal.aborted, true);
+    const next = database.enqueueJob({ type: "next", idempotencyKey: "after-stall", payload: {} }).job;
+    await desk.tick();
+    assert.equal(database.getJob(next.id)?.status, "complete");
+  } finally { clock = 2_000; await Promise.all([tick, new Promise(resolve => setTimeout(resolve, 20))]); desk.stop(); database.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("a job cannot exceed its total deadline by alternating progress stages", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "newsdesk-total-deadline-"));
+  const database = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({ version: 11 }) });
+  let clock = 0;
+  let context!: JobContext;
+  const desk = createJobDesk({ database, now: () => clock, progressTimeoutMs: 100, totalTimeoutMs: 150, watchdogMs: 5, handlers: {
+    slow: async (_payload, current) => {
+      context = current; current.progress(0.1, "步骤一");
+      await new Promise<void>((_resolve, reject) => current.signal.addEventListener("abort", () => reject(current.signal.reason), { once: true }));
+    },
+  } });
+  let tick: Promise<void> | undefined;
+  try {
+    const job = database.enqueueJob({ type: "slow", idempotencyKey: "total", payload: {} }).job;
+    tick = desk.tick(); clock = 80; context.progress(0.5, "步骤二"); clock = 160;
+    await Promise.all([tick, new Promise(resolve => setTimeout(resolve, 20))]);
+    assert.match(database.getJob(job.id)?.error ?? "", /超过处理时限/);
+    assert.equal((database.listWorkflowEvents(1)[0]?.payload as { reason?: string }).reason, "total-timeout");
+  } finally { clock = 2_000; await Promise.all([tick, new Promise(resolve => setTimeout(resolve, 20))]); desk.stop(); database.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("time spent while the computer was asleep does not count as a stalled job", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "newsdesk-suspend-deadline-"));
+  const database = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({ version: 11 }) });
+  let clock = 0;
+  const desk = createJobDesk({ database, now: () => clock, progressTimeoutMs: 100, totalTimeoutMs: 400, suspendGapMs: 1_000, watchdogMs: 5, handlers: {
+    slow: async (_payload, current) => {
+      current.progress(0.08, "采集原始条目");
+      await new Promise<void>((_resolve, reject) => current.signal.addEventListener("abort", () => reject(current.signal.reason), { once: true }));
+    },
+  } });
+  let tick: Promise<void> | undefined;
+  try {
+    const job = database.enqueueJob({ type: "slow", idempotencyKey: "suspend", payload: {} }).job;
+    tick = desk.tick();
+    await new Promise(resolve => setTimeout(resolve, 15));
+    // The wall clock jumps 16 minutes between two watchdog ticks: the process was suspended.
+    clock = 980_000;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(database.getJob(job.id)?.status, "running");
+    // After waking, an ordinary stall is still detected against the remaining idle budget.
+    clock += 60; await new Promise(resolve => setTimeout(resolve, 15));
+    assert.equal(database.getJob(job.id)?.status, "running");
+    clock += 60;
+    await Promise.all([tick, new Promise(resolve => setTimeout(resolve, 20))]);
+    assert.match(database.getJob(job.id)?.error ?? "", /长时间没有实际进展/);
+  } finally { clock += 10_000; await Promise.all([tick, new Promise(resolve => setTimeout(resolve, 20))]); desk.stop(); database.close(); await rm(root, { recursive: true, force: true }); }
 });

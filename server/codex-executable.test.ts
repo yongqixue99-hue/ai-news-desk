@@ -34,3 +34,13 @@ test("macOS prefers the installed desktop CLI so a stale PATH binary cannot reje
   assert.equal(resolveCodexExecutable({ platform: "darwin", macApplicationsRoots: [root] }), desktop);
   assert.equal(resolveCodexExecutable({ platform: "darwin", macApplicationsRoots: [path.join(root, "missing")] }), "codex");
 });
+
+test("macOS finds the CLI in the desktop app's newer codex-cli/bin layout", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-mac-cli-layout-"));
+  const bin = path.join(root, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin");
+  await mkdir(bin, { recursive: true });
+  const bundled = path.join(bin, "codex");
+  await writeFile(bundled, "#!/bin/sh\nexit 0\n");
+  await chmod(bundled, 0o755);
+  assert.equal(resolveCodexExecutable({ platform: "darwin", macApplicationsRoots: [root] }), bundled);
+});

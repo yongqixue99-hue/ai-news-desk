@@ -49,6 +49,7 @@ import type {
   WeChatDraftSyncReceipt,
 } from "./types";
 import type { DraftLibrarySelection, DraftTrashSelection, TrashedDraftSummary } from "../server/draft-library.js";
+import type { AiStyleResult } from "ai-style-score";
 
 const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
   const response = await fetch(url, {
@@ -310,10 +311,15 @@ export interface ProductJob {
 }
 
 export const api = {
+  aiStyleKeyStatus: () => request<{ configured: boolean }>("/api/ai-style-score/key"),
+  saveAiStyleKey: (key: string) => request<{ configured: boolean }>("/api/ai-style-score/key", { method: "PUT", body: JSON.stringify({ key }) }),
+  deleteAiStyleKey: () => request<{ configured: boolean }>("/api/ai-style-score/key", { method: "DELETE" }),
+  scoreAiStyle: (text: string) => request<AiStyleResult>("/api/ai-style-score", { method: "POST", body: JSON.stringify({ text }) }),
   bootstrap: () => request<WorkflowState>("/api/bootstrap"),
   community: () => request<CommunityView>("/api/community"),
   shell: () => request<ShellView>("/api/shell"),
   today: () => request<TodayView>("/api/today?readOnly=1"),
+  translateTodayTitles: () => request<{ requested: number; completed: number; failed: number }>("/api/today/titles", { method: "POST", body: "{}" }),
   homeNews: (keyword: string) => request<StoryView[]>(`/api/home-news?keyword=${encodeURIComponent(keyword)}`),
   homeLayout: () => request<HomeLayout>("/api/home-layout"),
   saveHomeLayout: (layout: HomeLayout) => request<HomeLayout>("/api/home-layout", { method: "PATCH", body: JSON.stringify(layout) }),
@@ -785,7 +791,15 @@ export const socialDeliveryApi = {
   cancel: (id: string, batchId: string) => request<import("../server/social-delivery-types").SocialDeliveryBatch>(`/api/drafts/${encodeURIComponent(id)}/social-delivery-batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST", body: "{}" }),
   status: () => request<import("../server/social-delivery-types").SocialDeliveryStatus>("/api/delivery/social/status"),
   settings: (input: { enabled: boolean; extensionId: string; token?: string }) => request("/api/delivery/social/settings", { method: "PATCH", body: JSON.stringify(input) }),
-  receipts: (id: string) => request<{ receipts: import("../server/social-delivery-types").SocialDeliveryReceipt[]; revisions: Record<string, string> }>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`),
+  receipts: (id: string, signal?: AbortSignal) => request<{ receipts: import("../server/social-delivery-types").SocialDeliveryReceipt[]; revisions: Record<string, string> }>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`, { signal }),
   deliver: (id: string, input: { platform: string; account: string; accountId: string; updatedAt: string }) => request<import("../server/social-delivery-types").SocialDeliveryReceipt>(`/api/drafts/${encodeURIComponent(id)}/social-deliveries`, { method: "POST", body: JSON.stringify(input) }),
   resolve: (id: string, receiptId: string, resolution: "reviewed" | "not-received") => request(`/api/drafts/${encodeURIComponent(id)}/social-deliveries/${encodeURIComponent(receiptId)}/resolve`, { method: "POST", body: JSON.stringify({ resolution }) }),
+};
+
+export const deliveryBatchApi = {
+  view: (id: string, signal?: AbortSignal) => request<import("../server/delivery-batch-types").DeliveryBatchView>(`/api/drafts/${encodeURIComponent(id)}/delivery-batches`, { signal }),
+  connections: (id: string, signal?: AbortSignal) => request<import("../server/delivery-batch-types").DeliveryBatchView["platforms"]>(`/api/drafts/${encodeURIComponent(id)}/delivery-connections`, { signal }),
+  start: (id: string, input: { platforms: string[]; updatedAt: string; retryOf?: string; accountBindings?: Record<string, string> }) => request<import("../server/delivery-batch-types").DeliveryBatch>(`/api/drafts/${encodeURIComponent(id)}/delivery-batches`, { method: "POST", body: JSON.stringify(input) }),
+  cancel: (id: string, batchId: string) => request<import("../server/delivery-batch-types").DeliveryBatch>(`/api/drafts/${encodeURIComponent(id)}/delivery-batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST", body: "{}" }),
+  open: (platforms: string[]) => request<{ detail: string }>("/api/delivery/batch/open", { method: "POST", body: JSON.stringify({ platforms }) }),
 };

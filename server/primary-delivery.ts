@@ -3,14 +3,14 @@ import { insertedMediaIds, normalizedDraftBodyHtml } from "./article-html.js";
 import { evaluateDraftReadiness } from "./draft-readiness.js";
 import { publicationRevisionHash } from "./publication-state.js";
 import { wechatMetadataFor } from "./wechat-metadata.js";
-import type { ArticleDraft, WeChatChannelSettings, WeChatSyncAttempt } from "./types.js";
+import type { ArticleDraft, WeChatChannelSettings, WeChatSyncAttempt, WeChatWriteCheckpoint } from "./types.js";
 
 export const unresolvedWeChatAttempt = (draft: ArticleDraft, appId: string) =>
   draft.wechatSyncAttempts?.find(attempt => attempt.appId === appId && ["sending", "unknown"].includes(attempt.status));
 
-export const beginWeChatAttempt = (draft: ArticleDraft, appId: string, operation: "created" | "updated", mediaId?: string): WeChatSyncAttempt => {
+export const beginWeChatAttempt = (draft: ArticleDraft, appId: string, operation: "created" | "updated", mediaId?: string, checkpoint?: WeChatWriteCheckpoint): WeChatSyncAttempt => {
   if (unresolvedWeChatAttempt(draft, appId)) throw new Error("上次微信发送结果尚未核对，请先检查公众号草稿箱；本次没有重复发送");
-  const attempt: WeChatSyncAttempt = { id: randomUUID(), appId, startedAt: new Date().toISOString(), revisionHash: publicationRevisionHash(draft, "wechat"), operation, mediaId, status: "sending" };
+  const attempt: WeChatSyncAttempt = { id: randomUUID(), appId, startedAt: new Date().toISOString(), revisionHash: publicationRevisionHash(draft, "wechat"), operation, mediaId, checkpoint, status: "sending" };
   draft.wechatSyncAttempts = [attempt, ...(draft.wechatSyncAttempts ?? [])];
   return attempt;
 };

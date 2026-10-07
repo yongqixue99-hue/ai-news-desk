@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applySourceRunResult, sourceResultsForRun } from "./source-health.js";
+import { applySourceRunResult, sourceResultsForRun, applySourceCollectionFailure } from "./source-health.js";
 import type { Candidate, RawHorizonItem, SourceConfig } from "./types.js";
 
 const source = (id: string, name: string, kind: SourceConfig["kind"]): SourceConfig => ({
@@ -11,6 +11,19 @@ const source = (id: string, name: string, kind: SourceConfig["kind"]): SourceCon
   selected: true,
   category: "ai-news",
   discoveryOnly: false,
+});
+
+test("late model failures and user cancellation do not poison successful source health", () => {
+  for (const options of [{ cancelled: false, sourcesRead: true }, { cancelled: true, sourcesRead: false }]) {
+    const healthy = { ...source("official", "官网", "rss"), health: "healthy" as const, consecutiveFailures: 0, lastCheckedAt: "2026-10-01T00:00:00Z", lastHealthDetail: "读取成功" };
+    const before = structuredClone(healthy);
+    applySourceCollectionFailure(healthy, { ...options, message: "中文摘要超时", at: "2026-10-02T00:00:00Z" });
+    assert.deepEqual(healthy, before);
+  }
+  const failed = source("official", "官网", "rss");
+  applySourceCollectionFailure(failed, { cancelled: false, sourcesRead: false, message: "来源读取失败", at: "2026-10-02T00:00:00Z" });
+  assert.equal(failed.health, "error");
+  assert.equal(failed.consecutiveFailures, 1);
 });
 
 const item = (id: string, sourceType: string, feedName?: string): RawHorizonItem => ({

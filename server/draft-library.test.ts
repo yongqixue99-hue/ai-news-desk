@@ -8,6 +8,39 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createWorkflowBackup, verifyWorkflowBackup } from "./data-management.js";
+import { pendingDeliveryBatchJobs } from "./delivery-batch-desk.js";
+import type { DeliveryBatch } from "./delivery-batch-types.js";
+
+const deliveryBatch = (targets: DeliveryBatch["targets"]): DeliveryBatch => ({
+  id: "delivery", createdAt: "2026-10-02T00:00:00Z", expiresAt: "2026-10-02T00:10:00Z",
+  draftUpdatedAt: "2026-10-02T00:00:00Z", targets,
+});
+
+test("bulk deletion rejects an in-flight unified delivery before cancelling or deleting any draft", () => {
+  const state = createDefaultState();
+  const sending = createBlankDraftInState(state), waiting = createBlankDraftInState(state);
+  sending.deliveryBatches = [deliveryBatch([{ platform: "wechat", revisionHash: "saved", status: "sending", detail: "in flight" }])];
+  waiting.deliveryBatches = [deliveryBatch([{ platform: "xiaoheihe", revisionHash: "saved", status: "waiting-connection", detail: "waiting" }])];
+  const before = structuredClone(state);
+  assert.throws(() => trashDraftsInState(state, state.drafts.map(({ id, updatedAt }) => ({ id, updatedAt }))), /正在交付/);
+  assert.deepEqual(state, before);
+});
+
+test("deletion cancels queued unified deliveries, preserves results and cannot resend after restore", () => {
+  const state = createDefaultState(), draft = createBlankDraftInState(state);
+  draft.deliveryBatches = [deliveryBatch([
+    { platform: "wechat", revisionHash: "saved", status: "queued", detail: "waiting" },
+    { platform: "xiaoheihe", revisionHash: "saved", status: "waiting-connection", detail: "waiting" },
+    { platform: "zhihu", revisionHash: "saved", status: "waiting-login", detail: "waiting" },
+    { platform: "baijiahao", revisionHash: "saved", status: "reported", detail: "received", receiptId: "receipt" },
+    { platform: "toutiao", revisionHash: "saved", status: "unknown", detail: "unknown" },
+  ])];
+  trashDraftsInState(state, [{ id: draft.id, updatedAt: draft.updatedAt }]);
+  const restored = restoreDraftFromTrashInState(state, draft.id);
+  assert.deepEqual(restored.deliveryBatches?.[0].targets.map(target => target.status), ["cancelled", "cancelled", "cancelled", "reported", "unknown"]);
+  assert.equal(restored.deliveryBatches?.[0].targets[3].receiptId, "receipt");
+  assert.deepEqual(pendingDeliveryBatchJobs(state), []);
+});
 
 test("blank drafts remain independent, human authored and recoverable after upgrading", () => {
   const state = createDefaultState();

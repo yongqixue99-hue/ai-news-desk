@@ -986,6 +986,18 @@ export class LocalDatabase {
     `).get(type, subjectId));
   }
 
+  /** Filter before limiting so collection events cannot hide the user's edit observations. */
+  queryWorkflowEvents(type: string, options: { since: string; through: string; draftId?: string; limit?: number }) {
+    const limit = Math.max(1, Math.min(10_000, Math.floor(options.limit ?? 10_000)));
+    const where = "type = ? AND julianday(created_at) >= julianday(?) AND julianday(created_at) <= julianday(?)"
+      + (options.draftId ? " AND json_extract(payload_json, '$.draftId') = ?" : "");
+    const parameters = [type, options.since, options.through, ...(options.draftId ? [options.draftId] : [])];
+    const total = Number((this.db.prepare(`SELECT COUNT(*) AS count FROM workflow_events WHERE ${where}`).get(...parameters) as { count: number }).count);
+    const rows = this.db.prepare(`SELECT * FROM workflow_events WHERE ${where} ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(...parameters, limit) as unknown as Array<{ id: string; type: string; subject_type: string; subject_id: string; payload_json: string | null; created_at: string }>;
+    const events: WorkflowEventRecord[] = rows.map(row => ({ id: row.id, type: row.type, subjectType: row.subject_type, subjectId: row.subject_id, payload: parseJson(row.payload_json), createdAt: row.created_at }));
+    return { events, total, truncated: total > events.length };
+  }
+
   pruneOperationalHistory(input: {
     terminalJobsOlderThan: string;
     workflowEventsOlderThan: string;

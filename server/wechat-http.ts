@@ -9,6 +9,7 @@ interface WeChatHttpGatewayOptions {
   appSecret: string;
   fetcher?: typeof fetch;
   clock?: () => number;
+  signal?: AbortSignal;
 }
 
 interface WeChatResponseError {
@@ -50,6 +51,7 @@ export const createWeChatHttpGateway = (
 ): WeChatDraftGateway => {
   const fetcher = options.fetcher ?? fetch;
   const clock = options.clock ?? Date.now;
+  const signalFor = (ms: number) => options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
   let cachedToken: { value: string; expiresAt: number } | undefined;
 
   const accessToken = async () => {
@@ -63,7 +65,7 @@ export const createWeChatHttpGateway = (
         secret: options.appSecret,
         force_refresh: false,
       }),
-      signal: AbortSignal.timeout(20_000),
+      signal: signalFor(20_000),
     });
     const payload = await responseJson<{ access_token?: string; expires_in?: number }>(response);
     if (!payload.access_token) throw new Error("微信没有返回 access_token");
@@ -94,7 +96,7 @@ export const createWeChatHttpGateway = (
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
+      signal: signalFor(30_000),
     });
     return responseJson<T>(response);
   };
@@ -108,7 +110,7 @@ export const createWeChatHttpGateway = (
     countDrafts: async () => {
       const response = await fetcher(await authenticatedUrl("/cgi-bin/draft/count"), {
         method: "GET",
-        signal: AbortSignal.timeout(20_000),
+        signal: signalFor(20_000),
       });
       const payload = await responseJson<{ total_count?: number }>(response);
       if (!Number.isInteger(payload.total_count) || Number(payload.total_count) < 0) throw new Error("微信没有返回有效的草稿接口检查结果");
@@ -118,7 +120,7 @@ export const createWeChatHttpGateway = (
       const response = await fetcher(await authenticatedUrl("/cgi-bin/media/uploadimg"), {
         method: "POST",
         body: imageForm(asset),
-        signal: AbortSignal.timeout(30_000),
+        signal: signalFor(30_000),
       });
       const payload = await responseJson<{ url?: string }>(response);
       if (!payload.url) throw new Error("微信没有返回正文图片地址");
@@ -128,7 +130,7 @@ export const createWeChatHttpGateway = (
       const response = await fetcher(await authenticatedUrl("/cgi-bin/material/add_material", { type: "image" }), {
         method: "POST",
         body: imageForm(asset),
-        signal: AbortSignal.timeout(30_000),
+        signal: signalFor(30_000),
       });
       const payload = await responseJson<{ media_id?: string; url?: string }>(response);
       if (!payload.media_id) throw new Error("微信没有返回封面素材 media_id");

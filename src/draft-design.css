@@ -90,6 +90,31 @@
 .draft-page-refined .external-writer-bridge:not([open]) { margin-bottom: 8px; }
 .draft-page-refined .external-writer-bridge p { font-size: 12px; }
 .draft-page-refined .agent-mode-switch { margin-top: 8px; }
+.ai-style-panel { margin: 13px 15px 17px; padding: 18px; border: 1px solid #e7e1d7; border-radius: 8px; background: #fffdf9; }
+.ai-style-heading { display: flex; align-items: center; justify-content: space-between; color: #ca4b38; }
+.ai-style-heading span { display: block; font-size: 9px; font-weight: 700; letter-spacing: .13em; }
+.ai-style-heading h3 { margin: 4px 0 0; color: #2c332b; font-size: 17px; }
+.ai-style-panel > p { margin: 12px 0; color: #6d746a; font-size: 11px; line-height: 1.7; }
+.ai-style-key-setup { display: grid; gap: 8px; }
+.ai-style-key-setup label { font-size: 11px; font-weight: 650; }
+.ai-style-key-setup input { min-width: 0; height: 36px; padding: 8px 10px; border: 1px solid #d7d9d1; border-radius: 4px; background: #fff; }
+.ai-style-key-setup .secondary-button, .ai-style-actions .secondary-button { width: fit-content; min-height: 32px; font-size: 11px; }
+.ai-style-panel small { color: #92998f; font-size: 10px; line-height: 1.6; }
+.ai-style-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.ai-style-actions .secondary-button { display: inline-flex; align-items: center; gap: 6px; }
+.ai-style-error, .ai-style-stale { padding: 9px 10px; border-radius: 4px; background: #fff2ee; color: #a74835 !important; }
+.ai-style-result { margin-top: 16px; padding-top: 15px; border-top: 1px solid #ebece5; }
+.ai-style-overall { display: flex; align-items: center; gap: 15px; }
+.ai-style-overall > strong { color: #c74a37; font-family: Georgia, serif; font-size: 48px; font-weight: 400; line-height: 1; }
+.ai-style-overall > strong small { margin-left: 3px; font-family: sans-serif; font-size: 12px; }
+.ai-style-overall > span { display: grid; gap: 3px; color: #323a30; font-size: 12px; font-weight: 650; }
+.ai-style-overall > span small { font-weight: 400; }
+.ai-style-dimensions { display: grid; gap: 13px; margin: 16px 0; }
+.ai-style-dimension-head { display: flex; justify-content: space-between; font-size: 11px; }
+.ai-style-dimension-head span { color: #bf4c3a; }
+.ai-style-meter { height: 4px; margin: 6px 0; background: #e9ece5; }
+.ai-style-meter > span { display: block; height: 100%; background: #d8624f; }
+.ai-style-dimensions p { margin: 5px 0 2px; color: #6b756a; font-size: 10px; line-height: 1.5; }
 .draft-page-refined .drawer-empty { font-size: 12px; }
 /* A drawer overlays only when preserving the article width requires it. */
 @container (max-width: 1100px) {

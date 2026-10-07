@@ -66,6 +66,18 @@ test("article material collection continues beyond two cached covers and include
   assert.equal(fixture.calls.generate, 0);
 });
 
+test("a timed-out image read cannot persist late assets or begin screenshot fallbacks", async () => {
+  const controller = new AbortController();
+  const fixture = memoryDependencies({ extracted: [] });
+  fixture.dependencies.extract = async () => {
+    controller.abort(new Error("image job timed out"));
+    return page([image("late-image")]);
+  };
+  await assert.rejects(runVisualHydration("story-test", 2, fixture.dependencies, { scope: "article", signal: controller.signal }), /image job timed out/);
+  assert.equal(fixture.images().length, 0);
+  assert.equal(fixture.calls.capture + fixture.calls.generate + fixture.calls.localize, 0);
+});
+
 const page = (images: SourceImage[]): ExtractedPage => ({
   url: signal.url,
   canonicalUrl: signal.url,

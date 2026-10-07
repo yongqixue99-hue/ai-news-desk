@@ -7,6 +7,8 @@ import {
   isCurrentDraftOperation,
   acknowledgedDraftTimestamp,
   mergeSavedDraftMetadata,
+  mergeDeliveryDraftMetadata,
+  isDeliveryAcknowledgement,
   persistDraftRecoverySnapshot,
   restoreDraftFromRecovery,
   switchDraftSafely,
@@ -42,6 +44,21 @@ const memoryStorage = (): DraftRecoveryStorage => {
     removeItem: (key) => { values.delete(key); },
   };
 };
+
+test("delivery acknowledgement preserves newer typing and ignores unrelated remote document changes", () => {
+  const sent = draft();
+  const latest = draft({ updatedAt: "2026-10-02T01:00:00Z", status: "filled", deliveryBatches: [] });
+  assert.equal(isDeliveryAcknowledgement(latest, sent), true);
+  const typed = draft({ title: "发送期间继续输入的标题" });
+  const merged = mergeDeliveryDraftMetadata(typed, latest, sent, latest.updatedAt)!;
+  assert.equal(merged.title, typed.title);
+  assert.equal(merged.status, typed.status);
+  assert.equal(merged.updatedAt, latest.updatedAt);
+  assert.deepEqual(merged.deliveryBatches, []);
+  assert.equal(mergeDeliveryDraftMetadata(sent, latest, sent)?.status, "filled");
+  assert.equal(mergeDeliveryDraftMetadata(typed, draft({ title: "其他窗口新正文" }), sent), typed);
+  assert.equal(mergeDeliveryDraftMetadata(draft({ id: "other" }), latest, sent)?.id, "other");
+});
 
 test("dirty draft is flushed before switching to another draft", async () => {
   const events: string[] = [];

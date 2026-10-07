@@ -72,6 +72,8 @@ export interface ExtensionPublisherJob {
   contentFormat: "article" | "image-post";
   title: string;
   bodyHtml: string;
+  /** Text and image bytes only: changing topics/cover should not re-upload the article. */
+  contentHash?: string;
   community: string;
   communities?: string[];
   publishing?: { contentFormat?: "article" | "image-post"; visibility: "public"; creationPlan: "none" | "standard" | "hot"; cover?: ExtensionPublisherImage };
@@ -300,13 +302,17 @@ export const prepareJob = async (draft: ArticleDraft, _editorUrl: string): Promi
       dataUrl: `data:${inspected.contentType};base64,${inspected.bytes.toString("base64")}`, caption: placement.caption };
   }
   if (selection && selection.options.creationPlan !== "none" && !cover) throw new Error("参加创作计划需要选择封面");
+  const images = await jobImages(draft);
+  const bodyHtml = draft.contentFormat === "image-post" ? publisherImagePostBodyHtml(draft) : publisherBodyHtml(draft);
+  const contentHash = createHash("sha256").update(JSON.stringify({ title: draft.title, bodyHtml,
+    images: images.map(image => ({ id: image.id, caption: image.caption, sha256: createHash("sha256").update(image.dataUrl).digest("hex") })) })).digest("hex");
   return {
     id: `publish_${randomUUID()}`, draftId: draft.id, createdAt: new Date().toISOString(),
     editorUrl: draft.contentFormat === "image-post" ? imagePostEditorUrl : previousArticleEditor(draft) ?? XIAOHEIHE_ARTICLE_EDITOR_URL,
     contentFormat: draft.contentFormat === "image-post" ? "image-post" : "article",
-    title: draft.title, bodyHtml: draft.contentFormat === "image-post" ? publisherImagePostBodyHtml(draft) : publisherBodyHtml(draft),
+    title: draft.title, bodyHtml, contentHash,
     community: selection?.community ?? draft.community.trim(), communities: selection?.communities,
-    topics: selection?.topics ?? normalizePublisherTopics(draft.topics), images: await jobImages(draft),
+    topics: selection?.topics ?? normalizePublisherTopics(draft.topics), images,
     publishing: selection ? { contentFormat: draft.contentFormat ?? "article", visibility: "public", creationPlan: selection.options.creationPlan, cover } : undefined,
   };
 };

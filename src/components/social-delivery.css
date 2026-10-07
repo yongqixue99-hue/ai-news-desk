@@ -24,6 +24,12 @@
 .social-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:12px 0;font-size:11px}
 .social-open{display:inline-flex;align-items:center;gap:5px;border:0;padding:5px 0;color:#5a6158;background:none;cursor:pointer;font-size:11px}
 .social-limit-note{border-left:2px solid #d9b378;padding-left:10px}
+.social-variants{margin:0 0 18px;padding:12px 0;border-block:1px solid var(--line,#ddd);font-size:12px}
+.social-variants summary{cursor:pointer;font-weight:600}.social-variants summary span{margin-left:8px;font-size:11px;font-weight:400;color:var(--text-secondary,#686d67)}
+.social-variants fieldset{border:0;border-top:1px solid var(--line,#ddd);padding:12px 0 0;margin:12px 0 0;min-width:0;display:grid;gap:10px}
+.social-variants legend{font-weight:600;padding-right:8px}.social-variants label{display:grid;gap:6px;font-size:11px;color:var(--text-secondary,#686d67)}
+.social-variants input,.social-variants select{box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--line,#ddd);border-radius:4px;background:var(--surface,#fff);color:var(--text,#25282d);padding:9px;font-size:12px}
+.social-variants input:focus-visible,.social-variants select:focus-visible{outline:2px solid var(--accent,#bc352d);outline-offset:2px}
 .social-progress{margin:20px 0 0;padding-top:16px;border-top:1px solid var(--line,#ddd)}
 .social-progress-heading{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:12px}
 .social-progress-heading button{border:0;background:none;color:#9c4138;font-size:11px;cursor:pointer;padding:4px}

@@ -267,6 +267,8 @@
 .quality-review-issue { border-left: 2px solid #ba462c; padding-left: 10px; }
 .edit-observation { padding: 20px 18px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .edit-observation summary { cursor: pointer; font-weight: 600; }
+.rework-summary { margin-top: 14px; padding: 12px; background: var(--surface-alt, #f7f7f5); border: 1px solid var(--line); border-radius: 4px; }
+.rework-summary strong { font-size: 12px; }.rework-summary p { margin: 8px 0; font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }.rework-summary small { color: var(--text-secondary, #686d67); font-size: 11px; line-height: 1.6; }
 .edit-observation form { display: grid; gap: 12px; margin-top: 10px; }
 .edit-observation fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 1px solid var(--border, #ddd); padding: 12px; }
 .edit-observation label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

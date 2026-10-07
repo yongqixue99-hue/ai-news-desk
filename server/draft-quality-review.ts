@@ -6,10 +6,10 @@ import type { LocalDatabase } from "./local-database.js";
 import type { ContentPackage } from "./product-types.js";
 import type { ArticleDraft } from "./types.js";
 type Store = Pick<LocalDatabase,"getContentPackage" | "getSourceSnapshot">;
-export const reviewDraftQuality = (draft: ArticleDraft, store: Store) => {
+export const reviewDraftQuality = (draft: ArticleDraft, store: Store, options: { deliveryTitle?: string } = {}) => {
   const contentPackage = draft.provenance.contentPackageId ? store.getContentPackage<ContentPackage>(draft.provenance.contentPackageId) : undefined;
   const binding = bindDraftCheck(draft, contentPackage);
-  const report = contentPackage ? evaluateDraftPackageQuality({ draft, contentPackage }) : undefined;
+  const report = contentPackage ? evaluateDraftPackageQuality({ draft: options.deliveryTitle === undefined ? draft : { ...draft, title: options.deliveryTitle }, contentPackage }) : undefined;
   const changes = contentPackage ? sourceChangesForPackage(contentPackage, store).map(change => ({ ...change,
     reviewed: Boolean(draft.sourceChangeReviews?.some(review => review.url === change.url && review.observedHash === change.observedHash && review.packageHash === binding.packageHash && review.documentHash === binding.documentHash)) })) : [];
   const blockers = [...(report?.blockers.map(issue => issue.message) ?? []),

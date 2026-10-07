@@ -923,6 +923,23 @@ export interface WeChatDraftMetadata {
   coverPlacementId?: string;
 }
 
+/** Delivery-only overrides; the editorial document and its original title stay intact. */
+export type SocialDraftMetadata = Partial<Record<import("./social-delivery-types.js").SocialPlatform, {
+  title?: string;
+  coverPlacementId?: string;
+}>>;
+
+/** Hashes recorded before the write allow read-only recovery after a lost response. */
+export interface WeChatWriteCheckpoint {
+  remoteContentFingerprint: string;
+  remoteFingerprintVersion: "v2";
+  contentHash: string;
+  sentDigest: string;
+  imageCount: number;
+  coverPlacementId: string;
+  localDraftUpdatedAt: string;
+}
+
 export interface WeChatSyncAttempt {
   id: string;
   appId: string;
@@ -932,6 +949,7 @@ export interface WeChatSyncAttempt {
   mediaId?: string;
   status: "sending" | "unknown" | "failed" | "complete" | "not-received";
   detail?: string;
+  checkpoint?: WeChatWriteCheckpoint;
 }
 
 export interface WeChatDraftSyncReceipt {
@@ -942,6 +960,8 @@ export interface WeChatDraftSyncReceipt {
   verifiedAt?: string;
   remoteFingerprint?: string;
   remoteContentFingerprint?: string;
+  /** Missing on legacy receipts, whose fingerprint compared text and images only. */
+  remoteFingerprintVersion?: "v1" | "v2";
   sentDigest?: string;
   draftId: string;
   mediaId: string;
@@ -1046,6 +1066,8 @@ export interface XiaoheihePublishOptions {
 }
 
 export interface ArticleDraft {
+  socialMetadata?: SocialDraftMetadata;
+  deliveryBatches?: import("./delivery-batch-types.js").DeliveryBatch[];
   xiaoheiheOptions?: XiaoheihePublishOptions;
   socialDeliveries?: import("./social-delivery-types.js").SocialDeliveryReceipt[];
   socialDeliveryBatches?: import("./social-delivery-types.js").SocialDeliveryBatch[];
@@ -1160,6 +1182,7 @@ export interface DraftGenerationAttempt {
 export type DraftSaveMode = "auto" | "manual";
 
 export interface DraftRevisionSnapshot {
+  socialMetadata?: SocialDraftMetadata;
   xiaoheiheOptions?: XiaoheihePublishOptions;
   wechatMetadata?: WeChatDraftMetadata;
   sourceChangeReviews?: ArticleDraft["sourceChangeReviews"];
