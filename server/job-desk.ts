@@ -127,7 +127,12 @@ export const createJobDesk = ({
             const timestamp = now();
             const suspendedMs = timestamp - watchedAt - Math.max(5, watchdogMs);
             watchedAt = timestamp;
-            if (suspendedMs >= Math.max(1, suspendGapMs)) { startedAt += suspendedMs; progressedAt += suspendedMs; }
+            if (suspendedMs >= Math.max(1, suspendGapMs)) {
+              startedAt += suspendedMs;
+              progressedAt += suspendedMs;
+              database.recordWorkflowEvent({ type: "job.suspended", subjectType: "job", subjectId: job.id,
+                payload: { jobType: job.type, suspendedMs, stage: lastStage } });
+            }
             const idle = timestamp - progressedAt >= Math.max(1, progressTimeoutMs);
             const expired = timestamp - startedAt >= Math.max(1, totalTimeoutMs);
             if (!idle && !expired) return;

@@ -692,7 +692,7 @@ export const executeCollection = async (runId: string, options: { signal?: Abort
         }, { createdAt: timestamp });
       }
       for (const source of state.sources.filter((entry) => selectedSources.some((selected) => selected.id === entry.id))) {
-        applySourceCollectionFailure(source, { cancelled, sourcesRead, message, at: timestamp });
+        applySourceCollectionFailure(source, { cancelled, sourcesRead, jobAborted: Boolean(options.signal?.aborted), message, at: timestamp });
       }
     });
     if (!cancelled) throw error;

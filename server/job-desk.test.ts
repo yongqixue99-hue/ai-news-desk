@@ -345,5 +345,8 @@ test("time spent while the computer was asleep does not count as a stalled job",
     // The watchdog timer is unref'd; waiting on its next tick keeps the loop alive until it fails the job.
     await Promise.all([tick, watchdogTick()]);
     assert.match(database.getJob(job.id)?.error ?? "", /长时间没有实际进展/);
+    const suspensions = database.listWorkflowEvents().filter((event) => event.type === "job.suspended" && event.subjectId === job.id);
+    assert.equal(suspensions.length, 1);
+    assert.deepEqual(suspensions[0].payload, { jobType: "slow", suspendedMs: 979_995, stage: "采集原始条目" });
   } finally { clock += 10_000; await Promise.all([tick, new Promise(resolve => setTimeout(resolve, 20))]); desk.stop(); database.close(); await rm(root, { recursive: true, force: true }); }
 });
