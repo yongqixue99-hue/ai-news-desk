@@ -20,10 +20,11 @@ export function TopicRadar({rows,busy,onOpen,onQueue,onRetain}: Props) {
         <div className="radar-meta"><span>{String(index+1).padStart(2,'0')}</span><span>{sourceNames(row).slice(0,2).join(' · ')}{row.sources.length>2?` 等 ${row.sources.length} 条来源`:''}</span><time dateTime={row.publishedAt}>{row.dateLabel} {new Date(row.publishedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</time></div>
         <h3>{row.story?<button type="button" aria-label={`查看 ${row.title}`} onClick={()=>onOpen(row.story!)}>{row.title}</button>:<a href={row.sources[0]?.url} target="_blank" rel="noreferrer">{row.title}</a>}</h3>
         {row.story && row.story.originalTitle && row.story.originalTitle !== row.title ? <p className="radar-original-title" lang="en">{row.story.originalTitle}</p> : null}
-        <p className="radar-reason">{row.reason}</p>
-        <details className="radar-evidence"><summary>摘要与来源</summary><p>{row.summary || '来源未提供摘要，请打开原文核对。'}</p><ul>{row.sources.map(source=><li key={`${source.name}:${source.url}`}><a href={source.url} target="_blank" rel="noreferrer">{source.name}<ExternalLink size={12}/></a></li>)}</ul><small>{row.story?'材料状态沿用原有证据规则。':'聚合摘要只作选题线索，留作选题后核验原文。'} 多处收录不等于独立证实。</small></details>
+        {row.brief ? <p className="radar-brief">{row.brief}</p> : null}
+        <span className="radar-label">{row.label}</span>
+        <details className="radar-evidence"><summary>摘要与来源</summary><p>{row.summary || '来源未提供摘要，请打开原文核对。'}</p><p className="radar-reason">{row.reason}</p><ul>{row.sources.map(source=><li key={`${source.name}:${source.url}`}><a href={source.url} target="_blank" rel="noreferrer">{source.name}<ExternalLink size={12}/></a></li>)}</ul><small>{row.story?'材料状态沿用原有证据规则。':'聚合摘要只作选题线索，留作选题后核验原文。'} 多处收录不等于独立证实。</small></details>
       </div>
-      <div className="radar-status"><span className={row.status==='ready'?'radar-ready':''}>{row.status==='ready'?'可进入成稿':'待核对线索'}</span><small>{row.heat}</small></div>
+      <div className="radar-status"><span className={row.status==='ready'?'radar-ready':''}>{row.status==='ready'?'可进入成稿':'待核对线索'}</span>{row.heat && row.heat !== '热度未知' ? <small>{row.heat}</small> : null}</div>
       <div className="radar-actions">{row.story?<button type="button" className="text-button" onClick={()=>onOpen(row.story!)}>阅读核对</button>:null}
         <button type="button" className="text-button" disabled={busy || Boolean(saving) || row.selected} onClick={()=>{
           if(row.story) onQueue(row.story,true);

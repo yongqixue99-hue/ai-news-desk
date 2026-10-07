@@ -22,6 +22,33 @@ const story = () => {
   return buildStories(state,now)[0]!;
 };
 
+test("radar exposes a real Chinese brief and the existing opportunity label", () => {
+  const original = story();
+  original.title = "示例模型开放本地运行";
+  original.summary = "开发者可以下载权重，在自己的电脑上运行模型。";
+  const before = structuredClone(original);
+  const row = buildTopicRadar([original], [], now)[0]!;
+  assert.equal(row.brief, original.summary);
+  assert.equal(row.label, original.opportunity!.label);
+  assert.deepEqual(original, before);
+});
+
+test("radar suppresses non-Chinese briefs and normalized title repetitions", () => {
+  const original = story();
+  original.title = "示例模型支持本地运行";
+  for (const summary of [original.title, "示例 模型，支持本地运行。", `新增能力：${original.title}`, "API and weights released."]) {
+    original.summary = summary;
+    assert.equal(buildTopicRadar([original], [], now)[0]!.brief, "", summary);
+  }
+});
+
+test("display additions preserve shortlist IDs, ordering and selection", () => {
+  const entries = Array.from({ length: 12 }, (_, i) => entry(String(i), { title: `Vendor${i} releases Model ${i}.5`, selected: i === 2 }));
+  const rows = buildTopicRadar([], entries, now);
+  assert.deepEqual(rows.map(row => row.id), ["0", "1", "10", "11", "2", "3", "4", "5"].map(id => `aggregation:${id}`));
+  assert.deepEqual(rows.map(row => [row.status, row.selected]), rows.map(row => ["verify", row.aggregationId === "2"]));
+});
+
 test('radar merges an aggregate copy with the original Story without upgrading evidence', () => {
   const original=story(); const before=structuredClone(original);
   const result=buildTopicRadar([original],[entry('copy',{url:original.signals[0]!.url})],now);
