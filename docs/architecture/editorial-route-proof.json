@@ -1,0 +1,58 @@
+[
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/intakes/url",
+    "bytes": 573,
+    "sha256": "958a74e441c67539e3d905332b662e1252e4889a4fea831387d413eaecfb8c5d"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/intakes/screenshot",
+    "bytes": 908,
+    "sha256": "1d20ac19b0ae306627c01f7e6d1cdc16a158d206bc6ea8f1d6c165aeab79eb23"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/intakes/reviews",
+    "bytes": 134,
+    "sha256": "d1ce460bcad1b867c3a8a7fe95088e13682fc878bd2f0bfaa6abcd541e52d9f4"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/intakes/reviews/:reviewId/confirm",
+    "bytes": 748,
+    "sha256": "3c8b1945e2414a72aa8e2db4fa10c106d9edc56977b98eb83668786d8c6d9d2e"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/runs/:runId/candidates/:candidateId/community-draft",
+    "bytes": 1157,
+    "sha256": "6294249555ed106a9eb5e910abbadddbf30030ddd0944860c17be3745adc19b9"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/runs/:runId/generate",
+    "bytes": 428,
+    "sha256": "4d19457b5b93bdb229f51aeb275b179f5074c9cd4778c21334a9aa3b310f6cdc"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/intakes/x-post",
+    "bytes": 679,
+    "sha256": "22f067571ed21bdbc7f3f10299996dda43faa3ff33878d1d3be72d605aba3786"
+  }
+]
