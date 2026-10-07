@@ -15,7 +15,7 @@
 | src/components/source-radar.css | [#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25) | 4752→4752 | 0 | 431730→431730 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
 | src/settings-design.css | [#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26) | 18164→18164 | 0 | 431730→431730 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
 | src/draft-design.css | [#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27) | 25927→25927 | 0 | 431730→431730 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
-| src/xiaoheihe-delivery.css | 待建PR | 6228→6228 | 0 | 431730→431730 | 48/48，像素差异0 | 单测1367/1367、编辑22/22、构建通过、E2E13/13 |
+| src/xiaoheihe-delivery.css | [#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28) | 6228→6228 | 0 | 431730→431730 | 48/48，像素差异0 | 单测1367/1367、编辑22/22、构建通过、E2E13/13 |
 
 保留所有没有充分证据能删除的规则。零删除同样是完整审查结果。
 
