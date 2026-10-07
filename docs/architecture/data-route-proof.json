@@ -1,0 +1,50 @@
+[
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/data/export",
+    "bytes": 317,
+    "sha256": "ca8dc2f8b993ef6749af42db046a5cf7fac18f81e53d5e69ae48ef27ab480579"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/data/archive",
+    "bytes": 913,
+    "sha256": "e948eef914bea44647c7f2f5609b24e386625a5959bf6e68cbd17be73ece27ba"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/data/archive/inspect",
+    "bytes": 1241,
+    "sha256": "2f6b4e6e97f7b433b7c8a0a57038b100c81dddc3d59d12ac305f45e359ac123b"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/data/archive/import",
+    "bytes": 1934,
+    "sha256": "fd79461429df6fd2ae42259badaf5b53ad5b9454ce811ab8ca506849ae744f0b"
+  },
+  {
+    "dependencyReferences": 0,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/data/storage",
+    "bytes": 141,
+    "sha256": "850e46ba4adcb55d99c2243ff804cd6f4d638ee7b792de5ee857ceb8e779383e"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/data/restore",
+    "bytes": 904,
+    "sha256": "936438aeee11313504d2cba2dbb8c228846cba68f9e93f25c4e704f4a99f502a"
+  }
+]
