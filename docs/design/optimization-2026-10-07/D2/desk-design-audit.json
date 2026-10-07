@@ -1,0 +1,26 @@
+{
+  "file": "src/desk-design.css",
+  "beforeBytes": 30584,
+  "afterBytes": 29243,
+  "removedSelectors": [
+    ".sidebar-profile strong",
+    ".sidebar-profile small",
+    ".sidebar-profile",
+    ".sidebar-profile > span",
+    ".today-metrics",
+    ".today-metrics > div",
+    ".today-metrics > div:first-child",
+    ".today-metrics > div:last-child",
+    ".today-metrics svg",
+    ".today-metrics span",
+    ".today-metrics strong",
+    ".today-metrics > div",
+    ".today-metrics svg",
+    ".today-metrics > div:first-child",
+    ".today-metrics > div:last-child",
+    ".today-metrics",
+    ".today-metrics svg",
+    ".today-metrics span",
+    ".today-metrics strong"
+  ]
+}

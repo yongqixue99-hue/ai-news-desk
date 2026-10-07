@@ -47,7 +47,8 @@ try {
       console.log(`capture ${item.name}-${width}`);
       await page.locator(".page, .aggregation-page").first().waitFor();
       if (item.action) await item.action(page);
-      await page.waitForTimeout(100);
+      await page.waitForTimeout(500);
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const name = `${item.name}-${width}.png`;
       const overflow = await capturePreview(page, path.join(destination, name), true);
       assert.deepEqual(errors, [], `${name}: ${errors.join(" | ")}`);
