@@ -1,0 +1,9 @@
+{
+  "file": "src/reader-design.css",
+  "beforeBytes": 23991,
+  "afterBytes": 23745,
+  "removedSelectors": [
+    ".today-release-highlights",
+    ".today-release-highlights"
+  ]
+}
