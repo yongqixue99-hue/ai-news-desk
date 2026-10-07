@@ -266,6 +266,7 @@ import { registerPackageHttpRoutes1, registerPackageHttpRoutes2 } from "./packag
 import { registerEditorialHttpRoutes1, registerEditorialHttpRoutes2 } from "./editorial-http-routes.js";
 import { registerDraftHttpRoutes1, registerDraftHttpRoutes2, registerDraftHttpRoutes3 } from "./draft-http-routes.js";
 import { registerDeliveryHttpRoutes1, registerDeliveryHttpRoutes2, registerDeliveryHttpRoutes3, registerDeliveryHttpRoutes4 } from "./delivery-http-routes.js";
+import { registerLearningHttpRoutes1, registerLearningHttpRoutes2, registerLearningHttpRoutes3, registerLearningHttpRoutes4, registerLearningHttpRoutes5, registerLearningHttpRoutes6 } from "./learning-http-routes.js";
 
 const app = express();
 const zhihuHotlist = createZhihuHotlist({
@@ -410,72 +411,7 @@ registerPackageHttpRoutes1(app, httpRouteRuntime);
 
 registerStoryHttpRoutes4(app, httpRouteRuntime);
 
-app.post(
-  "/api/stories/:storyId/events",
-  asyncRoute(async (request, response) => {
-    const storyId = routeParam(request.params.storyId);
-    const type = typeof request.body?.type === "string" ? request.body.type : "";
-    if (!storyEventTypes.has(type)) {
-      response.status(400).json({ error: "不支持的 Story 行为事件" });
-      return;
-    }
-    const currentStory = storyById(await readState(), storyId);
-    if (!currentStory) {
-      response.status(404).json({ error: "Story 不存在" });
-      return;
-    }
-    if (type === "interested" || type === "not_interested") {
-      await updateState((state) => {
-        const story = storyById(state, storyId);
-        if (!story) return;
-        const primary = story.signals.find((signal) => !signal.isCommunity) ?? story.signals[0];
-        if (primary) {
-          recordCandidateFeedback(state, {
-            runId: primary.runId,
-            candidateId: primary.candidateId,
-            kind: type,
-          });
-        }
-        for (const signal of story.signals) {
-          const candidate = state.runs.find((run) => run.id === signal.runId)
-            ?.candidates.find((entry) => entry.id === signal.candidateId);
-          if (candidate) candidate.userFeedback = type;
-        }
-        reapplyPersonalizationToRuns(state);
-      });
-    }
-    const database = await getLocalDatabase();
-    const reason = typeof request.body?.reason === "string" ? request.body.reason.trim().slice(0, 500) : undefined;
-    const payload = request.body?.payload && typeof request.body.payload === "object"
-      ? request.body.payload as Record<string, unknown>
-      : undefined;
-    const event = database.recordFeedback({ type, subjectType: "story", subjectId: storyId, reason, payload });
-    database.recordWorkflowEvent({ type: `story.${type}`, subjectType: "story", subjectId: storyId, payload });
-    response.status(201).json({ event, story: storyById(await readState(), storyId) });
-  }),
-);
-
-app.delete(
-  "/api/stories/:storyId/feedback",
-  asyncRoute(async (request, response) => {
-    const storyId = routeParam(request.params.storyId);
-    const restored = await updateState((state) => {
-      const story = storyById(state, storyId);
-      if (!story) return undefined;
-      for (const signal of story.signals) restoreCandidateFeedback(state, signal.candidateId);
-      reapplyPersonalizationToRuns(state);
-      return storyById(state, storyId);
-    });
-    if (!restored) {
-      response.status(404).json({ error: "Story 不存在" });
-      return;
-    }
-    const database = await getLocalDatabase();
-    const event = database.recordFeedback({ type: "feedback_restored", subjectType: "story", subjectId: storyId });
-    database.recordWorkflowEvent({ type: "story.feedback_restored", subjectType: "story", subjectId: storyId });
-    response.json({ event, story: restored });
-  }),
-);
+registerLearningHttpRoutes1(app, httpRouteRuntime);
 
 registerStoryHttpRoutes5(app, httpRouteRuntime);
 
@@ -501,13 +437,7 @@ app.get(
   }),
 );
 
-app.get(
-  "/api/product/feedback",
-  asyncRoute(async (request, response) => {
-    const limit = Number(request.query.limit ?? 100);
-    response.json((await getLocalDatabase()).listFeedback(undefined, undefined, Number.isFinite(limit) ? limit : 100));
-  }),
-);
+registerLearningHttpRoutes2(app, httpRouteRuntime);
 
 app.get(
   "/api/events",
@@ -550,123 +480,7 @@ app.get(
   }),
 );
 
-app.get(
-  "/api/editorial-system",
-  asyncRoute(async (_request, response) => {
-    const database = await getLocalDatabase();
-    response.json({
-      ...buildEditorialSystemView(await readState()),
-      writingMemories: writingMemoryView(database, (await readState()).settings.writingMemoryEnabled),
-    });
-  }),
-);
-
-app.post("/api/editorial-memories/preview", asyncRoute(async (request,response) => {
-  const state=await readState();
-  const title=typeof request.body?.title === "string" ? request.body.title.slice(0,500) : "";
-  const intent=["news","community","source"].includes(request.body?.intent) ? request.body.intent : "news";
-  response.json(writingPreferencePlan(await getLocalDatabase(),{enabled:state.settings.writingMemoryEnabled,title,intent}));
-}));
-
-app.patch(
-  "/api/editorial-system/profile",
-  asyncRoute(async (request, response) => {
-    const patch = (request.body ?? {}) as Partial<EditorialProfile>;
-    const view = await updateState((state) => {
-      updateEditorialProfile(state, patch);
-      return buildEditorialSystemView(state);
-    });
-    response.json({ ...view, writingMemories: writingMemoryView(await getLocalDatabase(), (await readState()).settings.writingMemoryEnabled) });
-  }),
-);
-
-app.post(
-  "/api/editorial-system/suggestions/:suggestionId/decision",
-  asyncRoute(async (request, response) => {
-    const suggestionId = Array.isArray(request.params.suggestionId)
-      ? request.params.suggestionId[0]
-      : request.params.suggestionId;
-    const decision = request.body?.decision;
-    if (decision !== "adopted" && decision !== "ignored") {
-      response.status(400).json({ error: "请选择采纳或忽略" });
-      return;
-    }
-    const view = await updateState((state) => {
-      decideEditorialSuggestion(state, suggestionId, decision);
-      return buildEditorialSystemView(state);
-    });
-    response.json({ ...view, writingMemories: writingMemoryView(await getLocalDatabase(), (await readState()).settings.writingMemoryEnabled) });
-  }),
-);
-
-app.patch(
-  "/api/editorial-memories/:memoryId",
-  asyncRoute(async (request, response) => {
-    if (typeof request.body?.enabled !== "boolean") {
-      response.status(400).json({ error: "enabled 必须是布尔值" });
-      return;
-    }
-    const database = await getLocalDatabase();
-    const memory = database.setEditorialMemoryEnabled(routeParam(request.params.memoryId), request.body.enabled);
-    if (!memory) {
-      response.status(404).json({ error: "编辑记忆不存在" });
-      return;
-    }
-    database.recordWorkflowEvent({
-      type: request.body.enabled ? "writing_memory.enabled" : "writing_memory.disabled",
-      subjectType: "writing-memory",
-      subjectId: memory.id,
-    });
-    response.json(writingMemoryView(database, (await readState()).settings.writingMemoryEnabled));
-  }),
-);
-
-app.delete(
-  "/api/editorial-memories/:memoryId",
-  asyncRoute(async (request, response) => {
-    const database = await getLocalDatabase();
-    const memoryId = routeParam(request.params.memoryId);
-    if (!database.deleteEditorialMemory(memoryId)) {
-      response.status(404).json({ error: "编辑记忆不存在" });
-      return;
-    }
-    database.recordWorkflowEvent({
-      type: "writing_memory.deleted",
-      subjectType: "writing-memory",
-      subjectId: memoryId,
-    });
-    response.json(writingMemoryView(database, (await readState()).settings.writingMemoryEnabled));
-  }),
-);
-
-app.patch(
-  "/api/notifications/:notificationId/read",
-  asyncRoute(async (request, response) => {
-    const notificationId = Array.isArray(request.params.notificationId)
-      ? request.params.notificationId[0]
-      : request.params.notificationId;
-    const result = await updateState((state) => ({
-      notification: markWorkflowNotificationRead(state, notificationId),
-      notifications: state.notifications,
-    }));
-    if (!result.notification) {
-      response.status(404).json({ error: "通知不存在" });
-      return;
-    }
-    response.json(result.notifications);
-  }),
-);
-
-app.post(
-  "/api/notifications/read-all",
-  asyncRoute(async (_request, response) => {
-    const notifications = await updateState((state) => {
-      markAllWorkflowNotificationsRead(state);
-      return state.notifications;
-    });
-    response.json(notifications);
-  }),
-);
+registerLearningHttpRoutes3(app, httpRouteRuntime);
 
 app.get(
   "/api/data/export",
@@ -1265,65 +1079,7 @@ app.patch(
   }),
 );
 
-app.post(
-  "/api/runs/:runId/candidates/:candidateId/feedback",
-  asyncRoute(async (request, response) => {
-    const kind = request.body?.kind as CandidateFeedbackKind;
-    if (!(["interested", "not_interested"] as CandidateFeedbackKind[]).includes(kind)) {
-      response.status(400).json({ error: "候选反馈类型不正确" });
-      return;
-    }
-    const result = await updateState((state) => {
-      const run = state.runs.find((entry) => entry.id === request.params.runId);
-      const candidate = run?.candidates.find((entry) => entry.id === request.params.candidateId);
-      if (!run || !candidate) return undefined;
-      const feedback = recordCandidateFeedback(state, {
-        runId: run.id,
-        candidateId: candidate.id,
-        kind,
-      });
-      reapplyPersonalizationToRuns(state);
-      return {
-        feedback,
-        run: state.runs.find((entry) => entry.id === run.id),
-        feedbackCount: state.candidateFeedback.length,
-      };
-    });
-    if (!result?.feedback || !result.run) response.status(404).json({ error: "候选新闻不存在" });
-    else response.json(result);
-  }),
-);
-
-app.delete(
-  "/api/runs/:runId/candidates/:candidateId/feedback",
-  asyncRoute(async (request, response) => {
-    const result = await updateState((state) => {
-      const run = state.runs.find((entry) => entry.id === request.params.runId);
-      const candidate = run?.candidates.find((entry) => entry.id === request.params.candidateId);
-      if (!run || !candidate) return undefined;
-      restoreCandidateFeedback(state, candidate.id);
-      reapplyPersonalizationToRuns(state);
-      return {
-        run: state.runs.find((entry) => entry.id === run.id),
-        feedbackCount: state.candidateFeedback.length,
-      };
-    });
-    if (!result?.run) response.status(404).json({ error: "候选新闻不存在" });
-    else response.json(result);
-  }),
-);
-
-app.delete(
-  "/api/candidate-feedback",
-  asyncRoute(async (_request, response) => {
-    const result = await updateState((state) => {
-      const cleared = clearCandidateFeedback(state);
-      reapplyPersonalizationToRuns(state);
-      return { cleared, feedbackCount: state.candidateFeedback.length };
-    });
-    response.json(result);
-  }),
-);
+registerLearningHttpRoutes4(app, httpRouteRuntime);
 
 app.delete(
   "/api/runs/:runId/candidates",
@@ -1399,20 +1155,7 @@ app.post(
   }),
 );
 
-app.post("/api/drafts/:draftId/edit-observation", asyncRoute(async (request,response)=>{
-  const draft=(await readState()).drafts.find(draft=>draft.id===routeParam(request.params.draftId));
-  if(!draft){response.status(404).json({error:"草稿不存在"});return;}
-  response.json(recordEditObservation(await getLocalDatabase(),draft,request.body));
-}));
-app.get("/api/drafts/:draftId/rework", asyncRoute(async (request, response) => {
-  const draft = (await readState()).drafts.find(item => item.id === routeParam(request.params.draftId));
-  if (!draft) { response.status(404).json({ error: "草稿不存在" }); return; }
-  const observations = readReworkObservations(await getLocalDatabase(), { draftId: draft.id });
-  response.json({ changes: draftReworkChanges(draft), observations: summarizeReworkObservations(observations), window: observations.window });
-}));
-app.get("/api/source-changes", asyncRoute(async (_request, response) => {
-  response.json(affectedDraftsForSourceChanges((await readState()).drafts, await getLocalDatabase()));
-}));
+registerLearningHttpRoutes5(app, httpRouteRuntime);
 registerDraftHttpRoutes2(app, httpRouteRuntime);
 
 app.patch(
@@ -1672,14 +1415,7 @@ const openBatchPlatforms = async (platforms: DeliveryPlatform[]) => {
 const deliveryBatchDesk = createDeliveryBatchDesk({ read: readState, update: updateState, drivers: batchDrivers, open: openBatchPlatforms,
   pending: () => readStateProjection(pendingDeliveryBatchJobs) });
 registerDeliveryBatchRoutes(app, { desk: deliveryBatchDesk, read: readState, open: openBatchPlatforms });
-app.get("/api/workflow/performance", asyncRoute(async (request, response) => {
-  const days = Number(request.query.days ?? 30);
-  if (!Number.isInteger(days) || days < 1 || days > 365) { response.status(400).json({ error: "统计窗口应为 1–365 天" }); return; }
-  const urls = typeof request.query.url === "string" ? [request.query.url] : Array.isArray(request.query.url) ? request.query.url.filter((value): value is string => typeof value === "string") : [];
-  const now = new Date().toISOString();
-  const rework = readReworkObservations(await getLocalDatabase(), { days, now });
-  response.json(await readStateProjection(state => buildWorkflowPerformance(state, { days, now, benchmarkUrls: urls, rework })));
-}));
+registerLearningHttpRoutes6(app, httpRouteRuntime);
 
 registerDeliveryHttpRoutes4(app, httpRouteRuntime);
 

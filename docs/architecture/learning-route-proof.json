@@ -1,0 +1,146 @@
+[
+  {
+    "dependencyReferences": 4,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/stories/:storyId/events",
+    "bytes": 1972,
+    "sha256": "10b3b83485ecf99086372a7d6849c5cb973a6a555e13f1f91ba522283f21fc05"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "delete",
+    "path": "/api/stories/:storyId/feedback",
+    "bytes": 904,
+    "sha256": "ef8cf99478b1174cfd3ec79dbdc3adb561d1667c4b3be1237e6910a3e5e91caf"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/product/feedback",
+    "bytes": 262,
+    "sha256": "addba1d86ecc57ccee20046939e4bb1df709504bff5585f5fd60a7d194f38505"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/editorial-system",
+    "bytes": 321,
+    "sha256": "c2ae30daf4c319a74485694a60a8a466c3050348cbb2bc374aada3df511025d9"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/editorial-memories/preview",
+    "bytes": 449,
+    "sha256": "ce9307d0ed0350d79bbaa062a3e3a8a19b493a80ead7135ad76ca56fac28b126"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/editorial-system/profile",
+    "bytes": 458,
+    "sha256": "8b9cf15619cc3b2cc821991668b755c7bfd777e4ab0ef857779b80439d4acbb5"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/editorial-system/suggestions/:suggestionId/decision",
+    "bytes": 776,
+    "sha256": "7cdc3ff4a61f3df3c64cb5a83220d82af9a36ee92fea28e729e96961af7c1c60"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/editorial-memories/:memoryId",
+    "bytes": 815,
+    "sha256": "b51b14da31e8c545c65ddf5a9ff33d49a1cd383ebcb0fb3c475c6fd1293c0836"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "delete",
+    "path": "/api/editorial-memories/:memoryId",
+    "bytes": 594,
+    "sha256": "b89f00bb2320ccc9abd9c2ec736737d436bbc137ce6e55cf85af42dcc1cb4a97"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/notifications/:notificationId/read",
+    "bytes": 591,
+    "sha256": "94411a04c377fe0dcd40b63869551d75a09ef941fdac076a461b6ad7c7b3a4af"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/notifications/read-all",
+    "bytes": 276,
+    "sha256": "6489c13fcecc052b49bbcb0e4f7d040621f9db61d28b33aafaa77aaa77e9c99a"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/runs/:runId/candidates/:candidateId/feedback",
+    "bytes": 1125,
+    "sha256": "537057d278eb948f977c577ab041faa806fc8ef6dd83a85f3a61bcd7de04653e"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "delete",
+    "path": "/api/runs/:runId/candidates/:candidateId/feedback",
+    "bytes": 758,
+    "sha256": "3c6eb106bfbae47a10a7dba7fa5e1ef64f84d7f15779905a2245f49ee0c020e5"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "delete",
+    "path": "/api/candidate-feedback",
+    "bytes": 348,
+    "sha256": "b51328ac49ff6951a9fec0c223ece9fc8e6d09d412ee38b8c16c3989ffaf869b"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/edit-observation",
+    "bytes": 354,
+    "sha256": "4ecc90fee4cd0436ba445f16bb23deecff1192f2bdd5f86d5f7f5eea7f533c00"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/drafts/:draftId/rework",
+    "bytes": 512,
+    "sha256": "46346b920943c2db50de8579c278d002f2e7cd669c46a09d24322ab2b168077e"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/source-changes",
+    "bytes": 181,
+    "sha256": "efc0dcda22b863d293e77d340b20c9b2267e3ab34c3aedb621939c1884c82443"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/workflow/performance",
+    "bytes": 723,
+    "sha256": "21898e1ad4adb1e57044d81a641e7a33d9492e328a796a12dcdd4e6a57666e8c"
+  }
+]
