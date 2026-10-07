@@ -13,6 +13,15 @@ const source = (id: string, name: string, kind: SourceConfig["kind"]): SourceCon
   discoveryOnly: false,
 });
 
+test("job-level abort preserves every source health field even before reading finishes", () => {
+  const target = { ...source("official", "官网", "rss"), health: "healthy" as const, consecutiveFailures: 2,
+    lastCheckedAt: "2026-10-01T00:00:00Z", lastSuccessfulAt: "2026-09-30T00:00:00Z", lastHealthDetail: "上次成功" };
+  const before = structuredClone(target);
+  applySourceCollectionFailure(target, { cancelled: false, sourcesRead: false, jobAborted: true,
+    message: "任务被看门狗中止", at: "2026-10-07T00:00:00Z" });
+  assert.deepEqual(target, before);
+});
+
 test("late model failures and user cancellation do not poison successful source health", () => {
   for (const options of [{ cancelled: false, sourcesRead: true }, { cancelled: true, sourcesRead: false }]) {
     const healthy = { ...source("official", "官网", "rss"), health: "healthy" as const, consecutiveFailures: 0, lastCheckedAt: "2026-10-01T00:00:00Z", lastHealthDetail: "读取成功" };

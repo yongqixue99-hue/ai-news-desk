@@ -1,8 +1,8 @@
 import type { Candidate, CollectionSummary, RawHorizonItem, SourceConfig, SourceRouteResult, SourceRunResult, WorkflowRun } from "./types.js";
 
 /** Model/illustration failure is not evidence that a successfully read feed is broken. */
-export const applySourceCollectionFailure = (source: SourceConfig, input: { cancelled: boolean; sourcesRead: boolean; message: string; at: string }) => {
-  if (input.cancelled || input.sourcesRead) return;
+export const applySourceCollectionFailure = (source: SourceConfig, input: { cancelled: boolean; sourcesRead: boolean; jobAborted?: boolean; message: string; at: string }) => {
+  if (input.cancelled || input.sourcesRead || input.jobAborted) return;
   source.health = "error";
   source.lastCheckedAt = input.at;
   source.lastHealthDetail = input.message;
