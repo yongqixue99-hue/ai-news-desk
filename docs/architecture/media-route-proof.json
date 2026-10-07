@@ -1,0 +1,74 @@
+[
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/materials",
+    "bytes": 1661,
+    "sha256": "1aa9d4dd06a66da75b5af9d1767473f64d02afc4f57b46a3ccbcb36a9989a6b6"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/materials/from-url",
+    "bytes": 1884,
+    "sha256": "77377f5c3fb896d1d59473935d1d5b9c4c7e9b16586bf45dc750d6fad66a66c4"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "delete",
+    "path": "/api/materials/:materialId",
+    "bytes": 816,
+    "sha256": "f6f5318e727030d7920bc4160f863532055211623d593ab7409cf47fc6a74f6e"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/image-posts/from-screenshot",
+    "bytes": 1322,
+    "sha256": "7a333ead865b69800ad6e85d16291269212cb62ba9fbb15cf0691a5b2c412168"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/media",
+    "bytes": 933,
+    "sha256": "dbb8d45636d5f79ece0e725db4eaaf9bc1e1e519ba01d49587607ac503fc376b"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/media-from-url",
+    "bytes": 813,
+    "sha256": "0486e1829763c53c137b408b62b758d90caa16b4f4a3f29b1b63e1644f9e550d"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/materials/:materialId",
+    "bytes": 615,
+    "sha256": "1da966009792ba7d9a77bd70f0e93b0d8aa1bdad56df4bb195656914d506dd36"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/drafts/:draftId/published-images/material-status",
+    "bytes": 1055,
+    "sha256": "da531c714a90b7b29957fc7899995adcf8ac823a683f74fca97bfbfcba402a8c"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/drafts/:draftId/images/:placementId/save-material",
+    "bytes": 2803,
+    "sha256": "c7bf8177c9debf52859cb3ccbb7407b58308c96a977908129037e04bab21ca21"
+  }
+]
