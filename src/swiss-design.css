@@ -21,7 +21,6 @@ body { background: #fff; }
 .today-header p { color: var(--muted); }
 .today-edition { border-color: #242424; color: var(--muted); }
 .today-edition i { background: var(--accent); }
-.today-metrics strong { color: var(--text); }
 .today-metrics svg, .today-news-search-field svg { color: var(--muted); }
 .today-news-search-field, .today-news-search > button { border-radius: 3px; box-shadow: none; }
 .today-featured-list { border-top: 2px solid var(--text); }
@@ -41,8 +40,6 @@ body { background: #fff; }
 .desk-resume-list li { border-color: var(--line); }
 .desk-resume { box-shadow: none; }
 .nav-item.active:hover { background: #ffe7e5; }
-.sidebar-profile > span { background: #eee; }
-.today-release-highlights { margin-top: 0; margin-bottom: 30px; background: #fafafa; border-color: var(--line); }
 .release-highlights-list { grid-template-columns: 1fr; }
 .release-highlights-heading > span, .release-open { color: var(--accent); }
 .release-highlights-list > button { border-color: var(--line); background: #fff; }
@@ -407,7 +404,6 @@ body { background: #fff; }
 .today-story.compact .today-story-summary { font-size: 15px; }
 .today-story.compact .today-story-meta > span:last-child { display: inline-flex; white-space: normal; }
 .today-story.compact .today-story-meta { margin-top: 10px; }
-.nav-management { margin-top: 18px; padding-bottom: 4px; letter-spacing: 0; }
 .main-nav .nav-item-sources { margin-top: 0; }
 .rail-open { width: 100%; justify-content: space-between; min-height: 44px; }
 .rail-backdrop { position: fixed; z-index: 85; inset: 0; display: flex; justify-content: flex-end; background: #18181866; }

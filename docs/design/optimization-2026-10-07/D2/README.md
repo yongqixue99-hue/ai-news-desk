@@ -13,4 +13,10 @@
 
 | src/reader-design.css | [#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22) | 23991→23745 | 2 | 432366→432146 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
 
+| src/strategy-design.css | [#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23) | 7980→7788 | 2 | 432146→431978 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
+
+| src/swiss-design.css | [#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24) | 34061→33777 | 4 | 432146→431898 | 48/48，像素差异0 | 单测1365/1365、编辑22/22、构建通过、E2E13/13 |
+
 保留所有没有充分证据能删除的规则。零删除同样是完整审查结果。
+
+第5子批PR #23 的代码与检查均已完成，暂受GitHub合并接口服务端错误阻塞。各行体积是在该PR分支的真实构建上测量，未合并分支的数字不代表当前main。

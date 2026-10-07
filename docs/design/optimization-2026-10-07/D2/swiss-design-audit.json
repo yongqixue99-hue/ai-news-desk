@@ -1,0 +1,11 @@
+{
+  "file": "src/swiss-design.css",
+  "beforeBytes": 34061,
+  "afterBytes": 33777,
+  "removedSelectors": [
+    ".today-metrics strong",
+    ".sidebar-profile > span",
+    ".today-release-highlights",
+    ".nav-management"
+  ]
+}
