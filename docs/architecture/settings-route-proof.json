@@ -1,0 +1,66 @@
+[
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/settings",
+    "bytes": 2673,
+    "sha256": "20da86b33971d2faaa8a7b53918d3a09b43b6e5f8e09a96bae393014206ec1c8"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/ai/providers/:providerId",
+    "bytes": 3457,
+    "sha256": "f33291b6c0f021c1265f69e51daff200c737fb4b58ce5cb8d46d4151804968be"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/ai/providers/:providerId/test",
+    "bytes": 1009,
+    "sha256": "cf2dfe7c4a38325ca4ab573806f6a0947a46ca866c1cdbb02bec716688d0c3d2"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/ai/agent-roles",
+    "bytes": 1261,
+    "sha256": "22d11f87320375281568108817ba8211d7b1be2688da170b32f09968a86a9281"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/ai/writing-review",
+    "bytes": 459,
+    "sha256": "08d76ff2c82bf266de386f09789e892179dc0680ac1c45dd46817736c76f3480"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/ai/skills/:skillId",
+    "bytes": 521,
+    "sha256": "4e752545e9240f53094fb9b94dd917ed865f7d644d651399b66a225699db2eb6"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/ai/skills/import",
+    "bytes": 768,
+    "sha256": "ce1be7bbe45a4f6fe5803e0dc48dccd314a2db05265547b8e878a75a9daf474f"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/ai/completion-provider",
+    "bytes": 1170,
+    "sha256": "1b2024ea7e6602e2735fb01952f912db25df094ae95f7a509bc5c8b22171a991"
+  }
+]
