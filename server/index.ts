@@ -267,6 +267,7 @@ import { registerEditorialHttpRoutes1, registerEditorialHttpRoutes2 } from "./ed
 import { registerDraftHttpRoutes1, registerDraftHttpRoutes2, registerDraftHttpRoutes3 } from "./draft-http-routes.js";
 import { registerDeliveryHttpRoutes1, registerDeliveryHttpRoutes2, registerDeliveryHttpRoutes3, registerDeliveryHttpRoutes4 } from "./delivery-http-routes.js";
 import { registerLearningHttpRoutes1, registerLearningHttpRoutes2, registerLearningHttpRoutes3, registerLearningHttpRoutes4, registerLearningHttpRoutes5, registerLearningHttpRoutes6 } from "./learning-http-routes.js";
+import { registerWorkflowHttpRoutes1, registerWorkflowHttpRoutes2, registerWorkflowHttpRoutes3, registerWorkflowHttpRoutes4, registerWorkflowHttpRoutes5, registerWorkflowHttpRoutes6, registerWorkflowHttpRoutes7 } from "./workflow-http-routes.js";
 
 const app = express();
 const zhihuHotlist = createZhihuHotlist({
@@ -350,51 +351,12 @@ const httpRouteRuntime: HttpRouteRuntime = {
   get xiaoheiheDelivery() { return xiaoheiheDelivery; },
 };
 
-app.get(
-  "/api/bootstrap",
-  asyncRoute(async (_request, response) => {
-    const state = await readStateProjection(bootstrapView);
-    const skills = await Promise.all(state.aiSettings.skills.map(async (skill) => ({
-      ...skill,
-      available: Boolean((await readSkillInstructions(skill, 512)).trim()),
-    })));
-    response.json({
-      ...state,
-      aiSettings: { ...state.aiSettings, skills },
-    });
-  }),
-);
-
-app.get(
-  "/api/shell",
-  asyncRoute(async (_request, response) => {
-    const state = await readState();
-    response.json({
-      notifications: state.notifications.slice(0, 80),
-      notificationsMuted: state.settings.notificationsMuted,
-      activeRunCount: state.runs.filter((run) => ["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status)).length,
-    });
-  }),
-);
-
-app.get("/api/runs/:runId/diagnostics", asyncRoute(async (request, response) => {
-  const diagnostics = await readStateProjection(state => runDiagnosticsView(state, routeParam(request.params.runId)));
-  if (!diagnostics) { response.status(404).json({ error: "运行记录不存在" }); return; }
-  response.json(diagnostics);
-}));
+registerWorkflowHttpRoutes1(app, httpRouteRuntime);
 
 registerDraftHttpRoutes1(app, httpRouteRuntime);
 
 registerStoryHttpRoutes1(app, httpRouteRuntime);
-app.post("/api/product/jobs/:jobId/retry", asyncRoute(async (request, response) => {
-  const database = await getLocalDatabase();
-  const oldJob = database.getJob(routeParam(request.params.jobId));
-  if (!oldJob || !["build-content-package", "draft-from-package", "draft-from-editorial-intake", "draft-from-intake-review", "explain-story", "hydrate-story-assets", "supplement-story-evidence"].includes(oldJob.type) || oldJob.status !== "failed") { response.status(409).json({ error: "这个任务不能从这里重试" }); return; }
-  const storyId = oldJob.payload && typeof oldJob.payload === "object" && "storyId" in oldJob.payload ? String(oldJob.payload.storyId) : "";
-  const story = storyById(await readState(), storyId);
-  if (story) await updateState((state) => retainStoryForWriting(state, storyId));
-  response.status(202).json(retryPackageJob(database, oldJob.id, story?.title));
-}));
+registerWorkflowHttpRoutes2(app, httpRouteRuntime);
 
 registerSourceHttpRoutes1(app, httpRouteRuntime);
 
@@ -417,68 +379,11 @@ registerStoryHttpRoutes5(app, httpRouteRuntime);
 
 registerPackageHttpRoutes2(app, httpRouteRuntime);
 
-app.get(
-  "/api/product/jobs",
-  asyncRoute(async (request, response) => {
-    const limit = Number(request.query.limit ?? 100);
-    response.json((await getLocalDatabase()).listJobs(Number.isFinite(limit) ? limit : 100));
-  }),
-);
-
-app.get(
-  "/api/product/jobs/:jobId",
-  asyncRoute(async (request, response) => {
-    const job = (await getLocalDatabase()).getJob(routeParam(request.params.jobId));
-    if (!job) {
-      response.status(404).json({ error: "任务不存在" });
-      return;
-    }
-    response.json(job);
-  }),
-);
+registerWorkflowHttpRoutes3(app, httpRouteRuntime);
 
 registerLearningHttpRoutes2(app, httpRouteRuntime);
 
-app.get(
-  "/api/events",
-  asyncRoute(async (request, response) => {
-    response.status(200);
-    response.setHeader("content-type", "text/event-stream; charset=utf-8");
-    response.setHeader("cache-control", "no-cache, no-transform");
-    response.setHeader("connection", "keep-alive");
-    response.flushHeaders();
-    const database = await getLocalDatabase();
-    let latestId = database.listWorkflowEvents(1)[0]?.id;
-    let latestJobsJson = "";
-    const writeJobs = () => {
-      const jobsJson = JSON.stringify(database.listJobs(20));
-      if (jobsJson === latestJobsJson) return;
-      latestJobsJson = jobsJson;
-      response.write(`event: jobs\ndata: ${jobsJson}\n\n`);
-    };
-    response.write(`event: ready\ndata: ${JSON.stringify({ at: new Date().toISOString() })}\n\n`);
-    writeJobs();
-    const timer = setInterval(() => {
-      try {
-        const events = database.listWorkflowEvents(50);
-        const cursorIndex = latestId ? events.findIndex((event) => event.id === latestId) : -1;
-        const unseen = latestId
-          ? cursorIndex >= 0 ? events.slice(0, cursorIndex) : events.slice(0, 1)
-          : events.slice(0, 1);
-        for (const event of [...unseen].reverse()) {
-          response.write(`event: workflow\ndata: ${JSON.stringify(event)}\n\n`);
-        }
-        latestId = events[0]?.id ?? latestId;
-        writeJobs();
-        response.write(`: heartbeat ${Date.now()}\n\n`);
-      } catch {
-        // The next interval retries. A transient read error must not terminate
-        // the user's open editor or force a full-page reload.
-      }
-    }, 3_000);
-    request.on("close", () => clearInterval(timer));
-  }),
-);
+registerWorkflowHttpRoutes4(app, httpRouteRuntime);
 
 registerLearningHttpRoutes3(app, httpRouteRuntime);
 
@@ -623,21 +528,7 @@ app.post(
 );
 
 // Lightweight identity probe for the local desktop launcher; never exposes credentials.
-app.get("/api/desktop/status", (_request, response) => {
-  response.json({ app: "ai-news-desk", projectPath: process.cwd(), workflowRoot, pid: process.pid });
-});
-
-app.get(
-  "/api/health",
-  asyncRoute(async (_request, response) => {
-    const state = await readState();
-    const [codex, publisher] = await Promise.all([
-      codexStatus(),
-      publisherStatus(state.settings),
-    ]);
-    response.json({ ok: true, codex, publisher, horizon: { ok: true, detail: "本地 Horizon 已接入" } });
-  }),
-);
+registerWorkflowHttpRoutes5(app, httpRouteRuntime);
 
 registerStoryHttpRoutes6(app, httpRouteRuntime);
 
@@ -972,149 +863,11 @@ registerSourceHttpRoutes3(app, httpRouteRuntime);
 
 registerStoryHttpRoutes7(app, httpRouteRuntime);
 
-app.post(
-  "/api/runs/collect",
-  asyncRoute(async (request, response) => {
-    const body = (request.body ?? {}) as CollectionRequest;
-    const dateFrom = typeof body.dateFrom === "string" ? body.dateFrom.trim() : undefined;
-    const dateTo = typeof body.dateTo === "string" ? body.dateTo.trim() : undefined;
-    if ((dateFrom || dateTo) && (!dateFrom || !dateTo || !validDateInput(dateFrom) || !validDateInput(dateTo))) {
-      response.status(400).json({ error: "请填写有效的开始日期和结束日期" });
-      return;
-    }
-    if (dateFrom && dateTo) {
-      const rangeDays = (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`)) / 86_400_000;
-      if (rangeDays < 0) {
-        response.status(400).json({ error: "开始日期不能晚于结束日期" });
-        return;
-      }
-      if (rangeDays > 30) {
-        response.status(400).json({ error: "单次最多搜索 31 天，请缩短日期范围" });
-        return;
-      }
-    }
-    const keywords = typeof body.keywords === "string" ? body.keywords.trim() : undefined;
-    if (keywords && keywords.length > 120) {
-      response.status(400).json({ error: "关键词最多 120 个字符" });
-      return;
-    }
-    const sourceIds = Array.isArray(body.sourceIds)
-      ? body.sourceIds.filter((id): id is string => typeof id === "string").slice(0, 50)
-      : undefined;
-    if (sourceIds?.length) {
-      const spendingState = await readState();
-      for (const source of spendingState.sources.filter((entry) => sourceIds.includes(entry.id))) {
-        assertMeteredSourceAllowed(spendingState, source);
-      }
-    }
-    const result = await createCollectionRun({
-      dateFrom,
-      dateTo,
-      keywords,
-      sourceIds,
-      topicIds: normalizeTopicIds(body.topicIds),
-    });
-    response.status(result.created ? 202 : 200).json({ ...result, reused: !result.created });
-  }),
-);
-
-app.post(
-  "/api/runs/:runId/cancel",
-  asyncRoute(async (request, response) => {
-    const runId = Array.isArray(request.params.runId) ? request.params.runId[0] : request.params.runId;
-    const state = await readState();
-    if (!state.runs.some((run) => run.id === runId)) {
-      response.status(404).json({ error: "运行记录不存在" });
-      return;
-    }
-    const run = await cancelCollectionRun(runId);
-    if (!run) response.status(409).json({ error: "这个任务已经结束，无法取消" });
-    else response.json(run);
-  }),
-);
-
-app.post(
-  "/api/runs/:runId/retry",
-  asyncRoute(async (request, response) => {
-    const runId = Array.isArray(request.params.runId) ? request.params.runId[0] : request.params.runId;
-    const result = await retryCollectionRun(runId);
-    response.status(result.created ? 202 : 200).json({ ...result, reused: !result.created });
-  }),
-);
-
-app.post(
-  "/api/runs/:runId/briefings",
-  asyncRoute(async (request, response) => {
-    const runId = Array.isArray(request.params.runId) ? request.params.runId[0] : request.params.runId;
-    const state = await readState();
-    const run = state.runs.find((entry) => entry.id === runId);
-    if (!run) {
-      response.status(404).json({ error: "运行记录不存在" });
-      return;
-    }
-    if (["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status)) {
-      response.status(409).json({ error: "任务仍在运行，中文摘要会在采集后自动生成" });
-      return;
-    }
-    const candidateIds = Array.isArray(request.body?.candidateIds)
-      ? request.body.candidateIds.filter((value: unknown): value is string => typeof value === "string").slice(0, 30)
-      : undefined;
-    response.json(await enrichCandidateBriefings(runId, { candidateIds }));
-  }),
-);
-
-app.patch(
-  "/api/runs/:runId/candidates/:candidateId",
-  asyncRoute(async (request, response) => {
-    const candidate = await updateState((state) => {
-      const target = state.runs
-        .find((entry) => entry.id === request.params.runId)
-        ?.candidates.find((entry) => entry.id === request.params.candidateId);
-      if (!target) return undefined;
-      target.selected = Boolean(request.body.selected);
-      return target;
-    });
-    if (!candidate) response.status(404).json({ error: "候选新闻不存在" });
-    else response.json(candidate);
-  }),
-);
+registerWorkflowHttpRoutes6(app, httpRouteRuntime);
 
 registerLearningHttpRoutes4(app, httpRouteRuntime);
 
-app.delete(
-  "/api/runs/:runId/candidates",
-  asyncRoute(async (request, response) => {
-    const result = await updateState((state) => {
-      const run = state.runs.find((entry) => entry.id === request.params.runId);
-      if (!run) return undefined;
-      if (["queued", "collecting", "scoring", "extracting", "generating"].includes(run.status)) {
-        throw new Error("任务仍在运行，完成或取消后才能清空候选");
-      }
-      const candidateIds = Array.isArray(request.body?.candidateIds)
-        ? new Set(request.body.candidateIds.filter((value: unknown): value is string => typeof value === "string"))
-        : undefined;
-      const cleared = candidateIds
-        ? run.candidates.filter((candidate) => candidateIds.has(candidate.id)).length
-        : run.candidates.length;
-      const clearedAt = new Date().toISOString();
-      run.candidates = candidateIds
-        ? run.candidates.filter((candidate) => !candidateIds.has(candidate.id))
-        : [];
-      if (!run.candidates.length) run.candidatesClearedAt = clearedAt;
-      run.stage = run.candidates.length ? "部分候选已清空" : "候选已清空";
-      run.updatedAt = clearedAt;
-      run.logs.push({
-        at: clearedAt,
-        stage: run.stage,
-        message: `已清空 ${cleared} 条候选；已有草稿和来源记录不受影响`,
-        level: "info",
-      });
-      return { run, cleared };
-    });
-    if (!result) response.status(404).json({ error: "运行记录不存在" });
-    else response.json(result);
-  }),
-);
+registerWorkflowHttpRoutes7(app, httpRouteRuntime);
 
 registerEditorialHttpRoutes1(app, httpRouteRuntime);
 
