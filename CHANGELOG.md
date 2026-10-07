@@ -5,6 +5,10 @@
 每个条目保留原文和原路径；来自 docs/ 的相对链接旁提供以仓库根目录解析的可用入口。README 使用说明与交接参考部分另存原始基线，便于验证完整性。
 
 
+## 2026-10-08 · D4 editorial路由（未上线）
+
+按原位置搬迁7个editorial领域路由；原处理器逐段还原完全一致，注册顺序与服务的延后读取保持不变。现有领域服务不改行为。详见 [拆分记录](docs/architecture/http-route-progress.md)。
+
 ## 2026-10-08 · D4 package路由（未上线）
 
 按原位置搬迁6个package领域路由；原处理器逐段还原完全一致，注册顺序与服务的延后读取保持不变。现有领域服务不改行为。详见 [拆分记录](docs/architecture/http-route-progress.md)。
