@@ -1,0 +1,63 @@
+/** Synthetic UI only. No storage, worker, credentials, proxy or outbound requests. */
+import express from "express";
+import path from "node:path";
+import { createDefaultState } from "../../server/defaults.js";
+import { bootstrapView } from "../../server/bootstrap-view.js";
+import { buildTodayView } from "../../server/story-desk.js";
+import { buildEditorialSystemView } from "../../server/editorial-system.js";
+import { defaultHomeLayout } from "../../server/home-layout.js";
+import type { Candidate, WorkflowRun } from "../../server/types.js";
+
+const now = process.env.AI_NEWS_DESK_PREVIEW_TIME || new Date().toISOString();
+const state = createDefaultState();
+state.settings.scheduleEnabled = false;
+state.settings.officialMonitorEnabled = false;
+state.sources.forEach(source => { source.enabled = false; source.selected = false; });
+const examples = [
+  ["示例模型开放本地运行", "Example releases Model 3.5", "开发者可以下载权重，在自己的电脑上处理文字，服务不依赖云端。"],
+  ["示例团队发布长文档检索工具", "Sample releases document search", "工具支持按原文段落返回检索结果，便于核对回答引用的具体出处。"],
+  ["示例实验公布语音翻译研究", "Example research: speech translation", "研究比较了两种语音处理方法，结果仅来自实验条件，实际使用仍需验证。"],
+  ["示例产品增加任务历史导出", "Sample adds task history export", "用户可以把任务记录导出为文件，迁移时保留原有笔记和来源链接。"],
+  ["示例模型发布新版本", "Example releases Model 4.5", "示例模型发布新版本"],
+];
+const candidates: Candidate[] = examples.map(([titleZh, title, summaryZh], index) => ({
+  id: `example-${index}`, rawId: `example-${index}`, title: title!, sourceType: "rss", sourceName: `示例官方 ${index + 1}`,
+  sourceRole: "official", url: `https://example.com/releases/${index}`, canonicalUrl: `https://example.com/releases/${index}`,
+  excerpt: summaryZh!, publishedAt: new Date(Date.parse(now) - (index + 1) * 3_600_000).toISOString(), fetchedAt: now,
+  score: 13, scoreBreakdown: { consequence: 3, novelty: 3, evidence: 3, relevance: 2, timeliness: 2, confirmation: 0, penalty: 0 },
+  heatScore: 0, heatBreakdown: { engagement: 0, sourceReach: 0, crossSource: 0, freshness: 0 }, recommendationScore: 80,
+  clusterSize: 1, relatedSources: [`示例官方 ${index + 1}`], evidence: "一手线索", imageCount: 0, images: [], selected: false,
+  status: "candidate", topicIds: ["ai"], briefing: { titleZh: titleZh!, summaryZh: summaryZh!, basis: "full-source", generatedAt: now },
+}));
+state.runs = [{ id: "example-run", createdAt: now, updatedAt: now, collectedAt: now, status: "ready", stage: "完成",
+  windowHours: 24, sourceIds: [], scheduled: false, rawCount: candidates.length, candidates, logs: [],
+} satisfies WorkflowRun];
+const today = buildTodayView(state, now);
+const jobs = process.env.AI_NEWS_DESK_PREVIEW_JOBS === "1" ? [{ id: "example-job", lane: "foreground", type: "build-content-package",
+  idempotencyKey: "example-only", status: "running", payload: { storyId: today.radar?.[0]?.story?.id, storyTitle: examples[0]![0] },
+  progress: 0.4, stage: "读取原文", attempts: 1, maxAttempts: 3, createdAt: now, updatedAt: now, heartbeatAt: now }] : [];
+const responses: Record<string, unknown> = {
+  "/api/bootstrap": bootstrapView(state), "/api/editorial-system": buildEditorialSystemView(state, new Date(now)),
+  "/api/today": today, "/api/home-layout": defaultHomeLayout, "/api/drafts/overview": { total: 0, recent: [] },
+  "/api/shell": { notifications: [], notificationsMuted: false, activeRunCount: 0 }, "/api/product/jobs": jobs,
+  "/api/intakes/reviews": [], "/api/home-news": today.mustReads,
+};
+const app = express();
+app.use("/api", (req, res, next) => {
+  if (req.method !== "GET") { res.status(405).json({ error: "隔离截图仅允许读取示例数据" }); return; }
+  if (req.path === "/events") {
+    res.setHeader("Content-Type", "text/event-stream"); res.write(`event: jobs\ndata: ${JSON.stringify(jobs)}\n\n`);
+    return;
+  }
+  const value = responses[`/api${req.path}`];
+  if (value !== undefined) { res.json(value); return; }
+  next();
+});
+app.use("/api", (_req, res) => { res.status(404).json({ error: "示例接口未配置" }); });
+app.use(express.static(path.resolve(process.env.AI_NEWS_DESK_DIST_ROOT || ".artifacts/verify/dist")));
+const server = app.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  if (address && typeof address !== "string") console.log(`http://127.0.0.1:${address.port}`);
+});
+process.on("SIGTERM", () => { server.closeAllConnections(); server.close(); });
+process.on("SIGINT", () => { server.closeAllConnections(); server.close(); });

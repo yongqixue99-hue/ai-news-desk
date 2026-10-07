@@ -7,6 +7,8 @@ export interface TopicRadarRow {
   id: string;
   title: string;
   summary: string;
+  brief: string;
+  label: string;
   publishedAt: string;
   dateLabel: string;
   reason: string;
@@ -30,6 +32,15 @@ const sourcesFor = (entry: AggregationEntry) => [
 const uniqueSources = (sources: TopicRadarRow['sources']) => [...new Map(sources
   .filter(source => source.name !== '原文链接' || !sources.some(other => other.name !== '原文链接' && other.url === source.url))
   .map(source => [`${source.name}:${source.url}`,source])).values()];
+const normalized = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+const chineseBrief = (summary: string, ...titles: string[]) => {
+  const brief = summary.trim(), value = normalized(brief);
+  if (!/[㐀-鿿]/u.test(brief)) return '';
+  return titles.some(title => {
+    const headline = normalized(title);
+    return headline && (value.includes(headline) || headline.includes(value));
+  }) ? '' : brief;
+};
 const productUseCase = (story: StoryView): EditorialOpportunity | undefined => {
   const listing = story.signals.find(signal => {
     try { return ['producthunt.com','www.producthunt.com'].includes(new URL(signal.url).hostname) && signal.sourceRole === 'discovery'; }
@@ -60,13 +71,16 @@ export function buildTopicRadar(stories: StoryView[], entries: AggregationEntry[
     const reason = opportunity.practice?.angle || opportunity.reason;
     scored.push({score: (opportunity.lane === 'important' ? 40 : 20) + Math.max(0,20*(1-story.ageHours/48)) + heat + (story.assignment.canDraft ? 4 : 0)
       + Math.max(-4,Math.min(4,story.preferenceAdjustment || 0)),
-      row: {id: `story:${story.id}`,title:story.title,summary:story.summary,publishedAt:story.publishedAt,dateLabel:'发布', reason,
+      row: {id: `story:${story.id}`,title:story.title,summary:story.summary,
+        brief:chineseBrief(story.summary,story.title,story.originalTitle),label:opportunity.label,
+        publishedAt:story.publishedAt,dateLabel:'发布', reason,
         heat: heat ? '有近期平台热点信号' : story.trend.direction === 'unknown' ? '热度未知' : story.trend.summary,
         status:story.assignment.canDraft?'ready':'verify',selected:story.selected,story,
         sources:uniqueSources([...story.signals.map(signal => ({name:signal.sourceName,url:signal.url})),...copies.flatMap(sourcesFor)])}});
   }
   for (const entry of aggregates.filter(entry => !consumed.has(entry.id))) {
     scored.push({score:entry.ranking!.score,row:{id:`aggregation:${entry.id}`,title:entry.title,summary:entry.summary,
+      brief:chineseBrief(entry.summary,entry.title),label:assessEditorialOpportunity(entry.title,entry.summary).label,
       publishedAt:entry.publishedAt || entry.eventUpdatedAt!,dateLabel:entry.publishedAt?'发布':'平台进展',
       reason:entry.ranking!.reasons[0]!,heat:entry.ranking!.heat?'有近期平台热点信号':'热度未知',
       status:'verify',selected:entry.selected,aggregationId:entry.id,sources:uniqueSources(sourcesFor(entry))}});
