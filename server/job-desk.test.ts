@@ -315,7 +315,14 @@ test("time spent while the computer was asleep does not count as a stalled job",
   const root = await mkdtemp(path.join(os.tmpdir(), "newsdesk-suspend-deadline-"));
   const database = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({ version: 11 }) });
   let clock = 0;
-  const desk = createJobDesk({ database, now: () => clock, progressTimeoutMs: 100, totalTimeoutMs: 400, suspendGapMs: 1_000, watchdogMs: 5, handlers: {
+  let clockReads = 0;
+  // The watchdog reads the clock once per tick, so a new read proves that a tick
+  // has observed the current time. Fixed sleeps would depend on timer resolution.
+  const watchdogTick = async () => {
+    const seen = clockReads;
+    while (clockReads === seen) await new Promise(resolve => setTimeout(resolve, 2));
+  };
+  const desk = createJobDesk({ database, now: () => { clockReads += 1; return clock; }, progressTimeoutMs: 100, totalTimeoutMs: 400, suspendGapMs: 1_000, watchdogMs: 5, handlers: {
     slow: async (_payload, current) => {
       current.progress(0.08, "采集原始条目");
       await new Promise<void>((_resolve, reject) => current.signal.addEventListener("abort", () => reject(current.signal.reason), { once: true }));
@@ -325,16 +332,18 @@ test("time spent while the computer was asleep does not count as a stalled job",
   try {
     const job = database.enqueueJob({ type: "slow", idempotencyKey: "suspend", payload: {} }).job;
     tick = desk.tick();
-    await new Promise(resolve => setTimeout(resolve, 15));
+    await watchdogTick();
     // The wall clock jumps 16 minutes between two watchdog ticks: the process was suspended.
     clock = 980_000;
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await watchdogTick();
     assert.equal(database.getJob(job.id)?.status, "running");
     // After waking, an ordinary stall is still detected against the remaining idle budget.
-    clock += 60; await new Promise(resolve => setTimeout(resolve, 15));
+    clock += 60;
+    await watchdogTick();
     assert.equal(database.getJob(job.id)?.status, "running");
     clock += 60;
-    await Promise.all([tick, new Promise(resolve => setTimeout(resolve, 20))]);
+    // The watchdog timer is unref'd; waiting on its next tick keeps the loop alive until it fails the job.
+    await Promise.all([tick, watchdogTick()]);
     assert.match(database.getJob(job.id)?.error ?? "", /长时间没有实际进展/);
   } finally { clock += 10_000; await Promise.all([tick, new Promise(resolve => setTimeout(resolve, 20))]); desk.stop(); database.close(); await rm(root, { recursive: true, force: true }); }
 });
