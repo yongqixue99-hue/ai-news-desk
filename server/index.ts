@@ -261,6 +261,7 @@ import { retryPackageJob } from "./job-recovery.js";
 import { registerSourceHttpRoutes1, registerSourceHttpRoutes2, registerSourceHttpRoutes3 } from "./source-http-routes.js";
 import type { HttpRouteRuntime } from "./http-route-runtime.js";
 import { asyncRoute, deliveryRoute, validDateInput, sourceKinds, sourceRoles, draftableAssignmentModes, storyEventTypes, routeParam, decodedHeader, decodedHeaderList, storeNewMaterial, respondMaterialError, publisherPreflightFor, decodeHeader, parseScreenshotCropHeader, parseImagePostLinesHeader } from "./http-route-support.js";
+import { registerStoryHttpRoutes1, registerStoryHttpRoutes2, registerStoryHttpRoutes3, registerStoryHttpRoutes4, registerStoryHttpRoutes5, registerStoryHttpRoutes6, registerStoryHttpRoutes7 } from "./story-http-routes.js";
 
 const app = express();
 const zhihuHotlist = createZhihuHotlist({
@@ -384,25 +385,7 @@ app.get(
   }),
 );
 
-app.get("/api/discovery/trace", async (request, response, next) => {
-  try { response.json(traceDiscoveryUrl(await readState(), String(request.query.url ?? ""))); }
-  catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "链接诊断失败" }); }
-});
-
-app.get("/api/home-news", asyncRoute(async (request, response) => {
-  const keyword = typeof request.query.keyword === "string" ? request.query.keyword.trim().slice(0, 120) : "";
-  response.json(buildHomeNews(await readState(), keyword));
-}));
-
-app.get("/api/home-layout", asyncRoute(async (_request, response) => {
-  response.json(homeLayoutFor((await readState()).settings.homeLayout));
-}));
-app.patch("/api/home-layout", asyncRoute(async (request, response) => {
-  let layout;
-  try { layout = parseHomeLayout(request.body); } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "栏目设置无效" }); return; }
-  await updateState((state) => { state.settings.homeLayout = layout; });
-  response.json(layout);
-}));
+registerStoryHttpRoutes1(app, httpRouteRuntime);
 app.post("/api/product/jobs/:jobId/retry", asyncRoute(async (request, response) => {
   const database = await getLocalDatabase();
   const oldJob = database.getJob(routeParam(request.params.jobId));
@@ -415,123 +398,14 @@ app.post("/api/product/jobs/:jobId/retry", asyncRoute(async (request, response) 
 
 registerSourceHttpRoutes1(app, httpRouteRuntime);
 
-app.get("/api/aggregations", asyncRoute(async (_request, response) => {
-  response.json(buildAggregationView(await readState()));
-}));
-app.post("/api/aggregations/refresh", asyncRoute(async (_request, response) => {
-  const state = await readState();
-  const sourceIds = state.sources.filter(s => aggregationSourceIds.has(s.id) && s.enabled && s.selected).map(s => s.id);
-  if (!sourceIds.length) { response.status(409).json({error: "请在新闻源中启用并选入至少一个聚合平台。"}); return; }
-  const result = await createCollectionRun({sourceIds, topicIds: ["ai"], windowHours: 7 * 24, aggregation: true});
-  if (!result.created && !sourceIds.every(id => result.run.sourceIds.includes(id))) {
-    response.status(409).json({error: "另一个采集任务正在运行，请等它完成后再更新聚合资讯。"}); return;
-  }
-  response.json(result);
-}));
-app.post("/api/aggregations/:id/select", asyncRoute(async (request, response) => {
-  const id = routeParam(request.params.id);
-  if (!buildAggregationView(await readState()).entries.some(e => e.id === id)) { response.status(404).json({error: "条目已不在当前快照，请刷新列表。"}); return; }
-  response.json(await updateState(state => retainAggregationEntry(state, id)));
-}));
+registerStoryHttpRoutes2(app, httpRouteRuntime);
 
 const backfillTodayTitles = createTodayTitleBackfill({
   readView: readTodayView,
   enrich: enrichCandidateBriefings,
 });
 // Page fallback and collection jobs reuse the same bounded analysis operation.
-app.post(
-  "/api/today/titles",
-  asyncRoute(async (_request, response) => { response.json(await backfillTodayTitles()); }),
-);
-
-app.get(
-  "/api/today",
-  asyncRoute(async (_request, response) => {
-    const view = await readTodayView();
-    // Browsing must not enqueue legacy maintenance or invoke a provider.
-    if (_request.query.readOnly === "1") { response.json(view); return; }
-    const database = await getLocalDatabase();
-    for (const story of [...view.mustReads, ...(view.interesting ?? []), ...view.secondary].slice(0, 5)) {
-      if ((story.localImageCount ?? 0) >= 2) continue;
-      database.enqueueJob({
-        lane: "background",
-        type: "hydrate-story-assets",
-        idempotencyKey: `hydrate-story-assets:${story.id}:${story.lastSeenAt}`,
-        payload: { storyId: story.id, minimumImages: 2 },
-        maxAttempts: 2,
-      });
-    }
-    const evidencePool = [
-      ...view.watching,
-      ...(view.pending ?? []),
-      ...view.mustReads,
-      ...(view.interesting ?? []),
-      ...view.secondary,
-    ].filter((story, index, stories) => (story.evidenceStrength !== "strong"
-      || Boolean(story.releaseDossier && story.releaseDossier.readyCount < story.releaseDossier.totalCount))
-      && stories.findIndex((entry) => entry.id === story.id) === index);
-    const evidenceJobs = database.listJobs(500).filter((job) => job.type === "supplement-story-evidence");
-    const activeEvidenceStoryIds = new Set(evidenceJobs
-      .filter((job) => ["queued", "running", "retrying"].includes(job.status))
-      .map((job) => job.payload && typeof job.payload === "object" && "storyId" in job.payload
-        ? String((job.payload as { storyId: unknown }).storyId)
-        : "")
-      .filter(Boolean));
-    const recentCutoff = Date.now() - 6 * 60 * 60_000;
-    const recentlyAttemptedStoryIds = new Set(evidenceJobs
-      .filter((job) => Date.parse(job.updatedAt) >= recentCutoff)
-      .map((job) => job.payload && typeof job.payload === "object" && "storyId" in job.payload
-        ? String((job.payload as { storyId: unknown }).storyId)
-        : "")
-      .filter(Boolean));
-    const availableSlots = Math.max(0, 5 - activeEvidenceStoryIds.size);
-    const evidenceCandidates = evidencePool
-      .filter((story) => !activeEvidenceStoryIds.has(story.id) && !recentlyAttemptedStoryIds.has(story.id))
-      .slice(0, availableSlots);
-    const evidenceRetryWindow = Math.floor(Date.now() / (6 * 60 * 60_000));
-    for (const story of evidenceCandidates) {
-      database.enqueueJob({
-        lane: "background",
-        type: "supplement-story-evidence",
-        idempotencyKey: `supplement-story-evidence:auto:${story.id}:${story.lastSeenAt}:${evidenceRetryWindow}`,
-        payload: { storyId: story.id, trigger: "auto" },
-        maxAttempts: 2,
-      });
-    }
-    response.json(view);
-  }),
-);
-
-app.get(
-  "/api/stories/:storyId",
-  asyncRoute(async (request, response) => {
-    const storyId = routeParam(request.params.storyId);
-    const story = storyById(await readState(), storyId);
-    if (!story) {
-      response.status(404).json({ error: "Story 不存在" });
-      return;
-    }
-    const database = await getLocalDatabase();
-    response.json({
-      story,
-      contentPackage: database.latestContentPackageForStory<ContentPackage>(storyId),
-      feedback: database.listFeedback("story", storyId, 30),
-      assetCollection: database.listJobs(500).find((job) => job.type === "hydrate-story-assets" && job.status === "complete"
-        && (job.payload as { storyId?: string; scope?: string } | undefined)?.storyId === storyId
-        && (job.payload as { scope?: string }).scope === "article")?.result,
-    });
-  }),
-);
-
-app.get(
-  "/api/stories/:storyId/reading",
-  asyncRoute(async (request, response) => {
-    const story = storyById(await readState(), routeParam(request.params.storyId));
-    if (!story) { response.status(404).json({ error: "Story 不存在" }); return; }
-    const database = await getLocalDatabase();
-    response.json(readStoredStorySources(story, database.latestContentPackageForStory<ContentPackage>(story.id), database));
-  }),
-);
+registerStoryHttpRoutes3(app, httpRouteRuntime);
 
 app.get(
   "/api/editorial-intakes/:runId/:candidateId",
@@ -585,38 +459,7 @@ app.post(
   }),
 );
 
-app.post(
-  "/api/stories/:storyId/explanation",
-  asyncRoute(async (request, response) => {
-    const storyId = routeParam(request.params.storyId);
-    const story = storyById(await readState(), storyId);
-    if (!story) {
-      response.status(404).json({ error: "Story 不存在" });
-      return;
-    }
-    const force = request.body?.force === true;
-    if (story.explanation.status === "ready" && !force) {
-      response.json({ story, reused: true });
-      return;
-    }
-    const database = await getLocalDatabase();
-    const explanationRevision = story.explanation.generatedAt || story.lastSeenAt;
-    const queued = database.enqueueJob({
-      type: "explain-story",
-      idempotencyKey: force
-        ? `explain-story:v2-refresh:${story.id}:${explanationRevision}`
-        : `explain-story:v2:${story.id}:${story.lastSeenAt}`,
-      payload: { storyId: story.id },
-      maxAttempts: 2,
-    });
-    if (queued.job.status === "complete") {
-      const updated = storyById(await readState(), storyId);
-      response.json({ job: queued.job, story: updated, reused: true });
-      return;
-    }
-    response.status(202).json({ job: queued.job, story, reused: queued.reused });
-  }),
-);
+registerStoryHttpRoutes4(app, httpRouteRuntime);
 
 app.post(
   "/api/stories/:storyId/events",
@@ -685,24 +528,7 @@ app.delete(
   }),
 );
 
-app.post(
-  "/api/stories/:storyId/assets",
-  asyncRoute(async (request, response) => {
-    const storyId = routeParam(request.params.storyId);
-    const story = storyById(await readState(), storyId);
-    if (!story) { response.status(404).json({ error: "Story 不存在" }); return; }
-    const database = await getLocalDatabase();
-    const active = database.listJobs(500).find((job) => job.type === "hydrate-story-assets"
-      && ["queued", "running", "retrying"].includes(job.status)
-      && (job.payload as { storyId?: string; scope?: string } | undefined)?.storyId === storyId
-      && (job.payload as { scope?: string }).scope === "article");
-    const queued = active ? { job: active, reused: true } : database.enqueueJob({
-      type: "hydrate-story-assets", idempotencyKey: `article-assets:${storyId}:${randomUUID()}`,
-      payload: { storyId, minimumImages: 2, scope: "article" }, maxAttempts: 1,
-    });
-    response.status(202).json(queued);
-  }),
-);
+registerStoryHttpRoutes5(app, httpRouteRuntime);
 
 app.post(
   "/api/stories/:storyId/packages",
@@ -1150,46 +976,7 @@ app.get(
   }),
 );
 
-app.post(
-  "/api/stories/:storyId/evidence",
-  asyncRoute(async (request, response) => {
-    const storyId = routeParam(request.params.storyId);
-    const story = storyById(await readState(), storyId);
-    if (!story) {
-      response.status(404).json({ error: "Story 不存在" });
-      return;
-    }
-    if (story.evidenceStrength === "strong"
-      && (!story.releaseDossier || story.releaseDossier.readyCount >= story.releaseDossier.totalCount)) {
-      response.json({ story, reused: true });
-      return;
-    }
-    const database = await getLocalDatabase();
-    const activeJob = database.listJobs(100).find((job) => job.type === "supplement-story-evidence"
-      && ["queued", "running", "retrying"].includes(job.status)
-      && job.payload && typeof job.payload === "object" && "storyId" in job.payload
-      && String((job.payload as { storyId: unknown }).storyId) === storyId);
-    if (activeJob) {
-      response.status(202).json({ job: activeJob, story, reused: true });
-      return;
-    }
-    const queued = database.enqueueJob({
-      type: "supplement-story-evidence",
-      idempotencyKey: `supplement-story-evidence:manual:${story.id}:${randomUUID()}`,
-      payload: { storyId, trigger: "manual" },
-      maxAttempts: 2,
-    });
-    if (queued.job.status === "complete") {
-      response.json({
-        job: queued.job,
-        story: storyById(await readState(), storyId),
-        reused: true,
-      });
-      return;
-    }
-    response.status(202).json({ job: queued.job, story, reused: queued.reused });
-  }),
-);
+registerStoryHttpRoutes6(app, httpRouteRuntime);
 
 registerSourceHttpRoutes2(app, httpRouteRuntime);
 
@@ -1601,36 +1388,7 @@ app.delete(
 
 registerSourceHttpRoutes3(app, httpRouteRuntime);
 
-app.post(
-  "/api/stories/search",
-  asyncRoute(async (request, response) => {
-    const body = (request.body ?? {}) as { query?: unknown };
-    const query = typeof body.query === "string" ? body.query.trim() : "";
-    if (!query) {
-      response.status(400).json({ error: "请输入要搜索的模型、公司或事件" });
-      return;
-    }
-    if (query.length > 120) {
-      response.status(400).json({ error: "搜索词最多 120 个字符" });
-      return;
-    }
-    const state = await readState();
-    const collection = buildFocusedNewsSearchRequest(
-      state.sources,
-      query,
-      normalizeTopicIds(state.settings.collectionTopics),
-    );
-    if (!collection.sourceIds?.length) {
-      response.status(409).json({ error: "当前没有已启用的官网或新闻来源，请先在来源页启用至少一个来源" });
-      return;
-    }
-    for (const source of state.sources.filter((entry) => collection.sourceIds?.includes(entry.id))) {
-      assertMeteredSourceAllowed(state, source);
-    }
-    const result = await createCollectionRun(collection);
-    response.status(result.created ? 202 : 200).json({ ...result, reused: !result.created });
-  }),
-);
+registerStoryHttpRoutes7(app, httpRouteRuntime);
 
 app.post(
   "/api/runs/collect",

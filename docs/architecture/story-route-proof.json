@@ -1,0 +1,122 @@
+[
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/discovery/trace",
+    "bytes": 289,
+    "sha256": "6dae99773008ee0b7d71b5d80e8d2b1d8b09dd1453a9174f27291d3f8a73bf72"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/home-news",
+    "bytes": 243,
+    "sha256": "27d41b4430fe8a012237ca25d744853690b24e995bea5d22c021ca1481f45a37"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/home-layout",
+    "bytes": 148,
+    "sha256": "92dfa28ea78b839151a2df95571dda63ead0f90d2d4152881ea4718464ff23d7"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "patch",
+    "path": "/api/home-layout",
+    "bytes": 365,
+    "sha256": "02d6083324da6b0a10436fc7afdfbc0abed39e4d7a18b737c4c16a6571268ba3"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/aggregations",
+    "bytes": 134,
+    "sha256": "0019a19a2a4752d01e4e93f564230fbd7a5a11d65932889b189b2ea008a82b6c"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/aggregations/refresh",
+    "bytes": 738,
+    "sha256": "765490f9b9de9ab9b2a1a6c01235c978f086eee22d94c1fe51f580a2094769f4"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/aggregations/:id/select",
+    "bytes": 390,
+    "sha256": "e7041d131eca70e6702d9da652a2440aea91ccce8f984791069bce0faf563947"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/today/titles",
+    "bytes": 128,
+    "sha256": "2f04382782b2e950b4c5d7a6c710ff3e398631fa16f68476d7e91619a5633c89"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/today",
+    "bytes": 2705,
+    "sha256": "3ae0af02e8a35399e7101c3ea8eed3d9fc1ae9367e53eea7f303fe2cf6a3d753"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/stories/:storyId",
+    "bytes": 837,
+    "sha256": "9b55b05071d0246fe8e752fe1de2b356dab7f78523eb36aa4e60ed59cca83496"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "get",
+    "path": "/api/stories/:storyId/reading",
+    "bytes": 437,
+    "sha256": "c97d477f2dbf1eac58d4473d86b3d645a74e98d55a68b4b1d009075b2f8dee86"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/stories/:storyId/explanation",
+    "bytes": 1196,
+    "sha256": "b813429f9ed20e0b018ed748c99681758f337fb819a032c2b75d4043d6583868"
+  },
+  {
+    "dependencyReferences": 2,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/stories/:storyId/assets",
+    "bytes": 966,
+    "sha256": "4fe3a1a6f1c9f0e8e62309cb9d9e264af85bebdcaf81ed75b78daee4984db99b"
+  },
+  {
+    "dependencyReferences": 3,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/stories/:storyId/evidence",
+    "bytes": 1539,
+    "sha256": "a2adfe437d8deebabe82c2f712a75fc4344e634983fa3e7d273fa4758b01667a"
+  },
+  {
+    "dependencyReferences": 1,
+    "bodyPreserved": true,
+    "method": "post",
+    "path": "/api/stories/search",
+    "bytes": 1180,
+    "sha256": "89010623516693ab23bfdcce5d18e58d8ea594396f5bdd7ceb42411840869f22"
+  }
+]
