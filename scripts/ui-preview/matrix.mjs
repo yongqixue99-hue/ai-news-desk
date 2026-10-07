@@ -19,6 +19,21 @@ const origin = await new Promise((resolve, reject) => {
   child.stderr.on("data", chunk => { output += chunk; });
   child.once("exit", code => reject(new Error(`Fixture exited ${code}: ${output}`)));
 });
+// A paired run keeps both CSS versions in one renderer process. SVG curve
+// rasterization otherwise varies between fresh Chrome processes on this host.
+let beforeChild;
+let beforeOrigin;
+if (process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST) {
+  if (!baseline) throw new Error("Paired comparison requires a before screenshot directory");
+  await mkdir(baseline, { recursive: true });
+  beforeChild = spawn(process.execPath, ["--import", "tsx", "scripts/ui-preview/fixture.ts"], { env: { ...process.env, AI_NEWS_DESK_PREVIEW_MATRIX: "1", AI_NEWS_DESK_PREVIEW_TIME: instant, AI_NEWS_DESK_DIST_ROOT: path.resolve(process.env.AI_NEWS_DESK_PREVIEW_BEFORE_DIST) }, stdio: ["ignore", "pipe", "pipe"] });
+  let beforeOutput = "";
+  beforeOrigin = await new Promise((resolve, reject) => {
+    beforeChild.stdout.on("data", chunk => { beforeOutput += chunk; const match = beforeOutput.match(/http:\/\/127\.0\.0\.1:\d+/u); if (match) resolve(match[0]); });
+    beforeChild.stderr.on("data", chunk => { beforeOutput += chunk; });
+    beforeChild.once("exit", code => reject(new Error(`Before fixture exited ${code}: ${beforeOutput}`)));
+  });
+}
 const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--disable-gpu", "--force-color-profile=srgb", "--disable-skia-runtime-opts", "--disable-lcd-text", "--disable-font-subpixel-positioning"] });
 const pages = ["today", "aggregations", "community", "workbench", "drafts", "sources", "editorial-system", "runs", "schedule", "ai-settings"];
 const cases = pages.map(hash => ({ name: hash, hash }));
@@ -42,7 +57,17 @@ try {
       page.on("pageerror", error => errors.push(String(error)));
       page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
       // No external origin can be read, including an accidental platform request.
-      await page.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+      await page.route("**/*", route => [origin, beforeOrigin].includes(new URL(route.request().url()).origin) ? route.continue() : route.abort());
+      if (beforeOrigin) {
+        await page.goto(`${beforeOrigin}/#${item.hash}`, { waitUntil: "networkidle" });
+        await page.locator(".page, .aggregation-page").first().waitFor();
+        if (item.action) await item.action(page);
+        await page.waitForTimeout(500);
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        const beforeOverflow = await capturePreview(page, path.join(baseline, `${item.name}-${width}.png`), true);
+        assert.equal(beforeOverflow, 0, `${item.name}-${width}: before overflow`);
+        assert.deepEqual(errors, [], `${item.name}-${width}: before errors`);
+      }
       await page.goto(`${origin}/#${item.hash}`, { waitUntil: "networkidle" });
       console.log(`capture ${item.name}-${width}`);
       await page.locator(".page, .aggregation-page").first().waitFor();
@@ -65,5 +90,5 @@ try {
   await writeFile(path.join(destination, "matrix.json"), JSON.stringify(measurements, null, 2));
   console.log(JSON.stringify({ screenshots: measurements.length, compared: baseline ? measurements.length : 0, pixelDifferences: baseline ? 0 : undefined, consoleErrors: 0, measurements }));
 } finally {
-  await browser.close(); child.kill("SIGTERM");
+  await browser.close(); child.kill("SIGTERM"); beforeChild?.kill("SIGTERM");
 }
