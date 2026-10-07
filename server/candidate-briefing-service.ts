@@ -212,7 +212,7 @@ export const generateCandidateBriefings = async (
         attemptId: failedAttemptId,
         completedAt: trace.errors.at(-1)?.at,
       });
-      failure = error instanceof Error ? error.message : String(error);
+      failure = trace.errors.at(-1)?.message || (error instanceof Error ? error.message : String(error));
     }
     results.push({ items, trace: sanitizeAiRunTrace(trace), failure });
   }

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { codexCapabilityError } from "./codex-exec-policy.js";
 
 export type AiTaskKind =
   | "article-generation"
@@ -266,9 +267,10 @@ const redactSensitiveText = (value: string) => value
   .replace(/("(?:apiKey|api_key|authorization|access_token|secret|password)"\s*:\s*")[^"]*(")/gi, "$1[REDACTED]$2")
   .slice(0, 900);
 
-const errorMessage = (error: unknown) => redactSensitiveText(
-  error instanceof Error ? error.message : typeof error === "string" ? error : String(error),
-);
+const errorMessage = (error: unknown) => {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : String(error);
+  return redactSensitiveText(codexCapabilityError(message) || message);
+};
 
 export const classifyAiError = (input: {
   error?: unknown;
@@ -283,7 +285,7 @@ export const classifyAiError = (input: {
   if (/timeout|timed out|超时|aborterror/.test(message)) return "timeout";
   if (/fetch failed|econn|enotfound|socket|network|dns/.test(message)) return "network";
   if (/json|schema|结构不完整|invalid response|没有返回/.test(message)) return "invalid-response";
-  if (/base url|模型名称|未配置|configuration|config/.test(message)) return "configuration";
+  if (/base url|模型名称|未配置|configuration|config|不支持功能开关/.test(message)) return "configuration";
   if (/cancel|取消|sigterm/.test(message)) return "cancelled";
   if (input.httpStatus !== undefined || input.exitCode !== undefined) return "provider";
   return "unknown";

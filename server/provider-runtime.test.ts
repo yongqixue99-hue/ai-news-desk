@@ -15,6 +15,16 @@ import {
   streamInlineCompletionProvider,
 } from "./provider-runtime.js";
 import type { AiProviderConfig } from "./types.js";
+import { codexCapabilityError, codexExecFeatures } from "./codex-exec-policy.js";
+
+test("generation passes every shared feature restriction without dropping unsupported flags", () => {
+  const request = buildCodexExecRequest({ model: "test", reasoningEffort: "low", schemaPath: "/tmp/schema.json", outputPath: "/tmp/out.json", prompt: "test" });
+  for (const [mode, flags] of Object.entries(codexExecFeatures)) {
+    assert.deepEqual(request.args.flatMap((arg, index) => arg === `--${mode}` ? [request.args[index + 1]] : []), flags);
+  }
+  assert.equal(codexExecFeatures.enable.length + codexExecFeatures.disable.length, 23);
+  assert.match(codexCapabilityError("Unknown feature flag: skip_host_skill_discovery")!, /请更新 ChatGPT 或 Codex 桌面应用/);
+});
 
 const provider: AiProviderConfig = {
   id: "test-provider",

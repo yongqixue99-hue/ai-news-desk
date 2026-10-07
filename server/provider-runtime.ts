@@ -4,10 +4,13 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { parseProviderJson } from "./provider-schema.js";
 import { resolveCodexExecutable } from "./codex-executable.js";
+import { codexCapabilityError, codexExecFeatures } from "./codex-exec-policy.js";
 import { getProviderApiKey } from "./secrets.js";
 import type { AiProviderConfig } from "./types.js";
 
 const readableCodexError = (stderr: string, code: number | null) => {
+  const capabilityError = codexCapabilityError(stderr);
+  if (capabilityError) return capabilityError;
   const modelMessage = stderr.match(/"message":"([^"]+)"/)?.[1];
   if (modelMessage) return modelMessage.replaceAll("\\n", " ").slice(0, 700);
   const useful = stderr
@@ -69,8 +72,8 @@ export const buildCodexExecRequest = (input: CodexExecRequestInput): CodexExecRe
       "--skip-git-repo-check",
       "-c", 'web_search="disabled"',
       "-c", 'shell_environment_policy.inherit="none"',
-      "--enable", "skip_host_skill_discovery",
-      ...["shell_tool", "unified_exec", "apps", "browser_use", "browser_use_external", "computer_use", "in_app_browser", "in_app_chat", "in_app_local_automation", "hooks", "plugins", "remote_plugin", "multi_agent", "multi_agent_v2", "code_mode", "code_mode_host", "image_generation", "view_image", "skill_search", "standalone_web_search", "memories", "workspace_dependencies"].flatMap((feature) => ["--disable", feature]),
+      ...codexExecFeatures.enable.flatMap((feature) => ["--enable", feature]),
+      ...codexExecFeatures.disable.flatMap((feature) => ["--disable", feature]),
       "-s",
       "read-only",
       "-C",

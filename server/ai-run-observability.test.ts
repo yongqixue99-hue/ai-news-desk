@@ -6,9 +6,20 @@ import {
   appendAiProviderAttempt,
   appendAiRetry,
   completeAiRunTrace,
+  classifyAiError,
   sanitizeAiRunTrace,
   startAiRunTrace,
 } from "./ai-run-observability.js";
+
+test("unsupported Codex feature flags are configuration errors with shared update advice", () => {
+  const raw = new Error("Unknown feature flag: skip_host_skill_discovery");
+  assert.equal(classifyAiError({ error: raw, exitCode: 1 }), "configuration");
+  const trace = appendAiProviderAttempt(startAiRunTrace({
+    taskKind: "candidate-briefing", provider: { id: "codex", model: "test" },
+  }), { provider: { id: "codex", model: "test" } });
+  const failed = appendAiError(trace, { error: raw, exitCode: 1 });
+  assert.match(failed.errors[0].message, /请更新 ChatGPT 或 Codex 桌面应用/);
+});
 
 test("starting an AI trace records a deterministic skill snapshot without storing instructions", () => {
   const trace = startAiRunTrace({

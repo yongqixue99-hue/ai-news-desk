@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolveCodexExecutable } from "./codex-executable.js";
+import { codexExecFeatures, codexUpdateAdvice } from "./codex-exec-policy.js";
 import { fetchRemote, readResponseBuffer, validateRemoteUrl } from "./remote-url.js";
 import { getProviderApiKey } from "./secrets.js";
 import type {
@@ -17,6 +18,7 @@ export interface ProviderHealthCommandResult {
 }
 
 export interface ProviderHealthDependencies {
+  resolveCodexCommand: () => string;
   now: () => Date;
   clock: () => number;
   getApiKey: (providerId: string) => Promise<string>;
@@ -97,6 +99,7 @@ const runCommand = (
 });
 
 const defaultDependencies: ProviderHealthDependencies = {
+  resolveCodexCommand: resolveCodexExecutable,
   now: () => new Date(),
   clock: () => Date.now(),
   getApiKey: getProviderApiKey,
@@ -134,13 +137,15 @@ const codexHealth = async (
   dependencies: ProviderHealthDependencies,
   startedAt: number,
 ) => {
-  const codexCommand = resolveCodexExecutable();
+  const codexCommand = dependencies.resolveCodexCommand();
+  const result = (status: ProviderHealthStatus, category: ProviderHealthErrorCategory, message: string) =>
+    resultFor(provider, startedAt, dependencies, status, category, `${message}（CLI: ${codexCommand}）`);
   const version = await dependencies.runCommand(codexCommand, ["--version"], codexProbeTimeoutMs);
   if (version.timedOut) {
-    return resultFor(provider, startedAt, dependencies, "error", "timeout", "Codex CLI 响应超时；请在终端运行 codex --version 检查安装。");
+    return result("error", "timeout", "Codex CLI 响应超时；请在终端运行 codex --version 检查安装。");
   }
   if (!commandOk(version)) {
-    return resultFor(provider, startedAt, dependencies, "error", "not-configured", "未找到可用的 Codex CLI；请安装或更新 @openai/codex，并确认 codex 在 PATH 中。");
+    return result("error", "not-configured", "未找到可用的 Codex CLI；请安装或更新 @openai/codex，并确认 codex 在 PATH 中。");
   }
 
   const normalLogin = await dependencies.runCommand(codexCommand, ["login", "status"], codexProbeTimeoutMs);
@@ -157,15 +162,15 @@ const codexHealth = async (
     );
     if (!commandOk(isolatedLogin)) {
       if (normalLogin.timedOut || isolatedLogin.timedOut) {
-        return resultFor(provider, startedAt, dependencies, "error", "timeout", "检查 Codex 登录状态超时；请在终端运行 codex login status 后重试。");
+        return result("error", "timeout", "检查 Codex 登录状态超时；请在终端运行 codex login status 后重试。");
       }
       if (looksLikeAuthError(normalLogin) || looksLikeAuthError(isolatedLogin)) {
-        return resultFor(provider, startedAt, dependencies, "error", "auth", "Codex CLI 可用，但没有有效的 ChatGPT 登录；请在终端运行 codex login 后重试。");
+        return result("error", "auth", "Codex CLI 可用，但没有有效的 ChatGPT 登录；请在终端运行 codex login 后重试。");
       }
       if (looksLikeConfigError(normalLogin) || looksLikeConfigError(isolatedLogin)) {
-        return resultFor(provider, startedAt, dependencies, "error", "config", "Codex 配置无法读取；请检查 ~/.codex/config.toml 中的 service_tier 与 model_reasoning_effort，或更新 Codex CLI 后重试。");
+        return result("error", "config", "Codex 配置无法读取；请检查 ~/.codex/config.toml 中的 service_tier 与 model_reasoning_effort，或更新 Codex CLI 后重试。");
       }
-      return resultFor(provider, startedAt, dependencies, "error", "unknown", "Codex 登录诊断未通过；请在终端运行 codex login status 查看并修复。");
+      return result("error", "unknown", "Codex 登录诊断未通过；请在终端运行 codex login status 查看并修复。");
     }
     commandPrefix = ["-c", "service_tier=fast", "-c", "model_reasoning_effort=xhigh"];
     configWarning = looksLikeConfigError(normalLogin);
@@ -177,20 +182,29 @@ const codexHealth = async (
     codexProbeTimeoutMs,
   );
   if (!commandOk(execHelp)) {
-    return resultFor(provider, startedAt, dependencies, "error", execHelp.timedOut ? "timeout" : "config", "Codex 已登录，但非交互命令不可用；请更新 Codex CLI，并在终端运行 codex exec --help 检查。");
-  }
-  if (configWarning) {
-    return resultFor(provider, startedAt, dependencies, "warning", "config", "ChatGPT 登录有效，但 ~/.codex/config.toml 与当前 CLI 不兼容；工作台已使用兼容覆盖，仍建议更新 Codex CLI。");
+    return result("error", execHelp.timedOut ? "timeout" : "config", "Codex 已登录，但非交互命令不可用；请更新 Codex CLI，并在终端运行 codex exec --help 检查。");
   }
 
-  const versionLabel = version.stdout.match(/codex(?:-cli)?\s+([\w.-]+)/i)?.[1];
-  return resultFor(
-    provider,
-    startedAt,
-    dependencies,
+  const versionLabel = version.stdout.match(/codex(?:-cli)?\s+([\w.-]+)/i)?.[1] || "版本未知";
+  const features = await dependencies.runCommand(codexCommand, [...commandPrefix, "features", "list"], codexProbeTimeoutMs);
+  const supported = new Set(features.stdout.split(/\r?\n/u).flatMap((line) => {
+    const name = line.trim().match(/^([a-z_][a-z0-9_]*)\s+/iu)?.[1];
+    return name ? [name] : [];
+  }));
+  const missing = [...codexExecFeatures.enable, ...codexExecFeatures.disable].filter((flag) => !supported.has(flag));
+  const detail = `Codex ${versionLabel}`;
+  if (!commandOk(features) || missing.length) {
+    return result("error", features.timedOut ? "timeout" : "config",
+      `${detail} ${features.timedOut ? "功能检查超时" : !commandOk(features) ? "功能列表不可用" : `缺少功能开关：${missing.join("、")}`}；${codexUpdateAdvice}。`);
+  }
+  if (configWarning) {
+    return result("warning", "config", `${detail}：ChatGPT 登录有效，但 ~/.codex/config.toml 与当前 CLI 不兼容；工作台已使用兼容覆盖，仍建议更新 Codex CLI。`);
+  }
+
+  return result(
     "healthy",
     "none",
-    versionLabel ? `Codex ${versionLabel} 已登录，非交互能力正常；本次未调用模型。` : "Codex 已登录，非交互能力正常；本次未调用模型。",
+    `${detail} 已登录，非交互能力和全部 ${codexExecFeatures.enable.length + codexExecFeatures.disable.length} 个功能开关正常；本次未调用模型。`,
   );
 };
 
