@@ -34,14 +34,14 @@ const candidate = (publishedAt: string): Candidate => ({
   topicIds: ["ai"],
 });
 
-const layoutFixture = () => {
+const layoutFixture = (untranslated = 0) => {
   const state = createDefaultState();
   const now = new Date().toISOString();
   const items = Array.from({ length: 10 }, (_, index) => ({
     ...candidate(now), id: `layout-${index}`, rawId: `layout-${index}`,
     title: `Original source headline ${index}`, url: `https://example.com/layout/${index}`,
     canonicalUrl: `https://example.com/layout/${index}`, recommendationScore: 90 - index,
-    selected: index < 2, briefing: { titleZh: `隔离候选 ${index}`, summaryZh: "只有来源支持的信息才能进入文章。", basis: "full-source" as const, generatedAt: now, providerId: "fixture" },
+    selected: index < 2, briefing: index < untranslated ? undefined : { titleZh: `隔离候选 ${index}`, summaryZh: "只有来源支持的信息才能进入文章。", basis: "full-source" as const, generatedAt: now, providerId: "fixture" },
   }));
   return renderToStaticMarkup(createElement(Workbench, {
     settings: state.settings, sources: [], activeProvider: state.aiSettings.providers[0]!,
@@ -270,4 +270,12 @@ test("selection summary names every queued candidate, surfaces gaps, and shows t
   assert.match(markup, /aria-label="从待写移除：OpenAI launches a new model"/u);
   assert.match(markup, />生成 2 篇草稿</u);
   assert.doesNotMatch(markup, /生成所选文章/u);
+});
+
+test("the manual title translation button appears only while visible candidates lack a Chinese title", () => {
+  assert.doesNotMatch(layoutFixture(), /翻译本页标题/);
+  const html = layoutFixture(3);
+  assert.match(html, /翻译本页标题<small>3<\/small>/);
+  assert.match(html, /每次最多 20 条，还有 3 条未翻译/);
+  assert.match(html, /Original source headline 0/);
 });

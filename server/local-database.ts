@@ -6,7 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { validTitleTranslationRecord, type TitleTranslationRecord } from "./title-translation-types.js";
 
 import { decodeStateFragment, encodeStateFragment } from "./state-fragment-codec.js";
-import { decodeRunArtifact, hydrateRunArtifacts, runArtifactKinds, type RunArtifactKind, type RunArtifactRow, type RunArtifactValue } from "./run-artifacts.js";
+import { runArtifactKinds, type RunArtifactKind, type RunArtifactValue } from "./run-artifacts.js";
+import { decodeRunArtifact, hydrateRunArtifacts, type RunArtifactRow } from "./run-artifact-rows.js";
 import type { WorkflowRun } from "./types.js";
 
 export const LOCAL_DATABASE_SCHEMA_VERSION = 7;
