@@ -89,6 +89,9 @@ interface WorkbenchProps {
   onConfirmQuickDraftReview: (reviewId: string, selection: EvidenceReviewSelection) => Promise<void>;
   onOpenAiSettings: () => void;
   initialIntakeReview?: IntakeReviewRecord;
+  /** Set by the shell's write-start entry to open the link and screenshot intake dialog once. */
+  quickDraftRequested?: boolean;
+  onQuickDraftRequestConsumed?: () => void;
   onInitialIntakeReviewConsumed?: () => void;
 }
 
@@ -197,6 +200,8 @@ export function Workbench({
   onConfirmQuickDraftReview,
   onOpenAiSettings,
   initialIntakeReview,
+  quickDraftRequested = false,
+  onQuickDraftRequestConsumed,
   onInitialIntakeReviewConsumed,
 }: WorkbenchProps) {
   const [dateFrom, setDateFrom] = useState(() => relativeInputDate(-1));
@@ -204,6 +209,12 @@ export function Workbench({
   const [keywords, setKeywords] = useState("");
   const [candidateSort, setCandidateSort] = useState<CandidateSortMode>("recommended");
   const [quickDraftOpen, setQuickDraftOpen] = useState(false);
+  // The request is consumed once so returning to this page later does not reopen the dialog.
+  useEffect(() => {
+    if (!quickDraftRequested) return;
+    setQuickDraftOpen(true);
+    onQuickDraftRequestConsumed?.();
+  }, [quickDraftRequested, onQuickDraftRequestConsumed]);
   const [runRailOpen, setRunRailOpen] = useState(true);
   const [mobileQueueOpen, setMobileQueueOpen] = useState(false);
   const queueAnchor = useRef<HTMLElement>(null);

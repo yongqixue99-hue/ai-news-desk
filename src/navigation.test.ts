@@ -12,8 +12,8 @@ test("pageFromHash accepts supported direct routes and falls back safely", () =>
   assert.equal(pageFromHash("#editorial-system"), "editorial-system");
   assert.equal(pageFromHash("#ai-settings"), "ai-settings");
   assert.equal(pageFromHash("#today"), "today");
-  assert.equal(pageFromHash("#not-a-page"), "today");
-  assert.equal(pageFromHash(""), "today");
+  assert.equal(pageFromHash("#not-a-page"), "drafts");
+  assert.equal(pageFromHash(""), "drafts");
 });
 
 test("canonicalHashForPage returns the URL fragment used by navigation", () => {
@@ -35,8 +35,8 @@ test("controller canonicalizes the first URL without adding a history entry", ()
 
   const controller = createHashPageController(environment, () => undefined);
 
-  assert.equal(controller.getPage(), "today");
-  assert.deepEqual(historyCalls, [["replace", "#today"]]);
+  assert.equal(controller.getPage(), "drafts");
+  assert.deepEqual(historyCalls, [["replace", "#drafts"]]);
   controller.dispose();
   assert.equal(listeners.size, 0);
 });
@@ -98,7 +98,7 @@ test("an invalid externally supplied hash is replaced, never pushed", () => {
   hash = "#unknown";
   listeners.get("hashchange")?.();
 
-  assert.equal(controller.getPage(), "today");
-  assert.deepEqual(historyCalls, [["replace", "#today"]]);
+  assert.equal(controller.getPage(), "drafts");
+  assert.deepEqual(historyCalls, [["replace", "#drafts"]]);
   controller.dispose();
 });
