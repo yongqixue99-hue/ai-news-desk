@@ -482,8 +482,8 @@ test("production routes, strategy controls, completion, draft resumption and mob
     await reader.getByRole("button", { name: "关闭事件详情", exact: true }).click();
     const nav = page.getByRole("navigation", { name: "主导航", exact: true });
     assert.equal(await nav.getByRole("button").count(), 5);
-    assert.deepEqual(await nav.getByRole("button").evaluateAll(buttons => buttons.map(button => button.getAttribute("aria-label"))), ["今日", "新闻工作台", "社区广场", "草稿", "更多功能"]);
-    for (const label of ["今日", "新闻工作台", "社区广场", "草稿", "更多"]) {
+    assert.deepEqual(await nav.getByRole("button").evaluateAll(buttons => buttons.map(button => button.getAttribute("aria-label"))), ["写作", "今日", "新闻工作台", "社区广场", "更多功能"]);
+    for (const label of ["写作", "今日", "新闻工作台", "社区广场", "更多"]) {
       const button = nav.getByRole("button", { name: label === "更多" ? "更多功能" : label, exact: true });
       assert.equal(await button.innerText(), label, `${label} is visible on mobile`);
     }

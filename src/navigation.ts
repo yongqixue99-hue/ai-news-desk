@@ -17,7 +17,8 @@ export const canonicalHashForPage = (page: AppPage) => `#${page}`;
 
 export const pageFromHash = (hash: string): AppPage => {
   const candidate = hash.replace(/^#/, "") as AppPage;
-  return APP_PAGES.has(candidate) ? candidate : "today";
+  // Writing is the default destination; discovery pages are opened on purpose.
+  return APP_PAGES.has(candidate) ? candidate : "drafts";
 };
 
 export interface HashPageEnvironment {

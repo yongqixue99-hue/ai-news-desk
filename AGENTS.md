@@ -11,10 +11,11 @@ This repository is a single-user, local-first AI and technology editorial desk. 
 
 ## Product contract
 
-- The default flow is source collection → Story aggregation → recommendation → user selects a topic → evidence package → illustrated draft → user editing → WeChat draft-box sync → user manually publishes.
+- Writing is the centre of the product. The user starts an article from a blank page, a captured link or screenshot, or a recommended topic; edits it; sends it to the draft boxes or editors of the chosen platforms with that platform's settings filled in; reviews; and publishes by hand. Collection, Story aggregation and recommendation exist to feed that flow, not to precede it.
+- Using the product must take fewer steps than writing directly on the platform. A feature that adds a step without removing one elsewhere needs a reason.
 - Never implement unattended publication or call a mass-send/final-publish API.
 - Do not turn the product into a multi-tenant SaaS, team workspace, billing system, or general-news platform.
-- WeChat Official Account drafts are the primary delivery target. Xiaoheihe remains compatibility-only.
+- Delivery targets are parallel: Xiaoheihe, WeChat Official Account, Toutiao, Zhihu, Baijiahao and Xiaohongshu. None is primary. A platform may be shown as supported only after a real-account acceptance has confirmed the content and every platform setting (community, topics, visibility, cover and so on) arrives as intended; until then it is labelled unverified.
 - Community platforms are discovery and discussion sources. They are not automatically factual sources for the linked event.
 - A community item that links to an external article or repository defaults to source-first news writing. A self-contained author post may become a private source working copy. Community commentary is used only when explicitly routed and sampling thresholds are met.
 - Draft generation may only use facts frozen in `ContentPackage`. Unsupported facts block delivery.

@@ -3,7 +3,7 @@ import { chooseWorkbenchRun } from "./workbench-run";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createCoalescedRefresh } from "./coalesced-refresh";
 import { completionAvailability } from "../server/editorial-controls.js";
-import { AppShell } from "./components/AppShell";
+import { AppShell, type WriteStart } from "./components/AppShell";
 import { BootstrapStatusPage } from "./components/BootstrapStatusPage";
 import { Notice, type NoticeState } from "./components/Notice";
 import { ProductJobCenter } from "./components/ProductJobCenter";
@@ -103,6 +103,22 @@ function App() {
   useEffect(() => {
     if (state) rememberLastDraft(() => window.localStorage, resolveDraftId(state.drafts, activeDraftId));
   }, [activeDraftId, state?.drafts]);
+
+  const [quickDraftRequested, setQuickDraftRequested] = useState(false);
+  const consumeQuickDraftRequest = useCallback(() => setQuickDraftRequested(false), []);
+  // One entry for starting an article from anywhere in the app.
+  const startWriting = useCallback(async (start: WriteStart) => {
+    if (start === "topics") { navigate("today"); return; }
+    if (start === "link") { setQuickDraftRequested(true); navigate("workbench"); return; }
+    try {
+      const draft = await api.createBlankDraft();
+      setState(current => current ? { ...current, drafts: [draft, ...current.drafts] } : current);
+      setActiveDraftId(draft.id);
+      navigate("drafts");
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }, [navigate]);
 
   const refreshShell = useCallback(async () => {
     try {
@@ -306,6 +322,7 @@ function App() {
         onMarkNotificationRead={markShellNotificationRead}
         onMarkAllNotificationsRead={markAllShellNotificationsRead}
         onOpenNotification={openShellNotification}
+        onWrite={startWriting}
       >
         <Notice notice={notice} onClose={() => setNotice(null)} />
         <ProductJobCenter onOpenDraft={openDraftById} onOpenStory={(storyId) => { setHomeStoryId(storyId); navigate("today"); }} />
@@ -328,7 +345,7 @@ function App() {
 
   if (!state || !editorialSystem) {
     return (
-      <AppShell page={page} onNavigate={navigate} notifications={shell.notifications} notificationsMuted={shell.notificationsMuted} onToggleNotificationsMuted={toggleShellNotifications} onMarkNotificationRead={markShellNotificationRead} onMarkAllNotificationsRead={markAllShellNotificationsRead} onOpenNotification={openShellNotification}>
+      <AppShell page={page} onNavigate={navigate} notifications={shell.notifications} notificationsMuted={shell.notificationsMuted} onToggleNotificationsMuted={toggleShellNotifications} onMarkNotificationRead={markShellNotificationRead} onMarkAllNotificationsRead={markAllShellNotificationsRead} onOpenNotification={openShellNotification} onWrite={startWriting}>
         <BootstrapStatusPage state={bootstrapState} onRetry={() => void bootstrap()} />
       </AppShell>
     );
@@ -1233,6 +1250,7 @@ function App() {
       onMarkNotificationRead={markNotificationRead}
       onMarkAllNotificationsRead={markAllNotificationsRead}
       onOpenNotification={openNotification}
+      onWrite={startWriting}
     >
       <Notice notice={notice} onClose={() => setNotice(null)} />
       <ProductJobCenter onOpenDraft={openDraftById} onOpenStory={(storyId) => { setHomeStoryId(storyId); navigate("today"); }} />
@@ -1277,6 +1295,8 @@ function App() {
           onConfirmQuickDraftReview={confirmQuickDraftReview}
           onOpenAiSettings={() => navigate("ai-settings")}
           initialIntakeReview={externalIntakeReview}
+          quickDraftRequested={quickDraftRequested}
+          onQuickDraftRequestConsumed={consumeQuickDraftRequest}
           onInitialIntakeReviewConsumed={consumeExternalIntakeReview}
           onOpenDrafts={() => {
             setActiveDraftId(state.drafts.find((draft) => draft.runId === activeRun?.id)?.id ?? state.drafts[0]?.id);

@@ -7,6 +7,8 @@ import {
   Compass,
   FilePenLine,
   History,
+  Link2,
+  PenLine,
   MessagesSquare,
   MoreHorizontal,
   Newspaper,
@@ -25,18 +27,26 @@ const SHELL_PREFERENCE_KEY = "ai-news-desk:shell:v1";
 
 interface NavigationItem { id: AppPage; label: string; short: string; icon: LucideIcon }
 const navigationGroups: Array<{ label: string; items: NavigationItem[] }> = [
-  { label: "阅读", items: [
+  { label: "写作", items: [
+    { id: "drafts", label: "写作", short: "写作", icon: FilePenLine },
+  ] },
+  { label: "找选题", items: [
     { id: "today", label: "今日", short: "今日", icon: CalendarDays },
     { id: "aggregations", label: "聚合资讯", short: "聚合", icon: Radio },
     { id: "community", label: "社区广场", short: "社区", icon: MessagesSquare },
-  ] },
-  { label: "创作", items: [
     { id: "workbench", label: "新闻工作台", short: "工作台", icon: Newspaper },
-    { id: "drafts", label: "草稿", short: "草稿", icon: FilePenLine },
   ] },
 ];
 
-const mobileNavigation = [navigationGroups[0].items[0], navigationGroups[1].items[0], navigationGroups[0].items[2], navigationGroups[1].items[1]];
+const [writing, today, , community, workbench] = navigationGroups.flatMap(group => group.items);
+const mobileNavigation = [writing, today, workbench, community];
+
+export type WriteStart = "blank" | "link" | "topics";
+const writeStarts: Array<{ id: WriteStart; label: string; hint: string; icon: LucideIcon }> = [
+  { id: "blank", label: "从空白开始", hint: "直接写，不调用模型", icon: FilePenLine },
+  { id: "link", label: "粘贴链接或截图", hint: "保存来源，生成可改的初稿", icon: Link2 },
+  { id: "topics", label: "从今日选题挑", hint: "看看今天有什么值得写", icon: CalendarDays },
+];
 
 const settingsNavigation: Array<{ id: AppPage; label: string; icon: LucideIcon }> = [
   { id: "sources", label: "新闻源", icon: Rss },
@@ -59,6 +69,7 @@ interface AppShellProps {
   onMarkNotificationRead: (notificationId: string) => void | Promise<void>;
   onMarkAllNotificationsRead: () => void | Promise<void>;
   onOpenNotification: (notification: WorkflowNotification) => void;
+  onWrite: (start: WriteStart) => void | Promise<void>;
   children: React.ReactNode;
 }
 
@@ -81,6 +92,7 @@ export function AppShell({
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
   onOpenNotification,
+  onWrite,
   children,
 }: AppShellProps) {
   const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches);
@@ -88,6 +100,9 @@ export function AppShell({
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [writeOpen, setWriteOpen] = useState(false);
+  const writeRef = useRef<HTMLDivElement>(null);
+  const writeButtonRef = useRef<HTMLButtonElement>(null);
   const mobileMoreRef = useRef<HTMLDivElement>(null);
   const mobileMoreButtonRef = useRef<HTMLButtonElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -160,7 +175,25 @@ export function AppShell({
     };
   }, [settingsOpen]);
 
-  useEffect(() => { setMobileMoreOpen(false); setSettingsOpen(false); }, [page]);
+  useEffect(() => {
+    if (!writeOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setWriteOpen(false);
+      writeButtonRef.current?.focus();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!writeRef.current?.contains(event.target as Node)) setWriteOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [writeOpen]);
+
+  useEffect(() => { setMobileMoreOpen(false); setSettingsOpen(false); setWriteOpen(false); }, [page]);
 
   useEffect(() => {
     const viewport = window.matchMedia("(max-width: 720px)");
@@ -225,11 +258,11 @@ export function AppShell({
           <button
             type="button"
             className="brand"
-            aria-label={collapsed ? "展开侧栏" : "返回今日编辑台"}
+            aria-label={collapsed ? "展开侧栏" : "返回写作"}
             aria-controls="app-sidebar"
             aria-expanded={!collapsed}
-            title={collapsed ? "展开侧栏（⌘/Ctrl+B）" : "返回今日编辑台"}
-            onClick={() => collapsed ? setCollapsed(false) : navigate("today")}
+            title={collapsed ? "展开侧栏（⌘/Ctrl+B）" : "返回写作"}
+            onClick={() => collapsed ? setCollapsed(false) : navigate("drafts")}
           >
             <span className="brand-mark app-brand-mark" aria-hidden="true">{collapsed ? <PanelLeftOpen size={18} /> : <img src="/brand/news-desk.svg" alt="" width="36" height="36" />}</span>
             <span className="brand-copy">AI 新闻台<small>NEWS DESK</small></span>
@@ -248,6 +281,17 @@ export function AppShell({
             </button>
           ) : null}
         </div>
+
+        {!mobile ? <div className="write-start" ref={writeRef}>
+          <button ref={writeButtonRef} type="button" className="write-start-button" aria-label="写一篇" aria-expanded={writeOpen} aria-controls="write-start-panel" title={collapsed ? "写一篇" : undefined} onClick={() => setWriteOpen(current => !current)}>
+            <PenLine size={17} strokeWidth={2} /><span className="nav-full">写一篇</span>
+          </button>
+          {writeOpen ? <div id="write-start-panel" className="write-start-panel" aria-label="开始写作的方式">
+            {writeStarts.map(start => <button type="button" key={start.id} onClick={() => { setWriteOpen(false); void onWrite(start.id); }}>
+              <start.icon size={17} /><span><strong>{start.label}</strong><small>{start.hint}</small></span>
+            </button>)}
+          </div> : null}
+        </div> : null}
 
         <nav className="main-nav" aria-label="主导航">
           {mobile ? mobileNavigation.map(renderNavigationItem) : navigationGroups.map(group => <div className="workspace-nav-group" key={group.label} role="group" aria-label={group.label}>
