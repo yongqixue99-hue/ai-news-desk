@@ -12,6 +12,9 @@ import { buildAggregationView } from "../../server/aggregation-desk.js";
 import { buildDraftOverview } from "../../server/draft-overview.js";
 import { discoveryFixture } from "../../tests/fixtures/discovery.js";
 import type { Candidate, WorkflowRun } from "../../server/types.js";
+import type { AggregationEntry, AggregationView } from "../../server/aggregation-desk.js";
+import { createAggregationTitleTranslationDesk } from "../../server/aggregation-title-translations.js";
+import type { TitleTranslationRecord } from "../../server/title-translation-types.js";
 
 const now = process.env.AI_NEWS_DESK_PREVIEW_TIME || new Date().toISOString();
 let state = createDefaultState();
@@ -38,14 +41,36 @@ state.runs = [{ id: "example-run", createdAt: now, updatedAt: now, collectedAt: 
   windowHours: 24, sourceIds: [], scheduled: false, rawCount: candidates.length, candidates, logs: [],
 } satisfies WorkflowRun];
 let today = buildTodayView(state, now);
-const full = process.env.AI_NEWS_DESK_PREVIEW_MATRIX === "1" ? discoveryFixture(now) : undefined;
+const workbenchPreview = process.env.AI_NEWS_DESK_PREVIEW_WORKBENCH === "1";
+const communityPreview = process.env.AI_NEWS_DESK_PREVIEW_COMMUNITY === "1";
+const full = process.env.AI_NEWS_DESK_PREVIEW_MATRIX === "1" || workbenchPreview || communityPreview ? discoveryFixture(now) : undefined;
 if (full) {
   state = full.state; today = full.today;
+  if (workbenchPreview) {
+    state.runs[0]!.origin = "collection";
+    state.runs[0]!.candidates.forEach((candidate, index) => { candidate.selected = index < 2; });
+    state.sources.filter(source => source.role !== "community").slice(0, 2).forEach((source, index) => {
+      source.enabled = true; source.selected = true; source.name = `隔离采集来源 ${index + 1}`;
+    });
+  }
   const communityCandidate = structuredClone(state.runs[0]!.candidates[1]!);
   communityCandidate.id = "community-fixture"; communityCandidate.sourceRole = "community";
   communityCandidate.sourceName = "隔离示例 Hacker News";
   communityCandidate.engagement = { points: 8, comments: 4, discussionUrl: "https://example.com/discussion" };
   state.runs[0]!.candidates.push(communityCandidate);
+  if (communityPreview) {
+    state.runs[0]!.candidates = state.runs[0]!.candidates.filter(candidate => candidate.id !== "community-fixture");
+    state.runs[0]!.candidates.forEach((candidate, index) => {
+      candidate.sourceRole = "community"; candidate.sourceType = "hackernews"; candidate.sourceName = "隔离社区 Hacker News";
+      candidate.topicIds = index < 4 ? ["ai"] : ["technology"];
+      candidate.engagement = { points: (6 - index) * 8, comments: 4, discussionUrl: `https://example.com/discussion/${index}` };
+    });
+    const template = state.sources[0]!;
+    state.sources = (["healthy", "error", "unknown"] as const).map((health, index) => ({
+      ...template, id: `community-source-${index}`, name: `隔离社区来源 ${index + 1}`, role: "community", enabled: true,
+      selected: false, health, note: "仅供隔离界面验收", lastHealthDetail: "虚构来源状态", lastCheckedAt: now,
+    }));
+  }
   state.notifications = [{ schemaVersion: "workflow-notification/v1", id: "fixture-notification", type: "collection-failed", severity: "warning", title: "隔离示例：来源待重试", message: "这是截图夹具，不是实际运行通知。", createdAt: now }];
 }
 const jobs = process.env.AI_NEWS_DESK_PREVIEW_JOBS === "1" ? [{ id: "example-job", lane: "foreground", type: "build-content-package",
@@ -57,16 +82,33 @@ const responses: Record<string, unknown> = {
   "/api/shell": { notifications: state.notifications, notificationsMuted: false, activeRunCount: 0 }, "/api/product/jobs": jobs,
   "/api/intakes/reviews": [], "/api/home-news": today.mustReads,
   "/api/community": buildCommunityView(state, now), "/api/aggregations": buildAggregationView(state, Date.parse(now)),
+  "/api/aggregations/title-translations": [],
   "/api/x/status": { configured: false, paidEnabled: false, bearerTokenConfigured: false, sourceIds: [], mode: "disabled", detail: "隔离示例，不连接 X" },
   "/api/health": { ok: true, codex: { ok: true, detail: "隔离示例，无模型调用" }, publisher: { mode: "chrome-extension", ok: false, detail: "隔离示例，没有平台连接" }, horizon: { ok: true, detail: "隔离示例，采集已关闭" } },
   "/api/publisher/status": { mode: "chrome-extension", ok: false, detail: "隔离示例，没有平台连接" },
   "/api/data/storage": { stateBytes: 0, databaseBytes: 0, legacyStateBytes: 0, mediaBytes: 0, materialBytes: 0, jobBytes: 0, backupBytes: 0, totalBytes: 0 },
   "/api/delivery/social/status": { connected: false, settings: { enabled: false, extensionId: "", tokenConfigured: false }, accounts: [] },
 };
+const translationPreview = process.env.AI_NEWS_DESK_PREVIEW_TRANSLATIONS === "1";
+const translationCache = new Map<string, TitleTranslationRecord>(), translationMetrics = { calls: 0, keys: [] as string[] };
+const translationEntries: AggregationEntry[] = Array.from({ length: 70 }, (_, index) => ({
+  id: `translation-${index}`, title: `Example model ${index}`, url: `https://example.com/model/${index}`, summary: "隔离示例材料，保留原始英文标题与顺序。", publishedAt: now, observedAt: now,
+  kind: index < 60 ? "news" : "digest", selected: false, platforms: [{ id: index < 40 ? "preview-a" : "preview-b", name: index < 40 ? "隔离平台 A" : "隔离平台 B", url: `https://example.com/model/${index}` }],
+  native: { channel: index >= 30 && index < 50 ? "selected" : "feed", order: index + 1, checkedAt: now }, ranking: { score: 70 - index, heat: 0, eligible: true, reasons: ["虚构示例"] },
+}));
+const translationView: AggregationView = { entries: translationEntries, recommended: translationEntries.slice(0, 60), platformEntries: { "preview-a": translationEntries.slice(0, 40), "preview-b": translationEntries.slice(40) },
+  platforms: ["A", "B"].map(name => ({ id: `preview-${name.toLowerCase()}`, name: `隔离平台 ${name}`, homepage: `https://example.com/${name}`, status: "ready", checkedAt: now })), active: false };
+const translationDesk = createAggregationTitleTranslationDesk({
+  readView: async () => structuredClone(translationView), readCache: async keys => keys.flatMap(key => translationCache.has(key) ? [{ ...translationCache.get(key)! }] : []),
+  writeCache: async records => { records.forEach(record => translationCache.set(record.key, { ...record })); },
+  provider: async () => ({ ...state.aiSettings.providers[0]!, model: "synthetic-analysis-model" }),
+  generate: async input => { translationMetrics.calls++; translationMetrics.keys.push(...input.items.map(item => item.key)); return { output: { items: input.items.map(item => ({ key: item.key, titleZh: `隔离示例：模型 ${item.title.match(/\d+$/u)?.[0]} 更新` })) }, model: input.provider.model, translatedAt: now }; },
+});
+if (translationPreview) { responses["/api/aggregations"] = translationView; responses["/api/preview/title-translation-metrics"] = translationMetrics; }
 if (full) {
   const communityStory = structuredClone(full.story);
   communityStory.explanation.status = "ready";
-  responses["/api/editorial-intakes/ui-fixture/community-fixture"] = {
+  const communityDetail = {
     story: communityStory, contentPackage: full.contentPackage,
     intake: { storyId: communityStory.id, signalId: "ui-fixture:community-fixture", sourceKind: "linked-community", recommendedIntent: "news", recommendationReason: "隔离示例：先核对外部原文，社区仅作讨论线索。", options: [
       { intent: "news", mode: "brief", available: false, workingCopy: false, label: "按新闻写", description: "隔离示例，不调用生成", reason: "示例材料不用于真实生成" },
@@ -74,6 +116,22 @@ if (full) {
       { intent: "community", mode: "community", available: false, workingCopy: false, label: "分析讨论", description: "有限样本", reason: "少于 5 条有效样本" },
     ] },
   };
+  responses["/api/editorial-intakes/ui-fixture/community-fixture"] = communityDetail;
+  if (communityPreview) for (const candidate of state.runs[0]!.candidates) {
+    const detail = structuredClone(communityDetail);
+    detail.story.title = candidate.briefing?.titleZh || candidate.title;
+    detail.story.originalTitle = candidate.title;
+    detail.contentPackage.title = detail.story.title;
+    detail.intake.signalId = `ui-fixture:${candidate.id}`;
+    detail.story.signals.push({
+      ...structuredClone(communityStory.signals[0]!), runId: "ui-fixture", candidateId: candidate.id,
+      sourceName: candidate.sourceName, sourceRole: "community", sourceType: "hackernews",
+      title: candidate.title, titleZh: candidate.briefing?.titleZh, url: candidate.url,
+      discussionUrl: candidate.engagement?.discussionUrl, isCommunity: true, factBearing: false, linkedSource: true,
+      engagement: { points: candidate.engagement?.points, comments: candidate.engagement?.comments },
+    });
+    responses[`/api/editorial-intakes/ui-fixture/${candidate.id}`] = detail;
+  }
   responses[`/api/stories/${full.story.id}`] = { story: full.story, contentPackage: full.contentPackage, feedback: [] };
   responses[`/api/stories/${full.story.id}/reading`] = full.contentPackage.sourceEvidence;
   responses[`/api/drafts/${full.draft.id}`] = full.draft;
@@ -81,7 +139,21 @@ if (full) {
   responses[`/api/drafts/${full.draft.id}/agent/threads`] = [];
 }
 const app = express();
-app.use("/api", (req, res, next) => {
+app.use(express.json());
+app.use("/api", async (req, res, next) => {
+  // This opt-in fixture updates only fictional in-memory selection. No worker,
+  // storage, collection, generation or delivery routes are made writable.
+  if (workbenchPreview && req.method === "PATCH" && /^\/runs\/ui-fixture\/candidates\/[a-f0-9]{14}$/u.test(req.path)) {
+    const candidate = state.runs[0]!.candidates.find(item => item.id === req.path.split("/").at(-1));
+    if (!candidate || typeof req.body?.selected !== "boolean") { res.status(400).json({ error: "无效的示例选择" }); return; }
+    candidate.selected = req.body.selected; responses["/api/bootstrap"] = bootstrapView(state);
+    res.json({ run: state.runs[0] }); return;
+  }
+  if (translationPreview && req.path === "/aggregations/title-translations" && (req.method === "GET" || req.method === "POST")) {
+    try { res.json(req.method === "GET" ? await translationDesk.cached() : await translationDesk.translate(req.body?.items)); }
+    catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "隔离示例翻译失败" }); }
+    return;
+  }
   // The reader records an opened event; this fixture acknowledges it without storing anything.
   if (full && req.method === "POST" && /^\/stories\/[^/]+\/events$/u.test(req.path)) { res.json({ event: { id: "fixture-event", createdAt: now } }); return; }
   if (req.method !== "GET") { res.status(405).json({ error: "隔离截图仅允许读取示例数据" }); return; }

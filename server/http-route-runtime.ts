@@ -1,3 +1,4 @@
+import type { RunArtifactReader } from "./run-artifacts.js";
 import type { readState, readStateProjection, updateState, replaceState, getLocalDatabase } from "./storage.js";
 import type { createDeliveryDesk } from "./delivery-desk.js";
 import type { createZhihuHotlist } from "./source-desk.js";
@@ -8,6 +9,7 @@ import type { createXiaoheiheDelivery } from "./xiaoheihe-delivery.js";
 
 /** Lazy getters preserve the composition root service initialization order. */
 export interface HttpRouteRuntime {
+  readonly readArtifact?: RunArtifactReader;
   readonly readState: typeof readState;
   readonly readStateProjection: typeof readStateProjection;
   readonly updateState: typeof updateState;

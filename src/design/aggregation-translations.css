@@ -1,0 +1,7 @@
+.aggregation-translation-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; margin: 0 0 12px; }
+.aggregation-translation-tools > span { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.aggregation-translation-tools > .aggregation-translation-error { color: var(--accent); }
+.aggregation-translation-tools > button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; min-height: 32px; }
+.aggregation-original-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; margin: 6px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.aggregation-machine-label { display: inline-block; flex-shrink: 0; padding: 1px 6px; border-radius: 3px; background: var(--surface-subtle); font-size: 10px; color: var(--muted); }
+@media (max-width: 720px) { .aggregation-translation-tools { justify-content: space-between; gap: 6px; } .aggregation-translation-tools > span { max-width: 100%; overflow-wrap: anywhere; } }

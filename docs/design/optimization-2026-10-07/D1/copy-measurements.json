@@ -1,0 +1,64 @@
+{
+  "kind": "aggregate metrics from independent database copies; no article/account content",
+  "runtime": "Node 22.23.2 / npm 10.9.8",
+  "runs": 62,
+  "beforeRunsPhysicalBytes": 15661832,
+  "afterRunsPhysicalBytes": 887712,
+  "afterRunsLogicalBytes": 3286587,
+  "artifactRows": 41,
+  "noopUpdateBeforeMs": [
+    111.04137500000002,
+    111.02645800000005,
+    112.15062499999999,
+    113.479916,
+    127.62016700000015,
+    111.441959,
+    111.75175000000013,
+    111.72783400000003,
+    113.4375419999999,
+    127.77804100000003,
+    112.00808399999983
+  ],
+  "noopUpdateAfterMs": [
+    30.79920800000002,
+    29.454875000000015,
+    29.580749999999966,
+    29.541291,
+    29.733292000000006,
+    29.603083999999967,
+    33.50487499999997,
+    30.355749999999944,
+    29.210542000000032,
+    29.290000000000077,
+    29.877749999999992
+  ],
+  "noopMedianBeforeMs": 112.00808399999983,
+  "noopMedianAfterMs": 29.603083999999967,
+  "fullStateEqual": true,
+  "viewsEqual": [
+    "today",
+    "aggregation",
+    "community",
+    "performance",
+    "trace",
+    "diagnostics"
+  ],
+  "otherTablesEqual": [
+    "workflow_jobs",
+    "feedback_events",
+    "workflow_events",
+    "content_packages",
+    "discussion_samples",
+    "source_snapshots",
+    "editorial_memories"
+  ],
+  "diagnosticsComplete": "62/62",
+  "sourceCopyUnchanged": true,
+  "firstFullReadWithMigrationMs": 472.78508300000004,
+  "limitations": [
+    "Measurements are serial direct-module reads and writes, not a running service.",
+    "Concurrent checks produced 58–126 ms updates; no absolute latency guarantee under CPU/GC pressure.",
+    "The gzip physical runs fragment is 887712 B; its losslessly decoded JSON remains 3286587 B.",
+    "No real migration, platform delivery, API fee or deployment occurred."
+  ]
+}

@@ -1,3 +1,4 @@
+import { artifactFromRun, runArtifactKinds, type RunArtifactReader } from "./run-artifacts.js";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { execFile } from "node:child_process";
@@ -57,8 +58,13 @@ export const checksumForState = (state: WorkflowState) =>
 export const createWorkflowBackup = (
   state: WorkflowState,
   exportedAt = new Date().toISOString(),
+  readArtifact?: RunArtifactReader,
 ): WorkflowBackupEnvelope => {
   const snapshot = structuredClone(state);
+  for (const run of snapshot.runs) for (const kind of runArtifactKinds) {
+    const value = artifactFromRun(run, kind, readArtifact);
+    if (value !== undefined) Object.assign(run, { [kind]: value });
+  }
   return {
     format: EXPORT_FORMAT,
     exportVersion: EXPORT_VERSION,
@@ -142,7 +148,7 @@ export const createPortableWorkflowArchive = async (input: {
     input.database.createSnapshot(databasePath);
     await copyDirectoryIfPresent(path.join(input.workflowRoot, "media"), path.join(staging, "media"));
     await copyDirectoryIfPresent(path.join(input.workflowRoot, "materials"), path.join(staging, "materials"));
-    const lightBackup = createWorkflowBackup(input.state, createdAt);
+    const lightBackup = createWorkflowBackup(input.state, createdAt, input.database.getRunArtifact.bind(input.database));
     await writeFile(path.join(staging, "state-backup.json"), `${JSON.stringify(lightBackup, null, 2)}\n`, "utf8");
 
     const payloadFiles = await filesBelow(staging);
@@ -157,7 +163,7 @@ export const createPortableWorkflowArchive = async (input: {
       createdAt,
       databaseSchemaVersion: LOCAL_DATABASE_SCHEMA_VERSION,
       stateVersion: input.state.version,
-      stateChecksum: checksumForState(input.state),
+      stateChecksum: lightBackup.checksum,
       secretsIncluded: false,
       files,
     };

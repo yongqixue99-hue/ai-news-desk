@@ -1,3 +1,4 @@
+import { artifactFromRun, snapshotArtifactReader, type RunArtifactReader } from "./run-artifacts.js";
 import { assessPracticeOpportunity } from "./practice-opportunity.js";
 import { buildTopicRadar } from "./topic-radar.js";
 import { buildAggregationView } from "./aggregation-desk.js";
@@ -208,7 +209,7 @@ const withinMergeWindow = (left: CandidateRecord, right: CandidateRecord) => {
   return Number.isFinite(delta) && delta <= 96 * 3_600_000;
 };
 
-const clustersFor = (state: WorkflowState) => {
+const clustersFor = (state: WorkflowState, readArtifact?: RunArtifactReader) => {
   const clusters: StoryCluster[] = [];
   const exactIndex = new Map<string, StoryCluster>();
   const versionIndex = new Map<string, Set<StoryCluster>>();
@@ -286,9 +287,9 @@ const clustersFor = (state: WorkflowState) => {
   }
   // Attach non-visible evidence only to an existing event. This pool cannot
   // create recommendations of its own or borrow a different date section.
-  for (const run of state.runs) for (const candidate of run.evidenceCandidates ?? []) {
+  for (const run of state.runs) for (const candidate of artifactFromRun(run, "evidenceCandidates", readArtifact) ?? []) {
     if (run.candidates.some(item => item.id === candidate.id)) continue;
-    const via = run.discoveryTrace?.find(entry => entry.rawId === candidate.rawId)?.candidateId;
+    const via = artifactFromRun(run, "discoveryTrace", readArtifact)?.find(entry => entry.rawId === candidate.rawId)?.candidateId;
     const owner = clusters.find(cluster => cluster.records.some(record => record.runId === run.id && record.candidate.id === via))
       ?? exactKeysFor(candidate).map(key => exactIndex.get(key)).find(Boolean);
     if (owner && !owner.records.some(record => record.runId === run.id && record.candidate.id === candidate.id)) owner.records.push({ runId: run.id, candidate });
@@ -820,13 +821,14 @@ const storyRank = (story: StoryView, focused = true) => {
     + (focused && story.opportunity ? opportunityPriority(story.opportunity) : 0);
 };
 
-export const buildStories = (state: WorkflowState, now = new Date().toISOString()) => {
+export const buildStories = (state: WorkflowState, now = new Date().toISOString(), readArtifact?: RunArtifactReader) => {
+  readArtifact = snapshotArtifactReader(readArtifact);
   const cutoff = Date.parse(now) - 30 * 86_400_000;
   const feedback = state.candidateFeedback.filter((entry) => Date.parse(entry.createdAt) >= cutoff && Date.parse(entry.createdAt) <= Date.parse(now));
   const candidates = [...new Map(state.runs.flatMap((run) => run.candidates).map((candidate) => [candidate.id, candidate])).values()];
   const preferences = new Map(personalizeCandidates(candidates, feedback, state.settings.personalizationEnabled).map((candidate) => [candidate.id, candidate]));
   const focused = state.settings.recommendationMode !== "balanced";
-  return clustersFor(state).map((cluster) => {
+  return clustersFor(state, readArtifact).map((cluster) => {
     const story = storyFromCluster(cluster, now);
     const originalSignal = story.signals.find((signal) => signal.title === story.originalTitle && !signal.isCommunity)
       ?? story.signals.find((signal) => signal.title === story.originalTitle);
@@ -898,9 +900,9 @@ const isWithinTodayWindow = (story: StoryView) => {
     && story.evidenceStrength !== "weak";
 };
 
-export const buildTodayView = (state: WorkflowState, now = new Date().toISOString()): TodayView => {
+export const buildTodayView = (state: WorkflowState, now = new Date().toISOString(), readArtifact?: RunArtifactReader): TodayView => {
   const recommendationTarget = 8;
-  const stories = buildStories(state, now);
+  const stories = buildStories(state, now, readArtifact);
   // Visibility is separate from evidence readiness: an indexed official
   // announcement deserves attention while its original page is being read.
   const releaseHighlights = stories.filter((story) => story.ageHours <= confirmedModelLaunchCatchupHours
@@ -986,7 +988,7 @@ export const buildTodayView = (state: WorkflowState, now = new Date().toISOStrin
   ].filter((reason) => reason.count > 0);
   return {
     generatedAt: now,
-    radar: buildTopicRadar([...new Map([...active, ...releaseHighlights].map(story => [story.id, story])).values()], buildAggregationView(state, Date.parse(now)).entries, now, stories),
+    radar: buildTopicRadar([...new Map([...active, ...releaseHighlights].map(story => [story.id, story])).values()], buildAggregationView(state, Date.parse(now), readArtifact).entries, now, stories),
     collection: latestSourceCollection(state.runs),
     pending: stories.filter((story) => story.selected && !story.drafted && !story.published && !story.ignored),
     releaseHighlights,
@@ -1034,11 +1036,11 @@ export const collectStoryImages = (candidates: ReadonlyArray<Pick<Candidate, "im
   uniqueBy(candidates.flatMap(candidate => candidate.images), image => normalizedUrl(image.url) || image.id),
 ).slice(0, 48);
 
-export const storyById = (state: WorkflowState, storyId: string, now = new Date().toISOString()) =>
-  buildStories(state, now).find((story) => story.id === storyId);
+export const storyById = (state: WorkflowState, storyId: string, now = new Date().toISOString(), readArtifact?: RunArtifactReader) =>
+  buildStories(state, now, readArtifact).find((story) => story.id === storyId);
 
-export const retainStoryForWriting = (state: WorkflowState, storyId: string) => {
-  const story = storyById(state, storyId);
+export const retainStoryForWriting = (state: WorkflowState, storyId: string, readArtifact?: RunArtifactReader) => {
+  const story = storyById(state, storyId, undefined, readArtifact);
   const signal = story?.signals.find((item) => !item.isCommunity) ?? story?.signals[0];
   const candidate = signal && state.runs.find((run) => run.id === signal.runId)?.candidates.find((item) => item.id === signal.candidateId);
   if (candidate) candidate.selected = true;

@@ -1,0 +1,52 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import test from "node:test";
+import { chromium } from "playwright-core";
+import { findChromeExecutable } from "../../server/chrome-launch.js";
+import type { TitleTranslationTarget } from "../../server/title-translation-types.js";
+
+test("aggregation titles translate only on click, only the visible filtered slice, and reuse cache on desktop and mobile", { timeout: 90_000 }, async () => {
+  const child = spawn(process.execPath, ["--import", "tsx", "scripts/ui-preview/fixture.ts"], { env: { ...process.env, AI_NEWS_DESK_PREVIEW_TRANSLATIONS: "1", AI_NEWS_DESK_DIST_ROOT: process.env.AI_NEWS_DESK_DIST_ROOT || path.resolve("dist") }, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+  let output = ""; child.stderr.on("data", data => { output += String(data); });
+  const browser = await chromium.launch({ executablePath: await findChromeExecutable(), headless: true });
+  try {
+    const origin = await new Promise<string>((resolve, reject) => { const timer = setTimeout(() => reject(new Error(output)), 15000); child.stdout.on("data", data => { output += String(data); const match = output.match(/http:\/\/127\.0\.0\.1:\d+/u); if (match) { clearTimeout(timer); resolve(match[0]); } }); child.once("exit", () => { clearTimeout(timer); reject(new Error(output)); }); });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }), errors: string[] = [], batches: TitleTranslationTarget[][] = [];
+    page.on("pageerror", error => errors.push(String(error))); page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+    page.on("request", request => { if (request.method() === "POST") { assert.ok(request.url().endsWith("/api/aggregations/title-translations")); batches.push(request.postDataJSON().items); } });
+    await page.route("**/*", route => route.request().url().startsWith(origin) ? route.continue() : route.abort());
+    const initial = await (await page.request.get(`${origin}/api/aggregations`)).json();
+    await page.goto(`${origin}/#aggregations`); await page.locator(".aggregation-row").first().waitFor();
+    assert.equal(await page.getByRole("button", { name: "翻译本页标题", exact: true }).count(), 1);
+    assert.equal(await page.locator(".aggregation-row").count(), 40); assert.deepEqual(batches, []);
+    const firstUrl = await page.locator(".aggregation-row h2 a").first().getAttribute("href");
+    await page.getByRole("button", { name: "翻译本页标题", exact: true }).click();
+    await page.locator(".aggregation-machine-label").first().waitFor();
+    assert.equal(batches[0]!.length, 20); assert.deepEqual(batches[0]!.map(item => item.entryId), Array.from({ length: 20 }, (_, index) => `translation-${index}`));
+    assert.equal(await page.locator(".aggregation-machine-label").count(), 20);
+    assert.match(await page.locator(".aggregation-original-title").first().innerText(), /Example model 0/u);
+    assert.equal(await page.locator(".aggregation-row h2 a").first().getAttribute("href"), firstUrl);
+    assert.deepEqual(await (await page.request.get(`${origin}/api/aggregations`)).json(), initial);
+    await page.reload(); await page.locator(".aggregation-machine-label").first().waitFor(); assert.equal(batches.length, 1);
+    await page.getByLabel("筛选聚合资讯").fill("model 5"); assert.equal(await page.locator(".aggregation-row").count(), 11);
+    await page.getByRole("button", { name: "翻译本页标题", exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll(".aggregation-machine-label").length === 11);
+    assert.equal(batches[1]!.length, 10); assert.ok(batches[1]!.every(item => /^translation-5\d$/u.test(item.entryId)));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByLabel("筛选聚合资讯").fill(""); await page.getByRole("button", { name: "隔离平台 B 读取正常", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "平台精选", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await page.locator(".aggregation-row").count(), 10);
+    await page.getByRole("button", { name: "翻译本页标题", exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll(".aggregation-machine-label").length === 10);
+    assert.equal(batches[2]!.length, 10); assert.ok(batches[2]!.every(item => /^translation-4\d$/u.test(item.entryId)));
+    await page.getByRole("button", { name: "订阅顺序", exact: true }).click(); await page.getByLabel("筛选聚合资讯").fill("model 6");
+    assert.equal(await page.locator(".aggregation-row").count(), 10);
+    await page.getByRole("button", { name: "翻译本页标题", exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll(".aggregation-machine-label").length === 10);
+    assert.ok(batches[3]!.every(item => /^translation-6\d$/u.test(item.entryId))); assert.equal(batches[3]!.length, 10);
+    assert.equal(await page.getByRole("button", { name: "翻译本页标题", exact: true }).isDisabled(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 0);
+    assert.deepEqual(errors, []); assert.deepEqual(await (await page.request.get(`${origin}/api/aggregations`)).json(), initial);
+  } finally { await browser.close(); if (child.pid && process.platform !== "win32") { try { process.kill(-child.pid, "SIGTERM"); } catch { /* exited */ } } else child.kill("SIGTERM"); child.stdout.destroy(); child.stderr.destroy(); }
+});

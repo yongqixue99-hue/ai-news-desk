@@ -1,5 +1,5 @@
 import { buildTodayView } from "./story-desk.js";
-import { getStateRevision, readStateProjection } from "./storage.js";
+import { getStateRevision, readStateProjection, readRunArtifact } from "./storage.js";
 import type { TodayView } from "./product-types.js";
 import type { WorkflowState } from "./types.js";
 
@@ -17,5 +17,5 @@ export const createTodayViewCache = (options: { now?: () => number; build?: type
   };
 };
 
-const todayView = createTodayViewCache();
+const todayView = createTodayViewCache({ build: (state, now) => buildTodayView(state, now, readRunArtifact) });
 export const readTodayView = () => readStateProjection(state => todayView(state, getStateRevision()));

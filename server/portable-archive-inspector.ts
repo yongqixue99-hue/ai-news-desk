@@ -1,3 +1,5 @@
+import { decodeStateFragment } from "./state-fragment-codec.js";
+import { hydrateRunArtifacts, type RunArtifactRow } from "./run-artifacts.js";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, mkdtemp, open, rm, stat, type FileHandle } from "node:fs/promises";
@@ -469,7 +471,10 @@ const databaseSnapshotFor = (databasePath: string) => {
       if (createHash("sha256").update(row.value_json).digest("hex") !== row.checksum) {
         throw new Error(`invalid state fragment: ${row.key}`);
       }
-      state[row.key] = JSON.parse(row.value_json) as unknown;
+      state[row.key] = decodeStateFragment(row.key, row.value_json);
+    }
+    if (database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'run_artifacts'").get()) {
+      hydrateRunArtifacts(state, database.prepare("SELECT * FROM run_artifacts ORDER BY run_id, kind").all() as unknown as RunArtifactRow[]);
     }
     return { version, state };
   } catch (error) {

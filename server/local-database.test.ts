@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { LocalDatabase } from "./local-database.js";
 
 const withDatabase = async (run: (root: string, store: LocalDatabase) => Promise<void>) => {
@@ -22,6 +23,41 @@ const withDatabase = async (run: (root: string, store: LocalDatabase) => Promise
     await rm(root, { recursive: true, force: true });
   }
 };
+
+test("schema 6 upgrades with a display-only translation cache and leaves all original state unchanged", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "newsdesk-translation-upgrade-"));
+  const original = { version: 11, runs: [{ id: "original", title: "Original title", facts: ["unchanged"] }] };
+  let store = await LocalDatabase.open({ workflowRoot: root, initialState: () => original });
+  try {
+    store.close();
+    const old = new DatabaseSync(path.join(root, "newsdesk.db"));
+    old.exec("DROP TABLE IF EXISTS title_translations; UPDATE metadata SET value = '6' WHERE key = 'schema_version'"); old.close();
+    store = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({}) });
+    assert.deepEqual(store.readState(), original);
+    const record = { key: "a".repeat(64), titleZh: "示例中文标题", model: "unchanged-model", translatedAt: "2026-10-07T12:00:00.000Z" };
+    store.saveTitleTranslations([record]);
+    assert.deepEqual(store.getTitleTranslations([record.key]), [record]);
+    store.close(); store = await LocalDatabase.open({ workflowRoot: root, initialState: () => ({}) });
+    assert.deepEqual(store.getTitleTranslations([record.key]), [record]); assert.deepEqual(store.readState(), original);
+    assert.throws(() => store.saveTitleTranslations([{ ...record, key: "b".repeat(64) }, { ...record, key: "invalid" }]));
+    assert.deepEqual(store.getTitleTranslations([record.key, "b".repeat(64)]), [record]);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("snapshot replacement restores the cache and accepts a pre-cache snapshot without carrying over unrelated translations", async () => {
+  await withDatabase(async (root, store) => {
+    const record = { key: "c".repeat(64), titleZh: "缓存标题", model: "existing", translatedAt: "2026-10-07T12:00:00.000Z" };
+    store.saveTitleTranslations([record]);
+    const snapshot = path.join(root, "with-cache.db"); store.createSnapshot(snapshot);
+    store.saveTitleTranslations([{ ...record, key: "d".repeat(64) }]);
+    store.replaceFromSnapshot(snapshot); assert.deepEqual(store.getTitleTranslations([record.key, "d".repeat(64)]), [record]);
+    const old = new DatabaseSync(snapshot); old.exec("DROP TABLE title_translations; UPDATE metadata SET value = '6' WHERE key = 'schema_version'"); old.close();
+    store.replaceFromSnapshot(snapshot);
+    assert.deepEqual(store.getTitleTranslations([record.key]), []); assert.equal(store.readState<{ marker: string }>().marker, "legacy");
+    const check = new DatabaseSync(store.databasePath, { readOnly: true });
+    try { assert.equal((check.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").get() as { value: string }).value, "7"); } finally { check.close(); }
+  });
+});
 
 test("filtered rework reads cannot be crowded out by collection events and disclose a capped result", async () => {
   await withDatabase(async (_root, store) => {

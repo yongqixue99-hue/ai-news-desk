@@ -49,7 +49,7 @@ test("bootstrap projection and on-demand diagnostics never rewrite or expose mut
     const view = await readStateProjection(bootstrapView);
     view.runs[0].candidates[0].title = "outside mutation";
     view.settings.community = "outside mutation";
-    const diagnostics = await readStateProjection(state => runDiagnosticsView(state, "fixture"));
+    const diagnostics = await readStateProjection((state, readArtifact) => runDiagnosticsView(state, "fixture", readArtifact));
     diagnostics!.discoveryTrace[0].title = "outside mutation";
     assert.deepEqual(await readState(), cachedBefore);
     assert.deepEqual(database.readState(), before);

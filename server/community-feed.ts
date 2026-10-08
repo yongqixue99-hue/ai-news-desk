@@ -1,3 +1,4 @@
+import { artifactFromRun, snapshotArtifactReader, type RunArtifactReader } from "./run-artifacts.js";
 import { hasOfficialUpdateAnchor, areDistinctOfficialUpdates } from "./official-update-url.js";
 import { mayShareEditorialEvent } from "./newsworthiness.js";
 import { compareCommunityMetrics, observedMetric, type CommunityMetricComparison } from "./community-metrics.js";
@@ -82,6 +83,7 @@ export interface CommunityFeedComposition {
 }
 
 export interface CommunityFeedOptions {
+  readArtifact?: RunArtifactReader;
   now?: string;
   expiryHours?: number;
   limit?: number;
@@ -295,10 +297,11 @@ export const findCommunitySupportingCandidates = (
   runs: WorkflowRun[],
   communityCandidate: Candidate,
   limit = 5,
+  readArtifact?: RunArtifactReader,
 ) => {
   const storyUrl = normalizedUrl(communityCandidate.canonicalUrl || communityCandidate.url);
   const discussionUrl = normalizedUrl(communityCandidate.engagement?.discussionUrl);
-  const matched = runs.flatMap((run) => [...run.candidates, ...(run.evidenceCandidates ?? []).filter(item => !run.candidates.some(visible => visible.id === item.id))].flatMap((candidate) => {
+  const matched = runs.flatMap((run) => [...run.candidates, ...(artifactFromRun(run, "evidenceCandidates", readArtifact) ?? []).filter(item => !run.candidates.some(visible => visible.id === item.id))].flatMap((candidate) => {
     if (isCommunityCandidate(candidate)) return [];
     const candidateUrl = normalizedUrl(candidate.canonicalUrl || candidate.url);
     const exactUrl = Boolean(storyUrl && candidateUrl && storyUrl === candidateUrl && candidateUrl !== discussionUrl);
@@ -324,7 +327,8 @@ export const findCommunitySupportingCandidates = (
 const supportingSourceViews = (
   runs: WorkflowRun[],
   candidate: Candidate,
-): CommunitySupportingSource[] => findCommunitySupportingCandidates(runs, candidate).map(({ runId, candidate: source }) => ({
+  readArtifact?: RunArtifactReader,
+): CommunitySupportingSource[] => findCommunitySupportingCandidates(runs, candidate, 5, readArtifact).map(({ runId, candidate: source }) => ({
   runId,
   candidateId: source.id,
   sourceName: source.sourceName,
@@ -381,6 +385,7 @@ export const composeCommunityFeed = (
   runs: WorkflowRun[],
   options: CommunityFeedOptions = {},
 ): CommunityFeedComposition => {
+  const readArtifact = snapshotArtifactReader(options.readArtifact);
   const nowMs = Date.parse(options.now ?? new Date().toISOString());
   const expiryMs = Math.max(1, options.expiryHours ?? 7 * 24) * 3_600_000;
   const clusters = new Map<string, CandidateRecord[]>();
@@ -413,7 +418,7 @@ export const composeCommunityFeed = (
       const ageHours = Number.isFinite(publishedMs) && Number.isFinite(nowMs)
         ? Math.max(0, (nowMs - publishedMs) / 3_600_000)
         : options.expiryHours ?? 7 * 24;
-      const supportingSources = supportingSourceViews(runs, merged.candidate);
+      const supportingSources = supportingSourceViews(runs, merged.candidate, readArtifact);
       return {
         runId: merged.runId,
         candidate: merged.candidate,

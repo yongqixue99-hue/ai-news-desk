@@ -204,6 +204,8 @@ export function Workbench({
   const [candidateSort, setCandidateSort] = useState<CandidateSortMode>("recommended");
   const [quickDraftOpen, setQuickDraftOpen] = useState(false);
   const [runRailOpen, setRunRailOpen] = useState(true);
+  const [mobileQueueOpen, setMobileQueueOpen] = useState(false);
+  const queueAnchor = useRef<HTMLElement>(null);
   const [rankingHelpOpen, setRankingHelpOpen] = useState(false);
   const [feedbackBusy, setFeedbackBusy] = useState<string>();
   const [communityDraftCandidate, setCommunityDraftCandidate] = useState<Candidate>();
@@ -382,6 +384,9 @@ export function Workbench({
       <div className={`workbench-grid ${runRailOpen ? "" : "run-rail-collapsed-layout"}`}>
         <section className="workflow-surface" aria-label="采集控制台">
           <div className="collection-controls">
+            <details className="collection-date-range">
+              <summary><CalendarRange size={15} /><span>搜寻日期 · {dateRangeDays} 天</span>{invalidDateRange ? <TriangleAlert size={14} /> : <ChevronDown size={14} />}</summary>
+              <div className="collection-date-fields">
             <label className="field-control date-range-control">
               <span className="control-label"><CalendarRange size={15} />搜寻日期</span>
               <span className="date-range-fields">
@@ -391,6 +396,8 @@ export function Workbench({
               </span>
               <small>{dateFrom > dateTo ? "开始日期不能晚于结束日期" : dateRangeDays > 31 ? "单次最多搜索 31 天" : `本次包含 ${dateRangeDays} 天`}</small>
             </label>
+              </div>
+            </details>
             <label className="field-control keyword-control">
               <span className="control-label"><Search size={15} />搜索关键词</span>
               <span className="input-with-icon">
@@ -398,6 +405,7 @@ export function Workbench({
                 <input
                   ref={keywordInputRef}
                   type="search"
+                  aria-label="搜索关键词"
                   value={keywords}
                   maxLength={120}
                   onChange={(event) => setKeywords(event.target.value)}
@@ -589,7 +597,7 @@ export function Workbench({
                 <article
                   id={`candidate-${candidateHome.featured.id}`}
                   tabIndex={0}
-                  className={`${candidateHome.featured.selected ? "candidate-featured selected" : "candidate-featured"}${sortedCandidates[keyboardCursor]?.id === candidateHome.featured.id ? " keyboard-active" : ""}`}
+                  className={`${candidateHome.featured.selected ? "candidate-featured workbench-candidate-row selected" : "candidate-featured workbench-candidate-row"}${sortedCandidates[keyboardCursor]?.id === candidateHome.featured.id ? " keyboard-active" : ""}`}
                 >
                   <div className="candidate-featured-copy">
                     <div className="candidate-card-meta">
@@ -632,7 +640,7 @@ export function Workbench({
                         <article
                           id={`candidate-${candidate.id}`}
                           tabIndex={0}
-                          className={`${candidate.selected ? "candidate-secondary-card selected" : "candidate-secondary-card"}${sortedCandidates[keyboardCursor]?.id === candidate.id ? " keyboard-active" : ""}`}
+                          className={`${candidate.selected ? "candidate-secondary-card workbench-candidate-row selected" : "candidate-secondary-card workbench-candidate-row"}${sortedCandidates[keyboardCursor]?.id === candidate.id ? " keyboard-active" : ""}`}
                           key={candidate.id}
                         >
                           <div className="candidate-card-meta">
@@ -679,24 +687,12 @@ export function Workbench({
               </div>
             ) : null}
             {coverageWarning ? <div className="run-empty-warning" role="status"><TriangleAlert size={17} /><span><strong>本次检索覆盖不完整</strong><small>{coverageWarning}</small></span></div> : null}
-            <div className="candidate-table-wrap">
-              <table className="candidate-table">
-                <thead>
-                  <tr>
-                    <th aria-label="选择" />
-                    <th>价值 / 传播</th>
-                    <th>来源</th>
-                    <th>候选新闻</th>
-                    <th>发布时间</th>
-                    <th>原图</th>
-                    <th>编辑偏好</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <div className="workbench-candidate-list-wrap">
+              <div className="workbench-candidate-list" aria-label="更多新闻候选">
+
                   {!candidates.length ? (
-                    <tr className={runHasNoResults ? "empty-row warning" : "empty-row"}>
-                      <td colSpan={8}>
+                    <article className={runHasNoResults ? "empty-row warning" : "empty-row"}>
+                      <div className="empty-run-copy">
                         {runHasNoResults ? <TriangleAlert size={26} /> : candidatesWereCleared ? <Trash2 size={26} /> : quickIntakeActive ? <LoaderCircle className="spin" size={26} /> : <Newspaper size={26} />}
                         <strong>{runHasNoResults ? coverageWarning ? "部分来源读取失败，暂未找到候选新闻" : "本次采集完成，但没有找到候选新闻" : candidatesWereCleared ? "当前候选列表已清空" : quickIntakeActive ? run?.stage : "点一次“开始采集”，候选会自动出现在这里"}</strong>
                         <span>
@@ -717,8 +713,8 @@ export function Workbench({
                             <button className="primary-button" onClick={startCollection}>重新采集</button>
                           </div>
                         ) : null}
-                      </td>
-                    </tr>
+                      </div>
+                    </article>
                   ) : tableCandidates.length ? tableCandidates.map((candidate) => {
                     const hasPublicEngagement = candidate.engagement?.points !== undefined
                       || candidate.engagement?.comments !== undefined;
@@ -738,13 +734,13 @@ export function Workbench({
                         ? `可核验传播证据：${candidate.relatedSources.length} 家独立来源跟进`
                         : "来源没有公开阅读/互动数据，也没有检测到多家独立跟进；这表示暂无数据，不代表热度低";
                     return (
-                    <tr
+                    <article
                       id={`candidate-${candidate.id}`}
                       key={candidate.id}
                       tabIndex={0}
-                      className={`${candidate.selected ? "selected" : ""}${sortedCandidates[keyboardCursor]?.id === candidate.id ? " keyboard-active" : ""}`.trim() || undefined}
+                      className={`workbench-candidate-row ${candidate.selected ? "selected" : ""}${sortedCandidates[keyboardCursor]?.id === candidate.id ? " keyboard-active" : ""}`.trim() || undefined}
                     >
-                      <td>
+                      <div className="row-selection">
                         <label className="row-checkbox">
                           <input
                             type="checkbox"
@@ -757,8 +753,8 @@ export function Workbench({
                           />
                           <span>{candidate.selected ? <Check size={13} /> : null}</span>
                         </label>
-                      </td>
-                      <td>
+                      </div>
+                      <div className="row-signals">
                         <div className="candidate-signals">
                           <span className={`score score-${Math.min(3, Math.floor(candidate.score / 4))}`}>价值 {candidate.score}/15</span>
                           {settings.personalizationEnabled && candidate.personalizationScore ? (
@@ -772,23 +768,23 @@ export function Workbench({
                             title={heatTitle}
                           >{hasPropagationEvidence ? <Flame size={12} /> : <Info size={12} />}{hasPropagationEvidence ? propagationLabel : "传播暂无数据"}</span>
                         </div>
-                      </td>
-                      <td>
+                      </div>
+                      <div className="row-source">
                         <span className="source-name">{candidate.sourceName}</span>
                         <span className="source-evidence">{candidate.evidence}{candidate.relatedSources.length > 1 ? ` · ${candidate.relatedSources.length} 家跟进` : ""}</span>
-                      </td>
-                      <td>
+                      </div>
+                      <div className="row-body">
                         <div className="candidate-title">
-                          <strong>{candidateDisplayTitle(candidate)}</strong>
+                          <h4>{candidateDisplayTitle(candidate)}</h4>
                           <span>{candidateDisplaySummary(candidate)}</span>
                           {candidateDisplayTitle(candidate) !== candidate.title ? <small lang={containsChinese(candidate.title) ? "zh-CN" : "en"}>原题 · {candidate.title}</small> : null}
                         </div>
-                      </td>
-                      <td><time dateTime={candidate.publishedAt}>{formatTime(candidate.publishedAt)}</time></td>
-                      <td>
+                      </div>
+                      <div className="row-time"><time dateTime={candidate.publishedAt}>{formatTime(candidate.publishedAt)}</time></div>
+                      <div className="row-images">
                         <span className={candidate.imageCount === null ? "image-count pending" : "image-count"} title={candidate.imageCount === null ? "加入待写后读取来源图片" : undefined}><ImageIcon size={14} />{candidate.imageCount === null ? "待读取" : `${candidate.imageCount} 张`}</span>
-                      </td>
-                      <td>
+                      </div>
+                      <div className="row-preferences">
                         <div className="candidate-feedback-actions">
                           {candidate.userFeedback ? (
                             <>
@@ -831,8 +827,8 @@ export function Workbench({
                             </>
                           )}
                         </div>
-                      </td>
-                      <td>
+                      </div>
+                      <div className="row-actions">
                         <div className="candidate-source-actions">
                           {candidateSupportsCommunityDraft(candidate) ? (
                             <button type="button" className="community-draft-button compact" onClick={() => setCommunityDraftCandidate(candidate)}>
@@ -844,27 +840,27 @@ export function Workbench({
                             查看原文
                           </a>
                         </div>
-                      </td>
-                    </tr>
+                      </div>
+                    </article>
                     );
                   }) : (
-                    <tr className="empty-row compact">
-                      <td colSpan={8}>
+                    <article className="empty-row compact">
+                      <div className="empty-run-copy">
                         <Check size={24} />
                         <strong>{candidateHome.featured ? "优先候选已集中在上方推荐区" : "当前没有仍在有效期内的候选"}</strong>
                         <span>{candidateHome.featured ? "继续采集后，更多候选会显示在这里。" : "超过 48 小时的未处理候选已自动退出首页，运行记录仍然保留。"}</span>
-                      </td>
-                    </tr>
+                      </div>
+                    </article>
                   )}
-                </tbody>
-              </table>
+
+              </div>
             </div>
           </div>
         </section>
 
         {runRailOpen ? (
-        <aside className="run-rail">
-          <div className="run-rail-heading"><h2 id="selection-summary-title">待写选题 <small>{selected.length}</small></h2><button aria-label="收起待写选题" title="收起待写选题" onClick={() => setRunRailOpen(false)}><PanelRightClose size={16} /></button></div>
+        <aside ref={queueAnchor} id="workbench-selection-panel" className={`run-rail ${mobileQueueOpen ? "mobile-queue-open" : ""}`}>
+          <div className="run-rail-heading"><h2 id="selection-summary-title">待写选题 <small>{selected.length}</small></h2><button aria-label="收起待写选题" title="收起待写选题" onClick={() => { setRunRailOpen(false); setMobileQueueOpen(false); }}><PanelRightClose size={16} /></button></div>
           {runHasNoResults ? (
             <div className="run-empty-warning" role="status">
               <TriangleAlert size={17} />
@@ -948,6 +944,17 @@ export function Workbench({
             {runIsActive ? <LoaderCircle className="spin" size={15} /> : run ? <Check size={15} /> : null}
           </aside>
         )}
+      </div>
+
+      <div className="workbench-mobile-dock" aria-label="待写操作">
+        <button className="secondary-button" type="button" aria-expanded={mobileQueueOpen} aria-controls="workbench-selection-panel" onClick={() => {
+          setRunRailOpen(true); setMobileQueueOpen((open) => !open);
+          if (!mobileQueueOpen) requestAnimationFrame(() => queueAnchor.current?.scrollIntoView({ block: "center" }));
+        }}>待写选题 {selected.length}<ChevronDown size={14} /></button>
+        <button className="primary-button" onClick={onGenerate} disabled={!run || !["ready", "complete"].includes(run.status) || !selected.length || busy}>
+          {busy || run?.status === "generating" ? <LoaderCircle className="spin" size={16} /> : null}
+          {run?.status === "generating" ? `正在生成 ${selected.length} 篇草稿` : selected.length ? `生成 ${selected.length} 篇草稿` : "先选择一个题目"}
+        </button>
       </div>
 
       <details className="workbench-provenance"><summary>采集记录与来源追溯 <ChevronDown size={14} /></summary><footer className="run-provenance">
