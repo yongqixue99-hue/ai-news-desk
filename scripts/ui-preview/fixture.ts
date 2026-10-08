@@ -38,9 +38,17 @@ state.runs = [{ id: "example-run", createdAt: now, updatedAt: now, collectedAt: 
   windowHours: 24, sourceIds: [], scheduled: false, rawCount: candidates.length, candidates, logs: [],
 } satisfies WorkflowRun];
 let today = buildTodayView(state, now);
-const full = process.env.AI_NEWS_DESK_PREVIEW_MATRIX === "1" ? discoveryFixture(now) : undefined;
+const workbenchPreview = process.env.AI_NEWS_DESK_PREVIEW_WORKBENCH === "1";
+const full = process.env.AI_NEWS_DESK_PREVIEW_MATRIX === "1" || workbenchPreview ? discoveryFixture(now) : undefined;
 if (full) {
   state = full.state; today = full.today;
+  if (workbenchPreview) {
+    state.runs[0]!.origin = "collection";
+    state.runs[0]!.candidates.forEach((candidate, index) => { candidate.selected = index < 2; });
+    state.sources.filter(source => source.role !== "community").slice(0, 2).forEach((source, index) => {
+      source.enabled = true; source.selected = true; source.name = `隔离采集来源 ${index + 1}`;
+    });
+  }
   const communityCandidate = structuredClone(state.runs[0]!.candidates[1]!);
   communityCandidate.id = "community-fixture"; communityCandidate.sourceRole = "community";
   communityCandidate.sourceName = "隔离示例 Hacker News";
@@ -81,7 +89,16 @@ if (full) {
   responses[`/api/drafts/${full.draft.id}/agent/threads`] = [];
 }
 const app = express();
+app.use(express.json({ limit: "16kb" }));
 app.use("/api", (req, res, next) => {
+  // This opt-in fixture updates only fictional in-memory selection. No worker,
+  // storage, collection, generation or delivery routes are made writable.
+  if (workbenchPreview && req.method === "PATCH" && /^\/runs\/ui-fixture\/candidates\/[a-f0-9]{14}$/u.test(req.path)) {
+    const candidate = state.runs[0]!.candidates.find(item => item.id === req.path.split("/").at(-1));
+    if (!candidate || typeof req.body?.selected !== "boolean") { res.status(400).json({ error: "无效的示例选择" }); return; }
+    candidate.selected = req.body.selected; responses["/api/bootstrap"] = bootstrapView(state);
+    res.json({ run: state.runs[0] }); return;
+  }
   // The reader records an opened event; this fixture acknowledges it without storing anything.
   if (full && req.method === "POST" && /^\/stories\/[^/]+\/events$/u.test(req.path)) { res.json({ event: { id: "fixture-event", createdAt: now } }); return; }
   if (req.method !== "GET") { res.status(405).json({ error: "隔离截图仅允许读取示例数据" }); return; }

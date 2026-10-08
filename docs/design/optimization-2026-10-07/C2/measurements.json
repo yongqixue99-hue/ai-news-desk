@@ -1,0 +1,80 @@
+[
+  {
+    "version": "before",
+    "width": 1440,
+    "height": 900,
+    "firstCandidateTop": 421.84375,
+    "draftActionTop": 413.171875,
+    "draftActionBottom": 455.171875,
+    "draftActionVisible": true,
+    "dateVisible": true,
+    "candidates": 6,
+    "overflow": 0,
+    "consoleErrors": 0
+  },
+  {
+    "version": "after",
+    "width": 1440,
+    "height": 900,
+    "firstCandidateTop": 350,
+    "draftActionTop": 420.953125,
+    "draftActionBottom": 462.953125,
+    "draftActionVisible": true,
+    "dateVisible": false,
+    "candidates": 6,
+    "overflow": 0,
+    "consoleErrors": 0
+  },
+  {
+    "version": "before",
+    "width": 1280,
+    "height": 720,
+    "firstCandidateTop": 479.84375,
+    "draftActionTop": 413.171875,
+    "draftActionBottom": 455.171875,
+    "draftActionVisible": true,
+    "dateVisible": true,
+    "candidates": 6,
+    "overflow": 0,
+    "consoleErrors": 0
+  },
+  {
+    "version": "after",
+    "width": 1280,
+    "height": 720,
+    "firstCandidateTop": 350,
+    "draftActionTop": 420.953125,
+    "draftActionBottom": 462.953125,
+    "draftActionVisible": true,
+    "dateVisible": false,
+    "candidates": 6,
+    "overflow": 0,
+    "consoleErrors": 0
+  },
+  {
+    "version": "before",
+    "width": 390,
+    "height": 844,
+    "firstCandidateTop": 784.875,
+    "draftActionTop": 2298.421875,
+    "draftActionBottom": 2340.421875,
+    "draftActionVisible": false,
+    "dateVisible": true,
+    "candidates": 6,
+    "overflow": 0,
+    "consoleErrors": 0
+  },
+  {
+    "version": "after",
+    "width": 390,
+    "height": 844,
+    "firstCandidateTop": 435.1875,
+    "draftActionTop": 732,
+    "draftActionBottom": 770,
+    "draftActionVisible": true,
+    "dateVisible": false,
+    "candidates": 6,
+    "overflow": 0,
+    "consoleErrors": 0
+  }
+]
