@@ -44,6 +44,7 @@ import {
   sourceTopicIds,
 } from "../../server/source-routing.js";
 import { collectionCoverageWarning } from "../../server/source-health.js";
+import { WORKBENCH_TITLE_BATCH, workbenchTitleTargets } from "../workbench-title-targets";
 import type {
   AiProviderConfig,
   EvidenceReviewSelection,
@@ -81,7 +82,7 @@ interface WorkbenchProps {
   onCommunityDraft: (candidateId: string, mode: CommunityDraftMode) => Promise<void>;
   onOpenDrafts: () => void;
   onClearCandidates: (candidateIds?: string[]) => Promise<void>;
-  onBriefCandidates: () => Promise<void>;
+  onBriefCandidates: (candidateIds?: string[]) => Promise<void>;
   onQuickDraftUrl: (url: string) => Promise<IntakeReviewRecord>;
   onQuickDraftXPost: (url: string, text: string, author?: string) => Promise<IntakeReviewRecord>;
   onQuickDraftScreenshot: (file: File, note?: string) => Promise<IntakeReviewRecord>;
@@ -251,6 +252,7 @@ export function Workbench({
     [otherCandidateIds, sortedCandidates],
   );
   const missingBriefingCount = candidates.filter((candidate) => !candidate.briefing).length;
+  const titleTargets = workbenchTitleTargets([candidateHome.featured, ...candidateHome.recommended, ...tableCandidates]);
   const selected = candidates.filter((candidate) => candidate.selected);
 
   useEffect(() => {
@@ -525,6 +527,14 @@ export function Workbench({
                   </select>
                   <ChevronDown size={13} />
                 </label>
+                {titleTargets.length ? (
+                  <button
+                    className="secondary-button compact workbench-translate-titles"
+                    disabled={runIsActive || busy}
+                    title={`使用当前分析模型补全中文标题和一句话摘要；原标题保留。每次最多 ${WORKBENCH_TITLE_BATCH} 条，还有 ${missingBriefingCount} 条未翻译`}
+                    onClick={() => void onBriefCandidates(titleTargets)}
+                  >{busy ? <LoaderCircle className="spin" size={14} /> : <Languages size={14} />}翻译本页标题<small>{titleTargets.length}</small></button>
+                ) : null}
                 <button className="secondary-button compact quick-draft-trigger" onClick={() => setQuickDraftOpen(true)}><ScanText size={15} />截图／链接成稿</button>
                 <details className="candidate-more"><summary><MoreHorizontal size={16} />更多操作</summary><div className="candidate-more-content">
                 <span className="candidate-shortcuts" title="键盘快捷键：J/K 浏览，A 或空格加入待写，G 生成，/ 搜索">J/K 浏览 · A 加入 · G 生成</span>

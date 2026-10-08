@@ -1,5 +1,5 @@
 import { decodeStateFragment } from "./state-fragment-codec.js";
-import { hydrateRunArtifacts, type RunArtifactRow } from "./run-artifacts.js";
+import { hydrateRunArtifacts, type RunArtifactRow } from "./run-artifact-rows.js";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, mkdtemp, open, rm, stat, type FileHandle } from "node:fs/promises";

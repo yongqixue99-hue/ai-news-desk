@@ -580,11 +580,11 @@ function App() {
     }
   };
 
-  const briefCandidates = async () => {
+  const briefCandidates = async (candidateIds?: string[]) => {
     if (!activeRun) return;
     setActionBusy(true);
     try {
-      const result = await api.briefCandidates(activeRun.id);
+      const result = await api.briefCandidates(activeRun.id, candidateIds);
       setState((current) => current ? {
         ...current,
         runs: current.runs.map((run) => run.id === result.run.id ? result.run : run),
