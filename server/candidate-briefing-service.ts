@@ -135,7 +135,7 @@ export const generateCandidateBriefings = async (
   runId: string,
   provider: AiProviderConfig,
   inputs: CandidateBriefingEvidenceInput[],
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; runProvider?: typeof runGenerationProviderObserved } = {},
 ): Promise<CandidateBriefingGenerationResult> => {
   const results: Array<{
     items: ParsedCandidateBriefing[];
@@ -171,11 +171,13 @@ export const generateCandidateBriefings = async (
       provider: providerSnapshot(provider),
     });
     trace = appendAiProviderAttempt(trace, { provider: trace.requestedProvider });
+    // appendAiError clears the active attempt, so later bookkeeping names it explicitly.
+    const attemptId = trace.activeAttemptId;
     let items: ParsedCandidateBriefing[] = [];
     let failure: string | undefined;
     try {
       const serialized = JSON.stringify(job);
-      const observed = await runGenerationProviderObserved({
+      const observed = await (options.runProvider ?? runGenerationProviderObserved)({
         provider,
         codexPrompt: `${apiSystemPrompt}\n\n读取任务文件 ${jobPath}，完成其中全部候选。不要读取或修改其他文件。`,
         apiSystemPrompt,
@@ -194,9 +196,13 @@ export const generateCandidateBriefings = async (
       });
       if (groundingIssues.length) {
         failure = groundingIssues.join('；');
-        trace = appendAiError(trace, {error: new Error(failure)});
+        trace = appendAiError(trace, {error: new Error(failure), attemptId});
+      } else if (!items.length) {
+        failure = "模型没有返回可用的中文摘要";
+        trace = appendAiError(trace, {error: new Error(failure), attemptId});
       }
       trace = completeAiRunTrace(trace, {
+        attemptId,
         status: items.length ? "succeeded" : "failed",
         completedAt: observed.meta.completedAt,
         exitCode: observed.meta.exitCode,
@@ -205,13 +211,15 @@ export const generateCandidateBriefings = async (
       });
     } catch (error) {
       if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
-      const failedAttemptId = trace.activeAttemptId;
-      trace = appendAiError(trace, { error });
-      trace = completeAiRunTrace(trace, {
-        status: "failed",
-        attemptId: failedAttemptId,
-        completedAt: trace.errors.at(-1)?.at,
-      });
+      // A grounding note may already have closed the attempt; record the error only on an open trace.
+      if (trace.status === "running") {
+        trace = appendAiError(trace, { error, attemptId });
+        trace = completeAiRunTrace(trace, {
+          status: "failed",
+          attemptId,
+          completedAt: trace.errors.at(-1)?.at,
+        });
+      }
       failure = trace.errors.at(-1)?.message || (error instanceof Error ? error.message : String(error));
     }
     results.push({ items, trace: sanitizeAiRunTrace(trace), failure });
