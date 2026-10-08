@@ -3,8 +3,9 @@ import { constants } from "node:fs";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { validTitleTranslationRecord, type TitleTranslationRecord } from "./title-translation-types.js";
 
-export const LOCAL_DATABASE_SCHEMA_VERSION = 6;
+export const LOCAL_DATABASE_SCHEMA_VERSION = 7;
 
 export type DurableJobStatus = "queued" | "running" | "retrying" | "complete" | "failed" | "cancelled";
 
@@ -308,6 +309,13 @@ export class LocalDatabase {
         first_seen_at TEXT NOT NULL,
         last_seen_at TEXT NOT NULL,
         evidence_json TEXT NOT NULL
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS title_translations (
+        key TEXT PRIMARY KEY CHECK (length(key) = 64),
+        title_zh TEXT NOT NULL,
+        model TEXT NOT NULL,
+        translated_at TEXT NOT NULL
       ) STRICT;
     `);
     const workflowJobColumns = new Set(
@@ -1045,6 +1053,27 @@ export class LocalDatabase {
     }
   }
 
+  getTitleTranslations(keys: string[]): TitleTranslationRecord[] {
+    const unique = [...new Set(keys)].filter(key => /^[0-9a-f]{64}$/u.test(key));
+    const records: TitleTranslationRecord[] = [];
+    for (let index = 0; index < unique.length; index += 500) {
+      const batch = unique.slice(index, index + 500);
+      records.push(...this.db.prepare(`SELECT key, title_zh AS titleZh, model, translated_at AS translatedAt FROM title_translations WHERE key IN (${batch.map(() => "?").join(",")})`).all(...batch) as unknown as TitleTranslationRecord[]);
+    }
+    return records.filter(validTitleTranslationRecord).map(record => ({ ...record }));
+  }
+
+  saveTitleTranslations(records: TitleTranslationRecord[]) {
+    if (records.some(record => !validTitleTranslationRecord(record)) || new Set(records.map(record => record.key)).size !== records.length) throw new Error("标题翻译缓存格式不正确");
+    if (!records.length) return;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const statement = this.db.prepare("INSERT INTO title_translations(key, title_zh, model, translated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET title_zh = excluded.title_zh, model = excluded.model, translated_at = excluded.translated_at");
+      for (const record of records) statement.run(record.key, record.titleZh, record.model, record.translatedAt);
+      this.db.exec("COMMIT");
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
   /** Create a transactionally consistent, WAL-independent SQLite snapshot. */
   createSnapshot(destinationPath: string) {
     this.db.prepare("VACUUM INTO ?").run(destinationPath);
@@ -1067,6 +1096,7 @@ export class LocalDatabase {
       ["discussion_samples", "id, story_id, platform, author, permalink, branch_id, published_at, sample_json, content_hash, captured_at"],
       ["source_snapshots", "url_key, requested_url, canonical_url, page_json, content_hash, captured_at"],
       ["editorial_memories", "id, kind, label, evidence_count, enabled, first_seen_at, last_seen_at, evidence_json"],
+      ["title_translations", "key, title_zh, model, translated_at"],
     ] as const;
     this.db.prepare("ATTACH DATABASE ? AS portable_import").run(snapshotPath);
     try {
@@ -1076,8 +1106,10 @@ export class LocalDatabase {
       try {
         for (const [table, columns] of tables) {
           this.db.exec(`DELETE FROM main.${table}`);
+          if (table === "title_translations" && !this.db.prepare("SELECT 1 FROM portable_import.sqlite_master WHERE type = 'table' AND name = ?").get(table)) continue;
           this.db.exec(`INSERT INTO main.${table}(${columns}) SELECT ${columns} FROM portable_import.${table}`);
         }
+        this.db.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', ?)").run(String(LOCAL_DATABASE_SCHEMA_VERSION));
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");

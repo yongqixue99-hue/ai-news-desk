@@ -1,0 +1,44 @@
+{
+  "fixture": "70 fictional entries, fake provider, in-memory cache; no database or outbound requests",
+  "instant": "2026-10-07T12:00:00.000Z",
+  "measurements": [
+    {
+      "width": 1440,
+      "height": 900,
+      "visible": 40,
+      "originalEnglish": 60,
+      "translated": 20,
+      "cacheAfterReload": 20,
+      "browsingModelCalls": 0,
+      "manualModelCalls": 1,
+      "modelCallsAfterReload": 1,
+      "manualBatchSizes": [
+        20
+      ],
+      "originalViewSHA256": "1021fac29dba880e637ca181066bb42a3c4fa1dbbadc89e246368ac7a7a1c989",
+      "afterViewSHA256": "1021fac29dba880e637ca181066bb42a3c4fa1dbbadc89e246368ac7a7a1c989",
+      "overflow": 0,
+      "consoleErrors": 0,
+      "realModelCalls": 0
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "visible": 40,
+      "originalEnglish": 60,
+      "translated": 20,
+      "cacheAfterReload": 20,
+      "browsingModelCalls": 0,
+      "manualModelCalls": 1,
+      "modelCallsAfterReload": 1,
+      "manualBatchSizes": [
+        20
+      ],
+      "originalViewSHA256": "1021fac29dba880e637ca181066bb42a3c4fa1dbbadc89e246368ac7a7a1c989",
+      "afterViewSHA256": "1021fac29dba880e637ca181066bb42a3c4fa1dbbadc89e246368ac7a7a1c989",
+      "overflow": 0,
+      "consoleErrors": 0,
+      "realModelCalls": 0
+    }
+  ]
+}
