@@ -39,7 +39,8 @@ state.runs = [{ id: "example-run", createdAt: now, updatedAt: now, collectedAt: 
 } satisfies WorkflowRun];
 let today = buildTodayView(state, now);
 const workbenchPreview = process.env.AI_NEWS_DESK_PREVIEW_WORKBENCH === "1";
-const full = process.env.AI_NEWS_DESK_PREVIEW_MATRIX === "1" || workbenchPreview ? discoveryFixture(now) : undefined;
+const communityPreview = process.env.AI_NEWS_DESK_PREVIEW_COMMUNITY === "1";
+const full = process.env.AI_NEWS_DESK_PREVIEW_MATRIX === "1" || workbenchPreview || communityPreview ? discoveryFixture(now) : undefined;
 if (full) {
   state = full.state; today = full.today;
   if (workbenchPreview) {
@@ -54,6 +55,19 @@ if (full) {
   communityCandidate.sourceName = "隔离示例 Hacker News";
   communityCandidate.engagement = { points: 8, comments: 4, discussionUrl: "https://example.com/discussion" };
   state.runs[0]!.candidates.push(communityCandidate);
+  if (communityPreview) {
+    state.runs[0]!.candidates = state.runs[0]!.candidates.filter(candidate => candidate.id !== "community-fixture");
+    state.runs[0]!.candidates.forEach((candidate, index) => {
+      candidate.sourceRole = "community"; candidate.sourceType = "hackernews"; candidate.sourceName = "隔离社区 Hacker News";
+      candidate.topicIds = index < 4 ? ["ai"] : ["technology"];
+      candidate.engagement = { points: (6 - index) * 8, comments: 4, discussionUrl: `https://example.com/discussion/${index}` };
+    });
+    const template = state.sources[0]!;
+    state.sources = (["healthy", "error", "unknown"] as const).map((health, index) => ({
+      ...template, id: `community-source-${index}`, name: `隔离社区来源 ${index + 1}`, role: "community", enabled: true,
+      selected: false, health, note: "仅供隔离界面验收", lastHealthDetail: "虚构来源状态", lastCheckedAt: now,
+    }));
+  }
   state.notifications = [{ schemaVersion: "workflow-notification/v1", id: "fixture-notification", type: "collection-failed", severity: "warning", title: "隔离示例：来源待重试", message: "这是截图夹具，不是实际运行通知。", createdAt: now }];
 }
 const jobs = process.env.AI_NEWS_DESK_PREVIEW_JOBS === "1" ? [{ id: "example-job", lane: "foreground", type: "build-content-package",
@@ -74,7 +88,7 @@ const responses: Record<string, unknown> = {
 if (full) {
   const communityStory = structuredClone(full.story);
   communityStory.explanation.status = "ready";
-  responses["/api/editorial-intakes/ui-fixture/community-fixture"] = {
+  const communityDetail = {
     story: communityStory, contentPackage: full.contentPackage,
     intake: { storyId: communityStory.id, signalId: "ui-fixture:community-fixture", sourceKind: "linked-community", recommendedIntent: "news", recommendationReason: "隔离示例：先核对外部原文，社区仅作讨论线索。", options: [
       { intent: "news", mode: "brief", available: false, workingCopy: false, label: "按新闻写", description: "隔离示例，不调用生成", reason: "示例材料不用于真实生成" },
@@ -82,6 +96,22 @@ if (full) {
       { intent: "community", mode: "community", available: false, workingCopy: false, label: "分析讨论", description: "有限样本", reason: "少于 5 条有效样本" },
     ] },
   };
+  responses["/api/editorial-intakes/ui-fixture/community-fixture"] = communityDetail;
+  if (communityPreview) for (const candidate of state.runs[0]!.candidates) {
+    const detail = structuredClone(communityDetail);
+    detail.story.title = candidate.briefing?.titleZh || candidate.title;
+    detail.story.originalTitle = candidate.title;
+    detail.contentPackage.title = detail.story.title;
+    detail.intake.signalId = `ui-fixture:${candidate.id}`;
+    detail.story.signals.push({
+      ...structuredClone(communityStory.signals[0]!), runId: "ui-fixture", candidateId: candidate.id,
+      sourceName: candidate.sourceName, sourceRole: "community", sourceType: "hackernews",
+      title: candidate.title, titleZh: candidate.briefing?.titleZh, url: candidate.url,
+      discussionUrl: candidate.engagement?.discussionUrl, isCommunity: true, factBearing: false, linkedSource: true,
+      engagement: { points: candidate.engagement?.points, comments: candidate.engagement?.comments },
+    });
+    responses[`/api/editorial-intakes/ui-fixture/${candidate.id}`] = detail;
+  }
   responses[`/api/stories/${full.story.id}`] = { story: full.story, contentPackage: full.contentPackage, feedback: [] };
   responses[`/api/stories/${full.story.id}/reading`] = full.contentPackage.sourceEvidence;
   responses[`/api/drafts/${full.draft.id}`] = full.draft;
