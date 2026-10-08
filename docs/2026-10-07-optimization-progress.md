@@ -14,10 +14,10 @@
 | B3 后台中文标题 | 已合并 | [#16](https://github.com/yongqixue99-hue/ai-news-desk/pull/16) | 后台入队 0→1/运行；无页面标题英文→中文；原题不变 | 四项及两个 CI 全过；真实模型耗时未测；未上线 |
 | B4 手机任务胶囊 | 已合并 | [#17](https://github.com/yongqixue99-hue/ai-news-desk/pull/17) | 覆盖选题按钮 2→0；390 溢出 0 | 四项及两个 CI 全过；合并接口恢复；未上线，效果待用户决定 |
 | C1 今日接口提速 | 已合并 | [#18](https://github.com/yongqixue99-hue/ai-news-desk/pull/18) | 冷读 770→487 ms；暖读 357–386→2.5–2.7 ms | 四项及两个 CI 全过；未上线 |
-| C2 新闻工作台 | 等待用户决定 | [#46](https://github.com/yongqixue99-hue/ai-news-desk/pull/46) | 首条top：1440 422→350；1280 480→350；390 785→435px；手机主动作不可见→可见 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线 |
-| C3 社区广场 | 等待用户决定 | [#47](https://github.com/yongqixue99-hue/ai-news-desk/pull/47) | 首条top：1440 320→247；390 420→301px；六条候选保持，溢出/错误/写请求均0 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线 |
-| C4 聚合标题翻译 | 等待用户决定 | [#48](https://github.com/yongqixue99-hue/ai-news-desk/pull/48) | 渲染40→40；译文0→20；浏览调用0，手动/刷新1/1（假）；原始JSON SHA不变 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线 |
-| D1 诊断存储分离 | 等待用户决定 | [#49](https://github.com/yongqixue99-hue/ai-news-desk/pull/49) | 副本空更新111–128→29–34ms；runs15661832→887712 B；62/62诊断相等 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线 |
+| C2 新闻工作台 | 已合并 | [#46](https://github.com/yongqixue99-hue/ai-news-desk/pull/46) | 首条top：1440 422→350；1280 480→350；390 785→435px；手机主动作不可见→可见 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线；2026-10-08 用户决定合并，经集成分支 codex/opt-pending-integration 并入 |
+| C3 社区广场 | 已合并 | [#47](https://github.com/yongqixue99-hue/ai-news-desk/pull/47) | 首条top：1440 320→247；390 420→301px；六条候选保持，溢出/错误/写请求均0 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线；2026-10-08 用户决定合并，经集成分支 codex/opt-pending-integration 并入 |
+| C4 聚合标题翻译 | 已合并 | [#48](https://github.com/yongqixue99-hue/ai-news-desk/pull/48) | 渲染40→40；译文0→20；浏览调用0，手动/刷新1/1（假）；原始JSON SHA不变 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线；2026-10-08 用户决定合并，经集成分支 codex/opt-pending-integration 并入 |
+| D1 诊断存储分离 | 已合并 | [#49](https://github.com/yongqixue99-hue/ai-news-desk/pull/49) | 副本空更新111–128→29–34ms；runs15661832→887712 B；62/62诊断相等 | 四项及最终verify/windows-desktop全过；PR保持打开、未上线；2026-10-08 用户决定合并，经集成分支 codex/opt-pending-integration 并入 |
 | D2 旧样式清理 | 已合并 | [#19](https://github.com/yongqixue99-hue/ai-news-desk/pull/19)、[#20](https://github.com/yongqixue99-hue/ai-news-desk/pull/20)、[#21](https://github.com/yongqixue99-hue/ai-news-desk/pull/21)、[#22](https://github.com/yongqixue99-hue/ai-news-desk/pull/22)、[#23](https://github.com/yongqixue99-hue/ai-news-desk/pull/23)、[#24](https://github.com/yongqixue99-hue/ai-news-desk/pull/24)、[#25](https://github.com/yongqixue99-hue/ai-news-desk/pull/25)、[#26](https://github.com/yongqixue99-hue/ai-news-desk/pull/26)、[#27](https://github.com/yongqixue99-hue/ai-news-desk/pull/27)、[#28](https://github.com/yongqixue99-hue/ai-news-desk/pull/28)、[#29](https://github.com/yongqixue99-hue/ai-news-desk/pull/29)、[#30](https://github.com/yongqixue99-hue/ai-news-desk/pull/30)、[#31](https://github.com/yongqixue99-hue/ai-news-desk/pull/31)、[#32](https://github.com/yongqixue99-hue/ai-news-desk/pull/32)、[#33](https://github.com/yongqixue99-hue/ai-news-desk/pull/33) | 构建CSS457709→431197 B（-5.79%）；删除288条全无引用规则 | 15/15独立PR已合并；每批四项/两个CI全过、48/48像素一致；未上线 |
 | D3 文档整理 | 已合并 | [#34](https://github.com/yongqixue99-hue/ai-news-desk/pull/34) | README331→283行；启动206→9行；交接761→52行；103块/119210 B原文完整 | 四项及最终verify/windows-desktop全过；原文完整；未上线 |
 | D4 大文件拆分 | 等待用户决定 | [#35](https://github.com/yongqixue99-hue/ai-news-desk/pull/35)、[#36](https://github.com/yongqixue99-hue/ai-news-desk/pull/36)、[#37](https://github.com/yongqixue99-hue/ai-news-desk/pull/37)、[#38](https://github.com/yongqixue99-hue/ai-news-desk/pull/38)、[#39](https://github.com/yongqixue99-hue/ai-news-desk/pull/39)、[#40](https://github.com/yongqixue99-hue/ai-news-desk/pull/40)、[#41](https://github.com/yongqixue99-hue/ai-news-desk/pull/41)、[#42](https://github.com/yongqixue99-hue/ai-news-desk/pull/42)、[#43](https://github.com/yongqixue99-hue/ai-news-desk/pull/43)、[#44](https://github.com/yongqixue99-hue/ai-news-desk/pull/44)、[#45](https://github.com/yongqixue99-hue/ai-news-desk/pull/45) | index149583→30762 B；内联API126→0；media原文9/9一致 | 后端11/11领域已合并；前端所有权拆分待决定；全部未上线 |
@@ -328,3 +328,12 @@
 - 首次提交68ce363的PR Windows作业在文章截图回归中出现一次渲染稳定性等待超时：应有2张图、实际1张。同一提交的push Windows与两个verify已成功，未改动截图实现。
 - 第1轮处理：查明超时日志后原样重跑失败作业，运行37703740095的第2次执行全部成功；保留5次重复截图及所有原断言，未删除、跳过或放宽任何测试，没有代码修补或真实平台调用。
 - 收尾仍采用本地四项与最终提交verify/windows-desktop全部通过的门槛，通过正常PR流程合并文档；检查及合并结果见PR #50。正式目录、dist、本机服务与真实数据保持原样。
+
+
+### 2026-10-08 — 四个待定提案合并
+
+- 用户查看状态后决定直接合并 C2、C3、C4、D1。四个分支都与 main 冲突，改为在集成分支 codex/opt-pending-integration 上依次合入。
+- 冲突与处理：进度表取 main 的最终版；`src/design/index.css` 保留 workbench、community、aggregation-translations 三行导入；`scripts/ui-preview/fixture.ts` 保留三个预览开关和两段示例处理；`server/local-database.ts` 的归档导入同时跳过旧归档里不存在的 `run_artifacts` 与 `title_translations`。两张表都是幂等建表，结构版本同为 7。
+- 集成分支四项验证：单测 1427/1427、编辑 22/22、隔离构建通过、E2E 17/17。
+- D1 迁移额外核对：对真实数据库的两份只读副本，分别用合并前后的代码读取。62 次运行的候选、草稿、来源、今日视图、聚合视图按键排序后逐字节相同；`run_artifacts` 写入 62 行（聚合 26、漏报追踪 18、证据候选 18），runs 片段约 1.1 MB，integrity_check 为 ok；副本上空写入约 300 ms → 70–100 ms。仅脚本调用，未启动服务。
+- 合并时尚未上线。上线会在真实数据库上执行 D1 迁移，需用户同意。
