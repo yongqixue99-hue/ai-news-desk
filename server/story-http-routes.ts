@@ -63,7 +63,7 @@ app.patch("/api/home-layout", asyncRoute(async (request, response) => {
 
 export function registerStoryHttpRoutes2(app: Express, runtime: HttpRouteRuntime): void {
 app.get("/api/aggregations", asyncRoute(async (_request, response) => {
-  response.json(buildAggregationView(await runtime.readState()));
+  response.json(await runtime.readStateProjection(state => buildAggregationView(state, undefined, runtime.readArtifact)));
 }));
 
 app.post("/api/aggregations/refresh", asyncRoute(async (_request, response) => {
@@ -79,8 +79,8 @@ app.post("/api/aggregations/refresh", asyncRoute(async (_request, response) => {
 
 app.post("/api/aggregations/:id/select", asyncRoute(async (request, response) => {
   const id = routeParam(request.params.id);
-  if (!buildAggregationView(await runtime.readState()).entries.some(e => e.id === id)) { response.status(404).json({error: "条目已不在当前快照，请刷新列表。"}); return; }
-  response.json(await runtime.updateState(state => retainAggregationEntry(state, id)));
+  if (!(await runtime.readStateProjection(state => buildAggregationView(state, undefined, runtime.readArtifact))).entries.some(e => e.id === id)) { response.status(404).json({error: "条目已不在当前快照，请刷新列表。"}); return; }
+  response.json(await runtime.updateState(state => retainAggregationEntry(state, id, runtime.readArtifact)));
 }));
 }
 

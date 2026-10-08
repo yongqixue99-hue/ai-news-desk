@@ -453,8 +453,8 @@ export const createVisualHydrationStorage = (storyId: string, dependencies: {
   let resolved = false;
   const getStory = async () => {
     if (!resolved) {
-      currentStory = await dependencies.project(state => {
-        const story = (dependencies.findStory ?? storyById)(state, storyId);
+      currentStory = await dependencies.project((state, readArtifact) => {
+        const story = dependencies.findStory ? dependencies.findStory(state, storyId) : storyById(state, storyId, undefined, readArtifact);
         return story ? { id: story.id, title: story.title, originalTitle: story.originalTitle, summary: story.summary, images: story.images, signals: story.signals } : undefined;
       });
       resolved = true;

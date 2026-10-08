@@ -4,7 +4,7 @@ import { readStateProjection } from "./storage.js";
 
 export const registerCommunityRoutes = (app: Express) => {
   app.get("/api/community", async (_request, response, next) => {
-    try { response.json(await readStateProjection(buildCommunityView)); }
+    try { response.json(await readStateProjection((state, readArtifact) => buildCommunityView(state, undefined, readArtifact))); }
     catch (error) { next(error); }
   });
 };

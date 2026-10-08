@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createDefaultState, upgradeState } from "./defaults.js";
 import { LocalDatabase } from "./local-database.js";
+import { runArtifactKinds, artifactFromRun, type RunArtifactReader } from "./run-artifacts.js";
 import type { WorkflowState } from "./types.js";
 import { workflowRoot, workspaceRoot } from "./workspace-paths.js";
 
@@ -13,6 +14,7 @@ const statePath = path.join(workflowRoot, "state.json");
 
 let queue: Promise<unknown> = Promise.resolve();
 let databasePromise: Promise<LocalDatabase> | undefined;
+let databaseInstance: LocalDatabase | undefined;
 let stateCache: WorkflowState | undefined;
 // Monotonic within this process; a new process also starts with an empty view cache.
 let stateRevision = 0;
@@ -28,7 +30,7 @@ const ensureDirectories = async () => {
 const cachedState = async (): Promise<WorkflowState> => {
   await ensureDirectories();
   if (stateCache) return stateCache;
-  const state = upgradeState((await localDatabase()).readState<WorkflowState>());
+  const state = upgradeState((await localDatabase()).readStateLean<WorkflowState>());
   state.draftGenerationAttempts ??= [];
   state.draftRevisions ??= [];
   state.articleAgentThreads ??= [];
@@ -39,26 +41,38 @@ const cachedState = async (): Promise<WorkflowState> => {
   return stateCache;
 };
 
-export const readState = async (): Promise<WorkflowState> => structuredClone(await cachedState());
+export const readRunArtifact: RunArtifactReader = (runId, kind) => {
+  if (!databaseInstance) throw new Error("运行明细读取必须先初始化存储");
+  return databaseInstance.getRunArtifact(runId, kind);
+};
+const leanState = (state: WorkflowState): WorkflowState => ({ ...state, runs: state.runs.map(({ discoveryTrace, evidenceCandidates, aggregationItems, ...run }) => run) });
+export const readState = async (): Promise<WorkflowState> => {
+  const state = structuredClone(await cachedState());
+  for (const run of state.runs) for (const kind of runArtifactKinds) {
+    const value = artifactFromRun(run, kind, readRunArtifact);
+    if (value !== undefined) Object.assign(run, { [kind]: value });
+  }
+  return state;
+};
 
 /** Pure synchronous selectors clone only the result, never the whole archive.
  * Selectors must not mutate the cached state. Results cannot alias storage. */
-export const readStateProjection = async <T>(select: (state: Readonly<WorkflowState>) => T): Promise<T> =>
-  structuredClone(select(await cachedState()));
+export const readStateProjection = async <T>(select: (state: Readonly<WorkflowState>, readArtifact?: RunArtifactReader) => T): Promise<T> =>
+  structuredClone(select(await cachedState(), readRunArtifact));
 
 const localDatabase = async () => {
   databasePromise ??= LocalDatabase.open({
     workflowRoot,
     legacyStatePath: statePath,
     initialState: createDefaultState,
-  });
+  }).then(database => { databaseInstance = database; return database; });
   return databasePromise;
 };
 
-const persistState = async (state: WorkflowState) => {
+const persistState = async (state: WorkflowState, replaceArtifacts = false) => {
   await ensureDirectories();
-  (await localDatabase()).writeState(state);
-  stateCache = structuredClone(state);
+  (await localDatabase()).writeState(state, { replaceArtifacts });
+  stateCache = structuredClone(leanState(state));
   stateRevision += 1;
 };
 
@@ -66,7 +80,7 @@ export const updateState = async <T>(
   mutate: (state: WorkflowState) => T | Promise<T>,
 ): Promise<T> => {
   const operation = queue.then(async () => {
-    const state = await readState();
+    const state = structuredClone(await cachedState());
     const result = await mutate(state);
     await persistState(state);
     return result;
@@ -83,7 +97,7 @@ export const updateState = async <T>(
 export const replaceState = async (nextState: WorkflowState): Promise<WorkflowState> => {
   const operation = queue.then(async () => {
     const state = upgradeState(structuredClone(nextState));
-    await persistState(state);
+    await persistState(state, true);
     return state;
   });
   queue = operation.catch(() => undefined);
@@ -107,7 +121,7 @@ export const runStorageExclusive = async <T>(
       database,
       replaceDatabaseSnapshot: (snapshotPath) => {
         database.replaceFromSnapshot(snapshotPath);
-        stateCache = upgradeState(database.readState<WorkflowState>());
+        stateCache = upgradeState(database.readStateLean<WorkflowState>());
         stateRevision += 1;
       },
     });

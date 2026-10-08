@@ -1,3 +1,4 @@
+import { artifactFromRun, type RunArtifactReader } from "./run-artifacts.js";
 import { aggregationLink as canonical, readAggregationEvent, type AggregationEvent } from './aggregation-event.js';
 import { createHash } from 'node:crypto';
 import { aggregationCatalog, aggregationSourceIds } from './aggregation-catalog.js';
@@ -48,8 +49,8 @@ function platformSnapshots(runs: WorkflowRun[], id: string) {
     return run ? [{run,items:run.aggregationItems!.filter(i=>sourceId(i)===id && i.metadata?.feed_url===url)}] : [];
   });
 }
-export function buildAggregationView(state: WorkflowState, now=Date.now()): AggregationView {
-  const runs = [...state.runs].sort((a,b)=>Date.parse(b.collectedAt||b.createdAt)-Date.parse(a.collectedAt||a.createdAt));
+export function buildAggregationView(state: WorkflowState, now=Date.now(), readArtifact?: RunArtifactReader): AggregationView {
+  const runs = state.runs.map(run => ({ ...run, aggregationItems: artifactFromRun(run, "aggregationItems", readArtifact) })).sort((a,b)=>Date.parse(b.collectedAt||b.createdAt)-Date.parse(a.collectedAt||a.createdAt));
   const grouped = new Map<string,AggregationEntry>();
   const platformEntries: Record<string,AggregationEntry[]> = {};
   const selected = new Set(state.runs.flatMap(r=>r.candidates.filter(c=>c.selected).map(c=>canonical(c.url))));
@@ -110,8 +111,8 @@ export function buildAggregationView(state: WorkflowState, now=Date.now()): Aggr
   return {platforms,entries,platformEntries,recommended:rankAggregations(entries,now),
     active:runs.some(r=>['queued','collecting','scoring','extracting'].includes(r.status)&&r.sourceIds.some(id=>aggregationSourceIds.has(id)))};
 }
-export function retainAggregationEntry(state: WorkflowState, id: string) {
- const entry=buildAggregationView(state).entries.find(e=>e.id===id);if(!entry)throw new Error('该条目已不在当前快照，请刷新列表。');
+export function retainAggregationEntry(state: WorkflowState, id: string, readArtifact?: RunArtifactReader) {
+ const entry=buildAggregationView(state, Date.now(), readArtifact).entries.find(e=>e.id===id);if(!entry)throw new Error('该条目已不在当前快照，请刷新列表。');
  for(const run of state.runs){const candidate=run.candidates.find(c=>canonical(c.url)===canonical(entry.url));if(candidate){candidate.selected=true;return {runId:run.id,candidateId:candidate.id};}}
  const now=new Date().toISOString();const runId=`aggregation-${id}`;
  const candidate:Candidate={id:`aggregation-${id}`,rawId:id,sourceType:'rss',sourceName:entry.platforms[0]!.name,sourceRole:'discovery',

@@ -77,7 +77,7 @@ app.get(
 );
 
 app.get("/api/runs/:runId/diagnostics", asyncRoute(async (request, response) => {
-  const diagnostics = await runtime.readStateProjection(state => runDiagnosticsView(state, routeParam(request.params.runId)));
+  const diagnostics = await runtime.readStateProjection(state => runDiagnosticsView(state, routeParam(request.params.runId), runtime.readArtifact));
   if (!diagnostics) { response.status(404).json({ error: "运行记录不存在" }); return; }
   response.json(diagnostics);
 }));
@@ -90,7 +90,7 @@ app.post("/api/product/jobs/:jobId/retry", asyncRoute(async (request, response) 
   if (!oldJob || !["build-content-package", "draft-from-package", "draft-from-editorial-intake", "draft-from-intake-review", "explain-story", "hydrate-story-assets", "supplement-story-evidence"].includes(oldJob.type) || oldJob.status !== "failed") { response.status(409).json({ error: "这个任务不能从这里重试" }); return; }
   const storyId = oldJob.payload && typeof oldJob.payload === "object" && "storyId" in oldJob.payload ? String(oldJob.payload.storyId) : "";
   const story = storyById(await runtime.readState(), storyId);
-  if (story) await runtime.updateState((state) => retainStoryForWriting(state, storyId));
+  if (story) await runtime.updateState((state) => retainStoryForWriting(state, storyId, runtime.readArtifact));
   response.status(202).json(retryPackageJob(database, oldJob.id, story?.title));
 }));
 }

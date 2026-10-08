@@ -5,6 +5,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { validTitleTranslationRecord, type TitleTranslationRecord } from "./title-translation-types.js";
 
+import { decodeStateFragment, encodeStateFragment } from "./state-fragment-codec.js";
+import { decodeRunArtifact, hydrateRunArtifacts, runArtifactKinds, type RunArtifactKind, type RunArtifactRow, type RunArtifactValue } from "./run-artifacts.js";
+import type { WorkflowRun } from "./types.js";
+
 export const LOCAL_DATABASE_SCHEMA_VERSION = 7;
 
 export type DurableJobStatus = "queued" | "running" | "retrying" | "complete" | "failed" | "cancelled";
@@ -161,6 +165,8 @@ export interface LocalDatabaseOptions {
   legacyStatePath?: string;
   initialState: () => unknown;
   now?: () => string;
+  /** Fault injection for migration rollback tests; production leaves this unset. */
+  beforeArtifactMigrationCommit?: () => void;
 }
 
 /**
@@ -172,6 +178,9 @@ export class LocalDatabase {
   readonly databasePath: string;
   private readonly db: DatabaseSync;
   private readonly now: () => string;
+  private stateTransaction = false;
+  private artifactCache = new Map<string, { checksum: string; json: string; value: unknown[] }>();
+  private runsEncoding?: { raw: string; stored: string };
 
   private constructor(databasePath: string, db: DatabaseSync, now: () => string) {
     this.databasePath = databasePath;
@@ -185,19 +194,66 @@ export class LocalDatabase {
     await mkdir(options.workflowRoot, { recursive: true });
     const db = new DatabaseSync(databasePath, { timeout: 5_000 });
     const store = new LocalDatabase(databasePath, db, options.now ?? (() => new Date().toISOString()));
-    store.initializeSchema();
-    await store.importLegacyStateIfNeeded(legacyStatePath, options.initialState);
-    store.assertIntegrity();
-    return store;
+    try {
+      store.guardSchemaVersion();
+      const before = store.existingState(); // Validate old bytes before creating or modifying anything.
+      const needsMove = store.hasEmbeddedArtifacts(before);
+      if (needsMove) {
+        const backups = path.join(options.workflowRoot, "backups");
+        await mkdir(backups, { recursive: true });
+        store.createSnapshot(path.join(backups, `before-run-artifacts-${randomUUID()}.db`));
+      }
+      db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000");
+      db.exec("BEGIN IMMEDIATE"); store.stateTransaction = true;
+      try {
+        store.initializeSchema();
+        await store.importLegacyStateIfNeeded(legacyStatePath, options.initialState);
+        if (needsMove) store.writeState(before);
+        store.assertIntegrity();
+        if (needsMove) options.beforeArtifactMigrationCommit?.();
+        db.exec("COMMIT");
+      } catch (error) { db.exec("ROLLBACK"); throw error; }
+      finally { store.stateTransaction = false; store.invalidateStateCaches(); }
+      return store;
+    } catch (error) { db.close(); throw error; }
+  }
+
+  private hasTable(name: string, schema = "main") {
+    return Boolean(this.db.prepare(`SELECT 1 FROM ${schema}.sqlite_master WHERE type = 'table' AND name = ?`).get(name));
+  }
+
+  private guardSchemaVersion(schema = "main") {
+    if (!this.hasTable("metadata", schema)) return;
+    const version = Number((this.db.prepare(`SELECT value FROM ${schema}.metadata WHERE key = 'schema_version'`).get() as { value: string } | undefined)?.value);
+    if (version > LOCAL_DATABASE_SCHEMA_VERSION) throw new Error("数据库版本较新，请使用对应版本的应用");
+  }
+
+  private existingState(): unknown {
+    if (this.hasTable("state_fragments") && Number((this.db.prepare("SELECT COUNT(*) AS n FROM state_fragments").get() as { n: number }).n)) {
+      const state = this.readStateLean();
+      if (this.hasTable("run_artifacts")) this.artifactRows().forEach(decodeRunArtifact);
+      return state;
+    }
+    if (!this.hasTable("app_state")) return undefined;
+    const row = this.db.prepare("SELECT state_json, checksum FROM app_state WHERE id = 1").get() as { state_json: string; checksum: string } | undefined;
+    if (!row) return undefined;
+    if (checksum(row.state_json) !== row.checksum) throw new Error("旧版本地数据库状态校验失败");
+    return JSON.parse(row.state_json) as unknown;
+  }
+
+  private hasEmbeddedArtifacts(state: unknown) {
+    const runs = (state as { runs?: WorkflowRun[] } | undefined)?.runs;
+    return Array.isArray(runs) && runs.some(run => runArtifactKinds.some(kind => Object.hasOwn(run, kind)));
+  }
+
+  private invalidateStateCaches() { this.artifactCache.clear(); this.runsEncoding = undefined; }
+
+  private artifactRows(): RunArtifactRow[] {
+    return this.db.prepare("SELECT run_id, kind, json, checksum, updated_at FROM run_artifacts ORDER BY run_id, kind").all() as unknown as RunArtifactRow[];
   }
 
   private initializeSchema() {
     this.db.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA synchronous = NORMAL;
-      PRAGMA foreign_keys = ON;
-      PRAGMA busy_timeout = 5000;
-
       CREATE TABLE IF NOT EXISTS metadata (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -215,6 +271,15 @@ export class LocalDatabase {
         value_json TEXT NOT NULL,
         checksum TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS run_artifacts (
+        run_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('discoveryTrace','evidenceCandidates','aggregationItems')),
+        json TEXT NOT NULL,
+        checksum TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, kind)
       ) STRICT;
 
       CREATE TABLE IF NOT EXISTS workflow_jobs (
@@ -383,60 +448,87 @@ export class LocalDatabase {
     if (!rows.length || rows.some((row) => checksum(row.value_json) !== row.checksum)) {
       throw new Error("本地数据库状态校验失败");
     }
+    for (const row of rows) decodeStateFragment(row.key, row.value_json);
+    this.artifactRows().forEach(decodeRunArtifact);
   }
 
-  readState<T>(): T {
+  readState<T>(): T { return hydrateRunArtifacts(this.readStateLean<T>(), this.artifactRows()); }
+
+  getRunArtifact<K extends RunArtifactKind>(runId: string, kind: K): RunArtifactValue<K> | undefined {
+    const row = this.db.prepare("SELECT run_id, kind, json, checksum, updated_at FROM run_artifacts WHERE run_id = ? AND kind = ?").get(runId, kind) as RunArtifactRow | undefined;
+    if (!row) return undefined;
+    const key = JSON.stringify([runId, kind]);
+    let cached = this.artifactCache.get(key);
+    if (!cached || cached.checksum !== row.checksum || cached.json !== row.json) {
+      cached = { checksum: row.checksum, json: row.json, value: decodeRunArtifact(row) }; this.artifactCache.set(key, cached);
+    }
+    return structuredClone(cached.value) as RunArtifactValue<K>;
+  }
+
+  readStateLean<T>(): T {
     const rows = this.db.prepare("SELECT key, value_json, checksum FROM state_fragments ORDER BY key").all() as unknown as StateFragmentRow[];
     if (!rows.length) throw new Error("本地数据库尚未初始化");
     const state: Record<string, unknown> = {};
     for (const row of rows) {
       if (checksum(row.value_json) !== row.checksum) throw new Error(`本地数据库状态切片损坏：${row.key}`);
-      state[row.key] = JSON.parse(row.value_json) as unknown;
+      state[row.key] = decodeStateFragment(row.key, row.value_json);
+      if (row.key === "runs") this.runsEncoding = { raw: json(state[row.key]), stored: row.value_json };
     }
     return state as T;
   }
 
-  writeState(state: unknown) {
-    if (!state || typeof state !== "object" || Array.isArray(state)) {
-      throw new Error("本地状态必须是一个对象");
-    }
-    const fragments = Object.entries(state as Record<string, unknown>).map(([key, value]) => {
-      const payload = json(value);
+  writeState(state: unknown, options: { replaceArtifacts?: boolean } = {}) {
+    if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("本地状态必须是一个对象");
+    const value = state as Record<string, unknown>;
+    const runs = Array.isArray(value.runs) ? value.runs as WorkflowRun[] : undefined;
+    const artifacts: Array<{ runId: string; kind: RunArtifactKind; payload?: string }> = [];
+    const seen = new Set<string>();
+    const leanRuns = runs?.map(run => {
+      if (seen.has(run.id)) throw new Error("运行 ID 重复，不能合并其历史明细"); seen.add(run.id);
+      const lean = { ...run };
+      for (const kind of runArtifactKinds) {
+        if (Object.hasOwn(run, kind)) {
+          if (run[kind] !== undefined && !Array.isArray(run[kind])) throw new Error("运行明细必须是数组");
+          artifacts.push({ runId: run.id, kind, payload: run[kind] === undefined ? undefined : json(run[kind]) });
+        }
+        delete lean[kind];
+      }
+      return lean;
+    });
+    let nextEncoding: typeof this.runsEncoding;
+    const fragments = Object.entries(value).map(([key, entry]) => {
+      const raw = json(key === "runs" && leanRuns ? leanRuns : entry);
+      const payload = key === "runs" && this.runsEncoding?.raw === raw ? this.runsEncoding.stored : encodeStateFragment(key, raw);
+      if (key === "runs") nextEncoding = { raw, stored: payload };
       return { key, payload, checksum: checksum(payload) };
     });
     const updatedAt = this.now();
-    this.db.exec("BEGIN IMMEDIATE");
+    const ownsTransaction = !this.stateTransaction;
+    if (ownsTransaction) this.db.exec("BEGIN IMMEDIATE");
     try {
-      const upsert = this.db.prepare(`
-        INSERT INTO state_fragments(key, value_json, checksum, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET
-          value_json = excluded.value_json,
-          checksum = excluded.checksum,
-          updated_at = excluded.updated_at
-        WHERE state_fragments.checksum <> excluded.checksum
-      `);
-      for (const fragment of fragments) {
-        upsert.run(fragment.key, fragment.payload, fragment.checksum, updatedAt);
+      if (options.replaceArtifacts) this.db.exec("DELETE FROM run_artifacts");
+      const putArtifact = this.db.prepare(`INSERT INTO run_artifacts(run_id, kind, json, checksum, updated_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(run_id, kind) DO UPDATE SET json = excluded.json, checksum = excluded.checksum, updated_at = excluded.updated_at
+        WHERE run_artifacts.checksum <> excluded.checksum`);
+      const removeArtifact = this.db.prepare("DELETE FROM run_artifacts WHERE run_id = ? AND kind = ?");
+      for (const row of artifacts) {
+        if (row.payload === undefined) removeArtifact.run(row.runId, row.kind);
+        else putArtifact.run(row.runId, row.kind, row.payload, checksum(row.payload), updatedAt);
       }
-      const keys = new Set(fragments.map((fragment) => fragment.key));
+      const upsert = this.db.prepare(`INSERT INTO state_fragments(key, value_json, checksum, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, checksum = excluded.checksum, updated_at = excluded.updated_at
+        WHERE state_fragments.checksum <> excluded.checksum`);
+      for (const fragment of fragments) upsert.run(fragment.key, fragment.payload, fragment.checksum, updatedAt);
+      const keys = new Set(fragments.map(fragment => fragment.key));
       const existingKeys = this.db.prepare("SELECT key FROM state_fragments").all() as unknown as Array<{ key: string }>;
       const remove = this.db.prepare("DELETE FROM state_fragments WHERE key = ?");
       for (const row of existingKeys) if (!keys.has(row.key)) remove.run(row.key);
       const manifestPayload = json({ keys: [...keys].sort() });
-      this.db.prepare(`
-        INSERT INTO app_state(id, state_json, checksum, updated_at)
-        VALUES (1, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          state_json = excluded.state_json,
-          checksum = excluded.checksum,
-          updated_at = excluded.updated_at
-      `).run(manifestPayload, checksum(manifestPayload), updatedAt);
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+      this.db.prepare(`INSERT INTO app_state(id, state_json, checksum, updated_at) VALUES (1, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, checksum = excluded.checksum, updated_at = excluded.updated_at`)
+        .run(manifestPayload, checksum(manifestPayload), updatedAt);
+      if (ownsTransaction) { this.db.exec("COMMIT"); if (options.replaceArtifacts) this.artifactCache.clear(); this.runsEncoding = nextEncoding; }
+    } catch (error) { if (ownsTransaction) this.db.exec("ROLLBACK"); throw error; }
   }
 
   enqueueJob(input: {
@@ -1089,6 +1181,7 @@ export class LocalDatabase {
       ["metadata", "key, value"],
       ["app_state", "id, state_json, checksum, updated_at"],
       ["state_fragments", "key, value_json, checksum, updated_at"],
+      ["run_artifacts", "run_id, kind, json, checksum, updated_at"],
       ["workflow_jobs", "id, type, idempotency_key, status, payload_json, result_json, progress, stage, heartbeat_at, attempts, max_attempts, created_at, updated_at, next_attempt_at, lease_owner, lease_expires_at, error"],
       ["feedback_events", "id, type, subject_type, subject_id, reason, payload_json, created_at"],
       ["workflow_events", "id, type, subject_type, subject_id, payload_json, created_at"],
@@ -1102,19 +1195,25 @@ export class LocalDatabase {
     try {
       const importedCheck = this.db.prepare("PRAGMA portable_import.quick_check").get() as { quick_check?: string } | undefined;
       if (importedCheck?.quick_check !== "ok") throw new Error("待导入数据库完整性检查失败");
-      this.db.exec("BEGIN IMMEDIATE");
+      this.guardSchemaVersion("portable_import");
+      this.db.exec("BEGIN IMMEDIATE"); this.stateTransaction = true;
       try {
         for (const [table, columns] of tables) {
           this.db.exec(`DELETE FROM main.${table}`);
-          if (table === "title_translations" && !this.db.prepare("SELECT 1 FROM portable_import.sqlite_master WHERE type = 'table' AND name = ?").get(table)) continue;
-          this.db.exec(`INSERT INTO main.${table}(${columns}) SELECT ${columns} FROM portable_import.${table}`);
+          if ((table === "run_artifacts" || table === "title_translations") && !this.hasTable(table, "portable_import")) continue;
+          const hasLane = table === "workflow_jobs" && (this.db.prepare("PRAGMA portable_import.table_info(workflow_jobs)").all() as Array<{ name: string }>).some(column => column.name === "lane");
+          const copiedColumns = hasLane ? `${columns}, lane` : columns;
+          this.db.exec(`INSERT INTO main.${table}(${copiedColumns}) SELECT ${copiedColumns} FROM portable_import.${table}`);
         }
-        this.db.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', ?)").run(String(LOCAL_DATABASE_SCHEMA_VERSION));
-        this.db.exec("COMMIT");
+        const imported = this.readStateLean();
+        if (this.hasEmbeddedArtifacts(imported)) this.writeState(imported);
+        this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('schema_version', ?)").run(String(LOCAL_DATABASE_SCHEMA_VERSION));
+        this.assertIntegrity(); // Verify inside the transaction so failures preserve the current database.
+        this.db.exec("COMMIT"); this.invalidateStateCaches();
       } catch (error) {
-        this.db.exec("ROLLBACK");
+        this.db.exec("ROLLBACK"); this.runsEncoding = undefined;
         throw error;
-      }
+      } finally { this.stateTransaction = false; }
     } finally {
       this.db.exec("DETACH DATABASE portable_import");
     }

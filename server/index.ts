@@ -217,6 +217,7 @@ import {
   getLocalDatabase,
   readState,
   readStateProjection,
+  readRunArtifact,
   replaceState,
   runStorageExclusive,
   updateState,
@@ -343,6 +344,7 @@ registerAiStyleScoreRoutes(app);
 
 const httpRouteRuntime: HttpRouteRuntime = {
   get readState() { return readState; },
+  get readArtifact() { return readRunArtifact; },
   get readStateProjection() { return readStateProjection; },
   get updateState() { return updateState; },
   get replaceState() { return replaceState; },

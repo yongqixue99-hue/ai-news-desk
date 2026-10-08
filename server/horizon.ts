@@ -1,3 +1,4 @@
+import { materializeRunArtifactForMutation } from "./run-artifacts.js";
 import { deadlineSignal } from './abort.js';
 import { aggregationSnapshot } from "./aggregation-desk.js";
 import { candidatePool } from "./candidate-pool.js";
@@ -26,7 +27,7 @@ import {
   eligibleSourcesForTopics,
   routedFeedsForSource,
 } from "./source-routing.js";
-import { getLocalDatabase, readState, updateState } from "./storage.js";
+import { getLocalDatabase, readState, updateState, readRunArtifact } from "./storage.js";
 import { normalizeTopicIds, topicLabels } from "./topics.js";
 import { appendWorkflowNotification } from "./notifications.js";
 import { canApplyCollectionResult, markCollectionReady } from "./collection-lifecycle.js";
@@ -233,6 +234,7 @@ const executeCandidateBriefingEnrichment = async (
     const target = current.runs.find((entry) => entry.id === runId);
     if (!target) throw new Error("运行记录不存在");
     if (!canApplyCollectionResult(target, signal)) return target;
+    materializeRunArtifactForMutation(target, "evidenceCandidates", readRunArtifact);
     for (const candidate of [...target.candidates, ...(target.evidenceCandidates ?? [])]) {
       const generatedCandidate = generatedById.get(candidate.id);
       if (generatedCandidate) {
@@ -628,7 +630,7 @@ export const executeCollection = async (runId: string, options: { signal?: Abort
       const targetRun = current.runs.find((entry) => entry.id === runId);
       if (!targetRun) return;
       if (!markCollectionReady(targetRun, completedAt)) return;
-      targetRun.recommendationSnapshot = captureRecommendationSnapshot(current, completedAt);
+      targetRun.recommendationSnapshot = captureRecommendationSnapshot(current, completedAt, readRunArtifact);
       clearResolvedCollectionFailures(current, runId);
       clearRetriedCollectionFailures(current, runId);
       appendWorkflowNotification(current, {
