@@ -7,6 +7,7 @@ import { xiaoheiheTitleLength, xiaoheiheTitleLimit } from "../../server/xiaoheih
 import type { PlatformDeliveryDisplayStatus } from "../publication-view";
 
 interface Props {
+  configurationOnly?: boolean;
   draft: ArticleDraft;
   nextCompanion?: "Steam" | "数码硬件";
   busy: boolean;
@@ -23,7 +24,7 @@ interface Props {
   publicationRemembered: boolean;
 }
 
-export function XiaoheiheDeliveryPanel({ draft, nextCompanion, busy, connected, status, result, error, selectedImageIds, onChange, onSend, onSettings, onUpload, onConfirmPublished, publicationRemembered }: Props) {
+export function XiaoheiheDeliveryPanel({ configurationOnly = false, draft, nextCompanion, busy, connected, status, result, error, selectedImageIds, onChange, onSend, onSettings, onUpload, onConfirmPublished, publicationRemembered }: Props) {
   const selection = xiaoheiheSelection(draft, nextCompanion);
   const options = selection.options;
   const titleLength = xiaoheiheTitleLength(draft.title);
@@ -48,9 +49,9 @@ export function XiaoheiheDeliveryPanel({ draft, nextCompanion, busy, connected, 
   return <section className="xhh-delivery" aria-label="小黑盒发布设置">
     <div className="xhh-delivery-heading"><div><strong>小黑盒</strong><p><span className={titleLength > xiaoheiheTitleLimit ? "xhh-title-over-limit" : undefined}>标题 {titleLength}/{xiaoheiheTitleLimit} 字</span> · 与小黑盒计数一致</p></div><button className="xhh-icon-button" aria-label="小黑盒连接设置" title="连接设置" onClick={onSettings}><Settings2 size={16} /></button></div>
     {current && !disabled
-      ? <a className="primary-button full xhh-send" href={receiptUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={17} />打开小黑盒检查</a>
-      : <button className="primary-button full xhh-send" disabled={disabled} onClick={onSend}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}{busy ? "正在准备并填入…" : sendLabel}</button>}
-    <p className="xhh-send-note">{current ? "当前版本已填入，检查后在小黑盒点击发布" : connected ? "自动保存并检查，随后打开小黑盒供你发布" : "自动连接 Chrome 并填入，随后由你检查发布"}</p>
+      ? <a className={configurationOnly ? "social-open" : "primary-button full xhh-send"} href={receiptUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={17} />打开小黑盒检查</a>
+      : !configurationOnly ? <button className="primary-button full xhh-send" disabled={disabled} onClick={onSend}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}{busy ? "正在准备并填入…" : sendLabel}</button> : null}
+    {!configurationOnly ? <p className="xhh-send-note">{current ? "当前版本已填入，检查后在小黑盒点击发布" : connected ? "自动保存并检查，随后打开小黑盒供你发布" : "自动连接 Chrome 并填入，随后由你检查发布"}</p> : null}
     {error && !repeatedStepError ? <p className="delivery-error" role="alert">{error}</p> : null}
     {result ? <div className={`xhh-receipt ${current ? "ready" : status === "changed" || status === "failed" ? "attention" : "neutral"}`}>
       <div role="status"><strong>{receiptLabel}</strong>{current ? null : <a href={receiptUrl} target="_blank" rel="noreferrer">查看上次填入页面 <ArrowUpRight size={14} /></a>}</div>

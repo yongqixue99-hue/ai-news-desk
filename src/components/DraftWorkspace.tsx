@@ -314,7 +314,7 @@ export function DraftWorkspace({
   const currentDeliverySnapshot = currentDraftDeliverySnapshot(editing, deliverySnapshot);
   const deliveryView = currentDeliverySnapshot?.value;
   useEffect(() => setPublisherStatus(initialPublisherStatus), [initialPublisherStatus]);
-  const [publishPlatform, setPublishPlatform] = useState<PublishPlatform | "social">("xiaoheihe");
+  const [deliveryRequested, setDeliveryRequested] = useState(false);
   const [wechatMetadata, setWechatMetadata] = useState<WeChatDraftMetadata>(() =>
     wechatMetadataFor(selected, wechatSettings));
   const [draftSearch, setDraftSearch] = useState("");
@@ -1379,7 +1379,6 @@ export function DraftWorkspace({
   const publisherReady = Boolean(publisherStatus?.ok);
   const deliveryPresentation = (platform: PublishPlatform) => platformDeliveryView({ platform,
     status: deliveryView?.[platform].status, dirty, loadFailed: currentDeliverySnapshot?.loadFailed });
-  const deliveryStatusLabel = (platform: PublishPlatform) => deliveryPresentation(platform).label;
   const draftQuality = buildDraftQualityView(editing.qualityWarnings);
   const passedReadinessCount = readiness.filter((item) => item.ok).length;
   const nextAction = editing.provenance.generatedBy === "human" && !editing.provenance.contentPackageId && !editing.sources.length
@@ -1541,7 +1540,7 @@ export function DraftWorkspace({
           <button className="draft-quick-save" aria-label="保存草稿" title="保存草稿并创建版本（⌘/Ctrl+S）" onClick={() => void save("manual").catch(() => undefined)} disabled={saving}>
             {saving ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}
           </button>
-          <button className="primary-button draft-delivery-trigger" aria-expanded={utilityTab === "publish"} onClick={() => { setFocusMode(false); setUtilityTab((tab) => tab === "publish" ? null : "publish"); }}><Send size={14} />交付草稿</button>
+          <button className="primary-button draft-delivery-trigger" aria-expanded={utilityTab === "publish"} disabled={saving || busy || deliveryBusy} onClick={() => { setFocusMode(false); setDraftLibraryOpen(false); setUtilityTab("publish"); setDeliveryRequested(true); }}><Send size={14} />交付草稿</button>
         </div>
       </header>
 
@@ -2000,12 +1999,11 @@ export function DraftWorkspace({
 
               {utilityTab === "publish" ? (
                 <>
-                  <div className="delivery-platform-tabs" role="tablist" aria-label="常用发布平台">
-                    {([ ["xiaoheihe", "小黑盒"], ["wechat", "微信公众号"], ["social", "多平台"] ] as const).map(([id, name], index, tabs) => <button key={id} role="tab" aria-selected={publishPlatform === id} disabled={deliveryBusy} tabIndex={publishPlatform === id ? 0 : -1} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = tabs[event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowLeft" ? -1 : 1) + tabs.length) % tabs.length]![0]; setPublishPlatform(next); event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-platform="${next}"]`)?.focus(); }} data-platform={id} onClick={() => setPublishPlatform(id)}><strong>{name}</strong><span>{id === "social" ? "头条 · 百家号 · 知乎" : deliveryStatusLabel(id)}</span></button>)}
-                  </div>
-                  {publishPlatform === "xiaoheihe" ? (
+                  <MultiDeliveryPanel key={editing.id} sendRequested={deliveryRequested} onRequestConsumed={() => setDeliveryRequested(false)}
+                    settingsSummary={platform => platform === "xiaoheihe" ? `${xiaoheiheSelection(editing, deliveryView?.xiaoheiheNextCompanion).communities.join(" · ")} · 4 个固定话题` : "封面、作者与摘要"}
+                    renderSettings={platform => platform === "xiaoheihe" ? (
                     <>
-                  <XiaoheiheDeliveryPanel key={editing.id} draft={editing} nextCompanion={deliveryView?.xiaoheiheNextCompanion}
+                  <XiaoheiheDeliveryPanel configurationOnly key={editing.id} draft={editing} nextCompanion={deliveryView?.xiaoheiheNextCompanion}
                     busy={busy || deliveryBusy} connected={publisherReady} status={deliveryPresentation("xiaoheihe").status}
                     result={fillResult} error={preflightError} selectedImageIds={[...insertedMediaIds]} onChange={updateEditing}
                     onSend={() => void fill()} onSettings={() => onOpenPublisherSettings("xiaoheihe")} onUpload={uploadImage}
@@ -2069,8 +2067,8 @@ export function DraftWorkspace({
                     </section>
                   ) : null}
                     </>
-                  ) : publishPlatform === "wechat" ? (
-                    <WeChatDraftPanel
+                  ) : platform === "wechat" ? (
+                    <WeChatDraftPanel configurationOnly
                       draft={editing}
                       settings={wechatSettings}
                       metadata={wechatMetadata}
@@ -2086,7 +2084,7 @@ export function DraftWorkspace({
                       onConfirmPublished={() => confirmPublication("wechat")}
                       onOpenSettings={() => onOpenPublisherSettings("wechat")}
                     />
-                  ) : <MultiDeliveryPanel key={editing.id} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} prepare={prepareMultiDelivery} onChange={updateEditing} onBusy={setDeliveryBusy} onOpenSettings={() => onOpenPublisherSettings("social")} onDelivered={(latest, sent) => {
+                  ) : null} dirty={dirty} draft={editing} disabled={saving || busy || deliveryBusy} prepare={prepareMultiDelivery} onChange={updateEditing} onBusy={setDeliveryBusy} onOpenSettings={() => onOpenPublisherSettings("social")} onDelivered={(latest, sent) => {
                     if (!isDeliveryAcknowledgement(latest, sent)) return;
                     const acknowledgedAt = acknowledgedDraftTimestamp(editingRef.current?.id, sent.id, persistedUpdatedAt.current, sent.updatedAt, latest.updatedAt);
                     if (acknowledgedAt) persistedUpdatedAt.current = acknowledgedAt;
@@ -2095,8 +2093,11 @@ export function DraftWorkspace({
                       editingRef.current = next;
                       return next;
                     });
-                    if (editingRef.current?.id === sent.id && acknowledgedAt) setLastSavedAt(acknowledgedAt);
-                  }} />}
+                    if (editingRef.current?.id === sent.id) {
+                      setFillResult(latest.fillResult);
+                      if (acknowledgedAt) setLastSavedAt(acknowledgedAt);
+                    }
+                  }} />
                 </>
               ) : null}
             </div>

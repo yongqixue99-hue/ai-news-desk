@@ -11,6 +11,7 @@ export type { WeChatDraftMetadata } from "../../server/types.js";
 
 type DeliveryView = Awaited<ReturnType<typeof api.primaryDeliveryStatus>>;
 interface WeChatDraftPanelProps {
+  configurationOnly?: boolean;
   draft: ArticleDraft; settings: WeChatChannelSettings; metadata?: WeChatDraftMetadata;
   dirty: boolean; saving: boolean; busy: boolean; copiedFormatted: boolean;
   onMetadataChange?: (metadata: WeChatDraftMetadata) => void;
@@ -111,10 +112,10 @@ export function WeChatDraftPanel(props: WeChatDraftPanelProps) {
     {!configured ? <div className="delivery-issue"><Info size={16} /><div><strong>连接公众号后自动同步</strong><p>接口不可用时，复制后粘贴到公众号编辑器。</p><button disabled={disabled} onClick={props.onOpenSettings}>连接公众号</button></div></div> : null}
     {unresolved ? <div className="delivery-issue" role="alert"><Info size={16} /><div><strong>上次发送结果待核对</strong><p>连接中断，尚不确定微信是否收到。先检查草稿箱，避免重复创建。</p><button disabled={disabled} onClick={() => void resolveUnknown()}>已核对未收到，允许重试</button></div></div> : null}
     <div className="delivery-main-action">
-      <button className="primary-button full" disabled={disabled || checking || !configured || connection?.ok !== true || Boolean(unresolved) || issues.length > 0} onClick={() => void send()}>
+      {!props.configurationOnly ? <button className="primary-button full" disabled={disabled || checking || !configured || connection?.ok !== true || Boolean(unresolved) || issues.length > 0} onClick={() => void send()}>
         {working || saving ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}
         {working ? phase : receipt && !view?.wechat.accountChanged ? stale ? "更新公众号草稿" : receipt.verification !== "verified" ? "重新核对微信草稿" : "检查并同步最新版本" : "同步到公众号草稿箱"}
-      </button>
+      </button> : null}
       <div className="delivery-action-links"><button disabled={disabled} onClick={() => void props.onCopyFormatted().catch(err => setError(err.message))}><Copy size={13} />{props.copiedFormatted ? "已复制" : "复制公众号排版"}</button><a href="https://mp.weixin.qq.com/" target="_blank" rel="noreferrer">打开公众号后台<ExternalLink size={12} /></a></div>
       <p className="delivery-boundary">保存 → 检查 → 同步草稿，由你在平台发布</p>
     </div>

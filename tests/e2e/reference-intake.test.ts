@@ -73,7 +73,19 @@ test("link and screenshot materials enter the writer without generation and surv
     await page.getByText("迟到的原文", { exact: true }).waitFor();
     assert.equal(await page.getByLabel("文章标题", { exact: true }).inputValue(), "读取期间修改的标题");
     assert.equal(await prose.innerText(), "读取期间写下的正文。");
-    await page.getByRole("button", { name: "关闭草稿库", exact: true }).click();
+    // Switching drawers must preserve the same editor instance and its undo history.
+    await prose.press("End");
+    await prose.press("Enter");
+    await prose.pressSequentially("用于撤销的补充句。");
+    const editorInstance = await prose.evaluate(element => { element.setAttribute("data-test-editor-instance", "retained"); return element.getAttribute("data-test-editor-instance"); });
+    const tools = page.getByRole("navigation", { name: "草稿辅助工具" });
+    for (let index = 0; index < 20; index++) await tools.getByRole("button", { name: index % 2 ? "资料" : "交付", exact: true }).click();
+    assert.equal(await prose.getAttribute("data-test-editor-instance"), editorInstance);
+    assert.match(await prose.innerText(), /读取期间写下的正文。[\s\S]*用于撤销的补充句。/u);
+    await prose.press("ControlOrMeta+z");
+    assert.doesNotMatch(await prose.innerText(), /用于撤销的补充句/u);
+    assert.equal(await page.getByLabel("文章标题", { exact: true }).inputValue(), "读取期间修改的标题");
+    if (await page.getByRole("button", { name: "关闭草稿库", exact: true }).isVisible()) await page.getByRole("button", { name: "关闭草稿库", exact: true }).click();
     await page.locator(".utility-drawer-scroll").evaluate(element => element.scrollTo(0, 0));
     if (process.env.AI_NEWS_DESK_WRITING_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.AI_NEWS_DESK_WRITING_SCREENSHOTS, "references-1440.png") });
     await page.setViewportSize({ width: 390, height: 844 });

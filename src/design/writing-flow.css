@@ -21,3 +21,20 @@
 .reference-input-actions button:not(.primary-button), .reference-read-state button { border: 0; border-radius: 5px; color: var(--muted, #71717a); background: transparent; }
 .reference-item-heading button { border: 0; border-radius: 4px; color: var(--muted, #71717a); background: transparent; }
 .reference-item-heading button:hover, .reference-input-actions button:not(.primary-button):hover { background: #f5f2f0; color: #b93228; }
+
+.multi-delivery .social-targets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.multi-delivery .social-targets > label { align-items: flex-start; padding: 10px; border-radius: 7px; min-width: 0; }
+.multi-delivery .social-targets input { margin-top: 3px; flex-shrink: 0; }
+.multi-delivery .social-platform-name { display: grid; gap: 4px; }
+.multi-delivery .social-platform-name b { font-size: 13px; }
+.multi-delivery .social-platform-name em { font-size: 10px; font-style: normal; color: #8b817d; }
+.multi-delivery .social-platform-copy { min-width: 0; }
+.multi-delivery .social-platform-copy > small { font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.multi-delivery .social-targets .unavailable { opacity: .65; cursor: default; }
+.delivery-channel-settings { border-bottom: 1px solid #e9e4e1; margin-top: 8px; }
+.delivery-channel-settings > summary { padding: 12px 0; cursor: pointer; font-size: 12px; }
+.delivery-channel-settings > summary strong { font-weight: 600; }
+.delivery-channel-settings > summary span { display: block; color: #8b817d; font-size: 11px; line-height: 1.6; margin-top: 4px; }
+.delivery-channel-settings .xhh-delivery, .delivery-channel-settings .wechat-primary { padding: 10px 0; }
+.delivery-channel-settings .xhh-delivery-heading { margin-bottom: 12px; }
+.delivery-channel-settings .xhh-receipt { margin-top: 10px; }
