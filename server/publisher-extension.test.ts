@@ -218,6 +218,7 @@ test("extension bridge gives a job to one client and resolves its report", async
 
   assert.equal(bridge.claim(bridge.token, "client-1")?.id, "job-1");
   assert.equal(bridge.claim(bridge.token, "client-1"), undefined);
+  bridge.heartbeat(bridge.token, "client-1", "9.9.9");
   assert.throws(
     () => bridge.complete(bridge.token, "another-client", "job-1", { steps: [] }),
     /不属于/,
@@ -233,6 +234,7 @@ test("extension bridge gives a job to one client and resolves its report", async
   const report = await completion;
   assert.equal(report.pageUrl, "https://xiaoheihe.cn/editor");
   assert.equal(report.steps.length, 2);
+  assert.equal(report.adapterVersion, MINIMUM_EXTENSION_VERSION, "receipt keeps the version that claimed the job, not a later heartbeat");
 });
 
 test("extension bridge rejects publishing while the helper is disconnected", () => {
@@ -248,7 +250,7 @@ test("duplicate receipt acknowledgements require the same token, client and resu
   bridge.claim(bridge.token, "client");
   const report = { pageUrl: "https://xiaoheihe.cn/editor", steps: [{ name: "配图", ok: false, detail: "上传失败" }] };
   assert.deepEqual(bridge.complete(bridge.token, "client", "receipt-retry", report), { ok: true });
-  assert.deepEqual(await completion, report, "ACK confirms receipt transport, not successful platform delivery");
+  assert.deepEqual(await completion, { ...report, adapterVersion: MINIMUM_EXTENSION_VERSION }, "ACK adds the claimed helper version without changing a failed result");
   assert.deepEqual(bridge.complete(bridge.token, "client", "receipt-retry", structuredClone(report)), { ok: true });
   assert.throws(() => bridge.complete("wrong", "client", "receipt-retry", report), /配对/);
   assert.throws(() => bridge.complete(bridge.token, "another", "receipt-retry", report), /不属于/);

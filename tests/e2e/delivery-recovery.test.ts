@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import net, { type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -139,4 +139,36 @@ test("remembered destinations start from the writer in one click without re-sele
   await page.getByRole("button", { name: "关闭右侧面板", exact: true }).click();
   await openDelivery(page);
   assert.equal(requests, 1, "opening settings cannot replay a consumed delivery request");
+}));
+
+test("Toutiao shares the one-click path and exposes missing field evidence without claiming readiness", { timeout: 60_000 }, () => isolated(async page => {
+  const delivered = { ...batch("reported", "头条隔离示例：已返回草稿编号，字段尚未回读"), targets: [{ platform: "toutiao", revisionHash: "test", status: "reported", detail: "头条隔离示例：已返回草稿编号，字段尚未回读", url: "https://mp.toutiao.com/profile_v4/graphic/publish?pgc_id=123", fieldChecks: { schemaVersion: "delivery-fields/v1", adapterVersion: "social-bridge/v1:toutiao/test-only", source: "helper-receipt", checkedAt: new Date().toISOString(), fields: [{ key: "cover", label: "封面", status: "unobserved" }, { key: "settings", label: "平台发布设置", status: "unobserved" }] } }] };
+  let writes = 0;
+  await page.route("**/delivery-batches", async route => {
+    if (route.request().method() === "POST") { writes++; assert.deepEqual(route.request().postDataJSON().platforms, ["toutiao"]); await route.fulfill({ json: delivered }); }
+    else await route.fulfill({ json: { batches: writes ? [delivered] : [], platforms: [] } });
+  });
+  const panel = await openDelivery(page);
+  await panel.getByRole("checkbox", { name: "今日头条", exact: true }).check();
+  await page.getByRole("button", { name: "关闭右侧面板", exact: true }).click();
+  await page.getByRole("button", { name: "交付草稿", exact: true }).click();
+  await panel.getByText("字段核对 0/2", { exact: true }).waitFor();
+  assert.equal(writes, 1);
+  assert.equal(await panel.locator(".delivery-field-checks").getAttribute("open"), null);
+  await panel.locator(".delivery-field-checks > summary").click();
+  assert.equal(await panel.getByText("尚未回读", { exact: true }).count(), 2);
+  await page.reload();
+  await openDelivery(page);
+  await panel.getByText("字段核对 0/2", { exact: true }).waitFor();
+  assert.equal(writes, 1, "refresh is not another write");
+  const screenshots = path.resolve(".artifacts/writing-flow/C/browser");
+  await mkdir(screenshots, { recursive: true });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    const summary = panel.locator(".delivery-field-checks > summary");
+    if (await panel.locator(".delivery-field-checks").getAttribute("open") === null) await summary.click();
+    await panel.locator(".delivery-field-checks").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(screenshots, `delivery-fields-${width}.png`), fullPage: true, animations: "disabled" });
+  }
 }));

@@ -1,3 +1,4 @@
+import { DeliveryFieldSummary } from "./DeliveryFieldSummary";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ExternalLink, RefreshCw, Send, LoaderCircle, Check, CircleAlert } from "lucide-react";
 import { api, deliveryBatchApi, socialDeliveryApi } from "../api";
@@ -137,7 +138,7 @@ export function MultiDeliveryPanel(props: Props) {
     void socialDeliveryApi.openReceipt(props.draft.id, receipt.id).catch(error => setError(error instanceof Error ? error.message : String(error)));
   };
   const resolve = async (receipt: SocialDeliveryReceipt, resolution: "reviewed" | "not-received") => {
-    const question = resolution === "reviewed" ? "已在目标平台核对账号、正文和全部图片？此操作只记录草稿核对。" : "已检查目标平台草稿箱和同步助手历史，确认这次文章没有送达？确认后才允许重试。";
+    const question = resolution === "reviewed" ? "已在目标平台核对账号、标题、正文、图片、封面和全部发布设置？此操作只记录当前稿件版本的人工核对。" : "已检查目标平台草稿箱和同步助手历史，确认这次文章没有送达？确认后才允许重试。";
     if (!window.confirm(question)) return;
     setError("");
     try { await socialDeliveryApi.resolve(props.draft.id, receipt.id, resolution); await refresh(); }
@@ -173,11 +174,11 @@ export function MultiDeliveryPanel(props: Props) {
     })}</details> : null}
     {props.dirty && automaticCount > 0 ? <p className="social-hint">交付时自动保存当前修改</p> : null}
     <div className="social-toolbar"><button className="social-open" type="button" disabled={opening || !selected.length} onClick={() => void open()}><ExternalLink size={13} />{opening ? "正在打开…" : "打开所选平台 / 登录"}</button><a href="#schedule" onClick={event => { event.preventDefault(); props.onOpenSettings(); }}>连接设置</a></div>
-    {selected.includes("toutiao") ? <p className="social-hint social-limit-note">头条会打开文章编辑页，当前不会自动填入。页面自动保存需另行核验，暂不计入存稿数量。</p> : null}
+    {selected.includes("toutiao") ? <p className="social-hint social-limit-note">头条通过同步助手存草稿，交付时自动核对登录和草稿能力。当前适配尚未完成真实账号验收。</p> : null}
 
     {batch ? <div className="social-progress" role="status"><div className="social-progress-heading"><strong>{waiting ? "正在交付" : "本次结果"}</strong>{batch.targets.some(t => deliveryTargetActive(t) && t.status !== "sending") ? <button type="button" onClick={() => void cancel()}>取消等待</button> : null}</div>{batch.targets.map(target => {
       const receipt = receipts.find(item => item.id === target.receiptId);
-      return <div className={`social-target-result ${target.status}`} key={target.platform}>{deliveryTargetActive(target) ? <LoaderCircle size={14} className="spin" /> : ["verified", "filled", "reported"].includes(target.status) ? <Check size={14} /> : <CircleAlert size={14} />}<div><b>{names[target.platform]}</b><p>{target.detail}</p>{receipt?.url ? <button type="button" className="social-open" onClick={() => openReceipt(receipt)}>查看草稿 <ExternalLink size={11} /></button> : target.url ? <a href={target.url} target="_blank" rel="noreferrer">打开平台核对 <ExternalLink size={11} /></a> : null}</div></div>;
+      return <div className={`social-target-result ${target.status}`} key={target.platform}>{deliveryTargetActive(target) ? <LoaderCircle size={14} className="spin" /> : ["verified", "filled"].includes(target.status) ? <Check size={14} /> : <CircleAlert size={14} />}<div><b>{names[target.platform]}</b><p>{target.detail}</p><DeliveryFieldSummary checks={target.fieldChecks} />{receipt?.url ? <button type="button" className="social-open" onClick={() => openReceipt(receipt)}>查看草稿 <ExternalLink size={11} /></button> : target.url ? <a href={target.url} target="_blank" rel="noreferrer">打开平台核对 <ExternalLink size={11} /></a> : null}</div></div>;
     })}{retryable.length && !waiting ? <button type="button" className="secondary-button social-retry" disabled={props.disabled || submitting} onClick={() => void run(retryable, batch.id)}>重试未完成的平台（{retryable.length}）</button> : null}</div> : null}
     {notice ? <p className="social-hint" role="status">{notice}</p> : null}
     {error ? <p className="social-error" role="alert">{error}</p> : null}
@@ -186,7 +187,7 @@ export function MultiDeliveryPanel(props: Props) {
     {receipts.length ? <details className="social-history"><summary>历史回执 · {receipts.length}</summary>{receipts.map(receipt => <article key={receipt.id}>
       <strong>{names[receipt.platform]} · {receipt.account}</strong><small>{new Date(receipt.createdAt).toLocaleString()} · {!props.dirty && receipt.revisionHash === revisions[receipt.platform] ? "当前版本" : "历史版本"}</small>
       <b>{{ sending: "等待核对结果", unknown: "结果未知", reported: "助手已返回草稿回执", reviewed: "已人工核对草稿", "not-received": "已确认未收到" }[receipt.status]}</b>
-      <p>{receipt.detail}</p><div className="social-actions">
+      <p>{receipt.detail}</p><DeliveryFieldSummary checks={receipt.fieldChecks} />{receipt.acceptance ? <small>已人工核对本稿版本 · {receipt.acceptance.adapterVersion}</small> : null}<div className="social-actions">
       <button type="button" onClick={() => receipt.url ? openReceipt(receipt) : void socialDeliveryApi.open([receipt.platform]).catch(error => setError(String(error)))}>打开草稿核对 <ExternalLink size={11} /></button>
       {["reported", "sending", "unknown"].includes(receipt.status) ? <button disabled={busy} onClick={() => void resolve(receipt, "reviewed")}>已核对草稿</button> : null}
       {["sending", "unknown"].includes(receipt.status) ? <button disabled={busy} onClick={() => void resolve(receipt, "not-received")}>确认未收到，允许重试</button> : null}

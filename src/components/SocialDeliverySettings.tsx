@@ -30,7 +30,7 @@ export function SocialDeliverySettings() {
   };
   return <section className="social-setup" id="social-delivery-settings">
     <div className="social-heading"><div><small>文章分发</small><h3>连接多平台同步助手</h3></div><span>{status?.connected ? "助手已连接" : "等待连接"}</span></div>
-    <p>在 Chrome 中登录一次，以后直接复用。百家号、知乎可通过助手存草稿；头条暂提供编辑入口。</p>
+    <p>在 Chrome 中登录一次，以后直接复用。百家号、知乎和头条通过助手存草稿，自动检查当前助手是否具备头条草稿能力。</p>
     <div className="social-actions"><button className="secondary-button" onClick={() => void openPlatforms()}><ExternalLink size={14} />打开平台登录</button><button className="secondary-button" disabled={busy} onClick={() => void perform(false)}><RefreshCw size={14} />{busy ? "正在检查…" : "检测连接"}</button></div>
     <div className="social-accounts">{socialPlatforms.map(platform => <div key={platform.id}><b>{platform.name}</b><span>{status?.accounts.find(account => account.id === platform.id)?.detail || "正在检测…"}</span></div>)}</div>
     <details className="social-connection-details" open={!status?.settings.tokenConfigured}><summary>{status?.settings.tokenConfigured ? "连接配置 · 已保存" : "首次连接同步助手"}</summary>

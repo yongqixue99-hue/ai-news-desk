@@ -340,7 +340,7 @@ test("a legacy verified receipt upgrades by readback without another upload or d
   const first = await desk.syncDraft({ draft, coverPlacementId: "placement-1" });
   const legacy = { ...first, remoteFingerprintVersion: undefined, remoteFingerprint: wechatRemoteFingerprint(remote!, true, "v1"), remoteContentFingerprint: wechatRemoteFingerprint(remote!, false, "v1") };
   const upgraded = await desk.syncDraft({ draft, coverPlacementId: "placement-1", previousReceipt: legacy });
-  assert.equal(upgraded.remoteFingerprintVersion, "v2");
+  assert.equal(upgraded.remoteFingerprintVersion, "v3");
   assert.equal(upgraded.verification, "verified");
   remote!.content = remote!.content.replace("https://example.com/source", "https://example.com/changed");
   await assert.rejects(desk.syncDraft({ draft, coverPlacementId: "placement-1", previousReceipt: legacy }), /链接.*不一致/);
@@ -382,4 +382,18 @@ test("lost create responses without a remote id remain uncertain instead of gues
     addDraft: async () => { throw new Error("must not create"); }, updateDraft: async () => { throw new Error("must not update"); } } });
   assert.equal(await desk.recoverAttempt({ draftId: "draft", appId: "wx", attempt: { id: "attempt", appId: "wx", startedAt: "2026-10-02T00:00:00Z", revisionHash: "a".repeat(64), operation: "created", status: "unknown" } }), undefined);
   assert.equal(reads, 0);
+});
+
+test("WeChat comment settings are part of readback and a mismatch never verifies delivery", async () => {
+  let remote: import("./wechat-draft.js").WeChatDraftArticlePayload;
+  const desk = createWeChatDraftDesk({ loadImage: async () => ({ bytes: new Uint8Array([1]), fileName: "cover.png", contentType: "image/png" }),
+    gateway: { countDrafts: async () => 0, getDraft: async () => ({ ...remote, need_open_comment: 1 }),
+      uploadContentImage: async () => ({ url: "https://mmbiz.qpic.cn/content" }), uploadPermanentImage: async () => ({ mediaId: "cover" }),
+      addDraft: async article => { remote = article; return { mediaId: "remote" }; }, updateDraft: async () => { throw new Error("must not rewrite"); } },
+  });
+  const receipt = await desk.syncDraft({ draft: articleDraft() });
+  assert.equal(receipt.verification, "pending");
+  assert.equal(receipt.fieldChecks?.fields.find(field => field.key === "comments")?.status, "different");
+  assert.equal(receipt.remoteFingerprintVersion, "v3");
+  assert.notEqual(wechatRemoteFingerprint(remote!), wechatRemoteFingerprint({ ...remote!, only_fans_can_comment: 1 }));
 });

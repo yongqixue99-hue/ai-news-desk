@@ -1,7 +1,8 @@
+import type { DeliveryFieldChecks } from "./delivery-verification.js";
 /** Browser-assisted article channels. Transport acknowledgements are not publication. */
 export const socialPlatforms = [
   { id: "baijiahao", name: "百家号", url: "https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1", enabled: true, titleMin: 2, titleMax: 64, saveHint: "保存到草稿箱" },
-  { id: "toutiao", name: "今日头条", url: "https://mp.toutiao.com/profile_v4/graphic/publish", enabled: false, titleMin: 2, titleMax: 30, saveHint: "平台自动保存 · 自动交付待接通" },
+  { id: "toutiao", name: "今日头条", url: "https://mp.toutiao.com/profile_v4/graphic/publish", enabled: true, titleMin: 2, titleMax: 30, saveHint: "保存到草稿箱 · 需助手提供头条草稿能力" },
   { id: "zhihu", name: "知乎", url: "https://zhuanlan.zhihu.com/write", enabled: true, titleMin: 1, titleMax: 100, saveHint: "保存到草稿箱" },
 ] as const;
 export type SocialPlatform = typeof socialPlatforms[number]["id"];
@@ -11,6 +12,8 @@ export interface SocialDeliveryStatus {
   settings: SocialBridgeSettings; address: string; connected: boolean; detail: string; accounts: SocialAccount[];
 }
 export interface SocialDeliveryReceipt {
+  fieldChecks?: DeliveryFieldChecks;
+  acceptance?: { reviewedAt: string; accountId: string; revisionHash: string; adapterVersion: string; fields: string[] };
   id: string; platform: SocialPlatform; account: string; accountId: string; revisionHash: string; title: string;
   createdAt: string; updatedAt: string;
   status: "sending" | "reported" | "unknown" | "not-received" | "reviewed";

@@ -1,13 +1,15 @@
+import type { DeliveryFieldChecks } from "./delivery-verification.js";
 export const deliveryPlatforms = [
   { id: "wechat", name: "微信公众号", automatic: true, url: "https://mp.weixin.qq.com/" },
   { id: "xiaoheihe", name: "小黑盒", automatic: true, url: "https://www.xiaoheihe.cn/creator/editor/draft/article" },
   { id: "baijiahao", name: "百家号", automatic: true, url: "https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1" },
   { id: "zhihu", name: "知乎", automatic: true, url: "https://zhuanlan.zhihu.com/write" },
-  { id: "toutiao", name: "今日头条", automatic: false, url: "https://mp.toutiao.com/profile_v4/graphic/publish" },
+  { id: "toutiao", name: "今日头条", automatic: true, url: "https://mp.toutiao.com/profile_v4/graphic/publish" },
 ] as const;
 export type DeliveryPlatform = typeof deliveryPlatforms[number]["id"];
 export type DeliveryTargetStatus = "queued" | "waiting-connection" | "waiting-login" | "sending" | "verified" | "filled" | "reported" | "unknown" | "failed" | "cancelled";
 export interface DeliveryBatchTarget {
+  fieldChecks?: DeliveryFieldChecks;
   platform: DeliveryPlatform;
   revisionHash: string;
   status: DeliveryTargetStatus;

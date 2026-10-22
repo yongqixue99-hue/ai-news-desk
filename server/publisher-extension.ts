@@ -1,3 +1,4 @@
+import { xiaoheiheDeliveryChecks } from "./delivery-verification.js";
 import { inspectXiaoheiheCover } from "./xiaoheihe-cover.js";
 import { xiaoheiheSelection } from "./xiaoheihe-publishing.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -82,6 +83,7 @@ export interface ExtensionPublisherJob {
 }
 
 export interface ExtensionPublisherReport {
+  adapterVersion?: string;
   pageUrl?: string;
   steps: PublisherStep[];
 }
@@ -95,6 +97,7 @@ interface PendingJob {
   job: ExtensionPublisherJob;
   claimedBy?: string;
   claimedAt?: number;
+  claimedVersion?: string;
   resolve: (report: ExtensionPublisherReport) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -200,6 +203,7 @@ export class ExtensionPublisherBridge {
       if (!pending.claimedBy) {
         pending.claimedBy = clientId;
         pending.claimedAt = now;
+        pending.claimedVersion = this.client.version;
         return pending.job;
       }
     }
@@ -237,7 +241,7 @@ export class ExtensionPublisherBridge {
     }
     clearTimeout(pending.timer);
     this.jobs.delete(jobId);
-    pending.resolve(normalized);
+    pending.resolve({ ...normalized, adapterVersion: pending.claimedVersion });
     return { ok: true };
   }
 }
@@ -373,6 +377,7 @@ export const fillViaChromeExtension = async (
     community: draftSnapshot.community,
     topics: job.topics,
     steps: report.steps,
+    fieldChecks: xiaoheiheDeliveryChecks(report.steps, report.adapterVersion),
     warning: "内容通过常用 Chrome 填入；系统不会点击最终发布。请检查正文、图片、分区和话题。",
   };
   return result;

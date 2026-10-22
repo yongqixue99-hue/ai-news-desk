@@ -93,9 +93,9 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     const response = await fetch(`${origin}/api/delivery/social/status`); const status = await response.json();
     assert.equal(status.connected, false); assert.equal(status.settings.tokenConfigured, false);
     assert.equal(status.accounts.find((item: {id: string}) => item.id === 'toutiao').available, false);
-    const rejected = await fetch(`${origin}/api/drafts/delivery-ui/social-deliveries`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ platform: 'toutiao' }) });
+    const rejected = await fetch(`${origin}/api/drafts/delivery-ui/social-deliveries`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ platform: 'toutiao', updatedAt: state.drafts[0]!.updatedAt, account: '隔离作者', accountId: 'test-account' }) });
     assert.equal(rejected.status, 400);
-    assert.match((await rejected.json()).error, /尚未接通/);
+    assert.match((await rejected.json()).error, /尚未连接/);
     const invalidSettings = await fetch(`${origin}/api/delivery/social/settings`, { method: 'PATCH', headers: {'content-type':'application/json'}, body: JSON.stringify({ extensionId: 'bad', enabled: true }) });
     assert.equal(invalidSettings.status, 400); assert.match((await invalidSettings.json()).error, /扩展 ID/);
     browser = await chromium.launch({ executablePath: await findChromeExecutable(), headless: true });
@@ -105,7 +105,7 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await page.getByRole('tab', { name: '采集计划', exact: true }).waitFor();
     assert.equal(await page.getByRole('heading', { name: '连接多平台同步助手' }).isVisible(), false);
     await page.getByRole('tab', { name: '平台连接', exact: true }).click();
-    await page.getByRole('button', { name: '知乎与百家号 多平台同步助手', exact: true }).click();
+    await page.getByRole('button', { name: '头条、知乎与百家号 多平台同步助手', exact: true }).click();
     await page.getByRole('heading', { name: '连接多平台同步助手' }).waitFor();
     await page.locator('#social-delivery-settings').scrollIntoViewIfNeeded();
     for (const width of [1440, 390]) {
@@ -284,8 +284,8 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await page.unroute('**/api/drafts/delivery-ui/delivery-batches');
     const panel = page.locator('.multi-delivery');
     await chooseOnly(['知乎', '今日头条']);
-    await panel.getByText(/头条会打开文章编辑页，当前不会自动填入/).waitFor();
-    assert.equal(await panel.getByRole('button', {name:'存入 1 个平台草稿箱'}).isEnabled(), true);
+    await panel.getByText(/头条通过同步助手存草稿/).waitFor();
+    assert.equal(await panel.getByRole('button', {name:'存入 2 个平台草稿箱'}).isEnabled(), true);
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 1000 });
       await page.locator('.utility-drawer-scroll').evaluate(element => element.scrollTo(0, 0));
@@ -329,11 +329,11 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
         if (retry) { retryRequests++; assert.equal(input.retryOf, 'wait-test'); }
         batch = retry
           ? { id: 'retry-test', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now()+600000).toISOString(), targets: [{ platform: 'zhihu', revisionHash: 'test', status: 'reported', detail: '隔离测试：失败平台重试完成' }] }
-          : { id: 'wait-test', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now()+600000).toISOString(), targets: [{ platform: 'zhihu', revisionHash: 'test', status: 'waiting-connection', detail: '等待同步助手连接；网站已登录则无需重登' }, { platform: 'toutiao', revisionHash: 'test', status: 'failed', detail: '头条自动存稿尚未接通' }] };
+          : { id: 'wait-test', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now()+600000).toISOString(), targets: [{ platform: 'zhihu', revisionHash: 'test', status: 'waiting-connection', detail: '等待同步助手连接；网站已登录则无需重登' }, { platform: 'toutiao', revisionHash: 'test', status: 'reported', detail: '隔离测试：头条已返回草稿回执' }] };
         await route.fulfill({json:batch});
       } else await route.fulfill({json:{ batches: batch ? [batch] : [], platforms: [] }});
     });
-    await page.getByRole('button', {name:'存入 1 个平台草稿箱'}).click();
+    await page.getByRole('button', {name:'存入 2 个平台草稿箱'}).click();
     await panel.getByRole('status').getByText(/等待同步助手连接/).waitFor();
     assert.equal((await (await fetch(`${origin}/api/drafts/delivery-ui/social-deliveries`)).json()).receipts.length, 0);
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -341,7 +341,7 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await closeSettings();
     await panel.getByRole('status').getByText(/等待同步助手连接/).waitFor();
     await page.route('**/delivery-batches/wait-test/cancel', async route => {
-      batch = { id:'wait-test', createdAt:new Date().toISOString(), expiresAt:new Date().toISOString(), targets:[{platform:'zhihu',revisionHash:'test',status:'cancelled',detail:'已取消等待，未发送存稿请求'}, {platform:'baijiahao',revisionHash:'test',status:'reported',detail:'隔离测试：百家号已返回草稿回执'}, {platform:'toutiao',revisionHash:'test',status:'failed',detail:'头条自动存稿尚未接通'}] };
+      batch = { id:'wait-test', createdAt:new Date().toISOString(), expiresAt:new Date().toISOString(), targets:[{platform:'zhihu',revisionHash:'test',status:'cancelled',detail:'已取消等待，未发送存稿请求'}, {platform:'baijiahao',revisionHash:'test',status:'reported',detail:'隔离测试：百家号已返回草稿回执'}, {platform:'toutiao',revisionHash:'test',status:'reported',detail:'隔离测试：头条已返回草稿回执'}] };
       await route.fulfill({json:batch});
     });
     await panel.getByRole('button', {name:'取消等待'}).click();
@@ -352,9 +352,10 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     assert.equal(retryRequests, 1, 'one retry sends only the failed supported platform');
     assert.equal(saveRequests, 0, 'unchanged delivery does not create another manual draft version');
     await panel.getByRole('checkbox', {name:/知乎/}).uncheck();
-    const openOnly = panel.getByRole('button', {name:'打开今日头条编辑页',exact:true});
+    assert.equal(await panel.getByRole('button', {name:'存入 1 个平台草稿箱',exact:true}).isEnabled(), true);
+    const openOnly = panel.getByRole('button', {name:'打开所选平台 / 登录',exact:true});
     await openOnly.waitFor();
-    assert.equal(await openOnly.isEnabled(), true, 'entry-only selection is an available action');
+    assert.equal(await openOnly.isEnabled(), true, 'opening login remains available without creating another draft');
     await page.route('**/api/delivery/batch/open', async route => {
       assert.deepEqual(route.request().postDataJSON().platforms, ['toutiao']);
       await route.fulfill({json:{detail:'隔离测试：已打开头条入口'}});

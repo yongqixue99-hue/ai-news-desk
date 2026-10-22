@@ -1,3 +1,4 @@
+import { createSocialAdapterCatalog } from "./social-adapter-catalog.js";
 import type { Express, RequestHandler } from "express";
 import { SocialBridge } from "./social-bridge.js";
 import { createSocialDeliveryDesk, socialAccounts, socialRevisionHash, socialDraftUrl } from "./social-delivery.js";
@@ -10,8 +11,9 @@ import { reviewDraftQuality } from "./draft-quality-review.js";
 import { loadWeChatPlacementImage } from "./wechat-image.js";
 
 const bridge = new SocialBridge();
+const catalog = createSocialAdapterCatalog({ generation: () => bridge.generation, fetch: () => bridge.request("listPlatforms") });
 const desk = createSocialDeliveryDesk({
-  bridge, read: readState, update: updateState, loadImage: loadWeChatPlacementImage,
+  bridge, platformMetadata: catalog.read, read: readState, update: updateState, loadImage: loadWeChatPlacementImage,
   quality: async (draft, deliveryTitle) => {
     const review = reviewDraftQuality(draft, await getLocalDatabase(), { deliveryTitle });
     if (!review.ready) throw new Error(review.blockers.join("；"));
@@ -36,9 +38,17 @@ const status = (): Promise<SocialDeliveryStatus> => checking ??= (async () => {
   try {
     await startSocialBridge();
     if (bridge.connected) {
+      const registered = catalog.peek();
       const auth = await Promise.all(socialPlatforms.filter(platform => platform.enabled).map(async platform => {
-        try { const result = await bridge.request("checkAuth", { platform: platform.id }); return { ...(result && typeof result === "object" ? result : {}), id: platform.id }; }
-        catch { return { id: platform.id }; }
+        const result = await bridge.request("checkAuth", { platform: platform.id }).catch(() => undefined);
+        // A slow login check must not turn pending capability discovery into a missing adapter.
+        return {
+          ...(result && typeof result === "object" ? result : {}), id: platform.id,
+          ...(platform.id === "toutiao" ? {
+            capabilityPending: registered === undefined,
+            capabilities: Array.isArray(registered) ? registered.find(item => item?.id === platform.id)?.capabilities ?? [] : [],
+          } : {}),
+        };
       }));
       accounts = socialAccounts(auth);
       detail = "同步助手已连接，直接复用 Chrome 中的登录账号";

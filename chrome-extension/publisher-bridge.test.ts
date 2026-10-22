@@ -130,7 +130,7 @@ test("a lost response after server acceptance is acknowledged on retry without r
     runJob: async () => { runs++; return receipt; },
   });
   await client.tick().catch(() => undefined);
-  assert.deepEqual(await completion, receipt);
+  assert.deepEqual(await completion, { ...receipt, adapterVersion: MINIMUM_EXTENSION_VERSION });
   assert.deepEqual(await client.tick(), { status: "completed" });
   assert.equal(reports, 2);
   assert.equal(runs, 1);
