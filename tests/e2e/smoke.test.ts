@@ -419,7 +419,8 @@ test("production routes, strategy controls, completion, draft resumption and mob
     // Format and gallery order must participate in autosave while preserving the article.
     const articleBeforeGallery = await prose.innerHTML();
     await page.getByRole("navigation", { name: "草稿辅助工具" }).getByRole("button", { name: "交付", exact: true }).click();
-    await page.getByRole("tablist", { name: "常用发布平台" }).getByRole("tab", { name: /小黑盒/u }).click();
+    await page.getByRole("checkbox", { name: "小黑盒", exact: true }).check();
+    await page.locator(".delivery-channel-settings > summary").filter({ hasText: "小黑盒设置" }).click();
     await page.locator(".xhh-disclosure > summary").filter({ hasText: "发送形式" }).click({ timeout: 10_000 }).catch(async error => {
       throw new Error(`${error.message}\nPage errors: ${JSON.stringify(pageErrors)}\nVisible page: ${(await page.locator("body").innerText()).slice(-6000)}`);
     });

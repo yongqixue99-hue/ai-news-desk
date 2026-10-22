@@ -118,11 +118,23 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await page.getByRole('textbox', {name:'文章标题'}).waitFor();
     assert.equal(await page.getByRole('textbox', {name:'文章标题'}).inputValue(), '多平台测试文章');
     await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', {name:'交付',exact:true}).click();
-    const primaryTabs = page.getByRole('tablist', { name: '常用发布平台' });
-    await primaryTabs.getByRole('tab', { name: /微信公众号/ }).click();
-    assert.equal(await page.getByRole('button', { name: '同步到公众号草稿箱', exact: true }).isDisabled(), true);
+    const channels = page.locator('.multi-delivery');
+    const showSettings = async (name: string) => {
+      await channels.getByRole('checkbox', { name, exact: true }).check();
+      const summary = channels.locator('.delivery-channel-settings > summary').filter({ hasText: `${name}设置` });
+      if (await summary.locator('..').getAttribute('open') === null) await summary.click();
+    };
+    const closeSettings = async () => {
+      while (await channels.locator('.delivery-channel-settings[open] > summary').count()) await channels.locator('.delivery-channel-settings[open] > summary').first().click();
+    };
+    const chooseOnly = async (names: string[]) => {
+      for (const name of ['微信公众号', '小黑盒', '百家号', '知乎', '今日头条']) await channels.getByRole('checkbox', { name, exact: true }).setChecked(names.includes(name));
+    };
+    await showSettings("微信公众号");
+    assert.equal(await page.getByRole('button', { name: '同步到公众号草稿箱', exact: true }).count(), 0);
+    await page.getByText('连接公众号后自动同步', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: '复制公众号排版', exact: true }).isVisible(), true);
-    await page.locator('.wechat-primary').locator('summary').filter({ hasText: '作者与摘要' }).click();
+    { const details = page.locator('.wechat-primary').locator('summary').filter({ hasText: '作者与摘要' }); if (await details.locator('..').getAttribute('open') === null) await details.click(); }
     await page.getByRole('textbox', { name: '公众号作者', exact: true }).fill('测试作者');
     await page.getByRole('textbox', { name: '公众号摘要', exact: true }).fill('摘要保存后再切平台也不会丢失。');
     await page.getByRole('button', { name: '保存草稿', exact: true }).click();
@@ -137,22 +149,22 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
       }
       throw new Error('WeChat metadata was not persisted');
     });
-    await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
-    assert.equal(await page.getByRole('button', { name: '送到小黑盒', exact: true }).isDisabled(), false);
+    await showSettings("小黑盒");
+    assert.equal(await page.getByRole('button', { name: '送到小黑盒', exact: true }).count(), 0);
+    assert.equal(await channels.getByRole('button', { name: '交付到 2 个平台', exact: true }).isEnabled(), true);
     await page.locator('.xhh-disclosure > summary').filter({ hasText: '社区与话题' }).click();
     // First delivery must expose setup even though no fill receipt exists yet.
     assert.equal(await page.getByLabel('关联社区', { exact: true }).isVisible(), true);
     await page.locator('.xhh-disclosure > summary').filter({ hasText: '发送形式' }).click();
     assert.equal(await page.getByRole('group', { name: '小黑盒发送形式' }).isVisible(), true);
     assert.equal(await page.getByRole('button', { name: '打开 Chrome 连接助手', exact: true }).isVisible(), false);
-    await primaryTabs.getByRole('tab', { name: /微信公众号/ }).click();
-    await page.locator('.wechat-primary').locator('summary').filter({ hasText: '作者与摘要' }).click();
+    await showSettings("微信公众号");
+    { const details = page.locator('.wechat-primary').locator('summary').filter({ hasText: '作者与摘要' }); if (await details.locator('..').getAttribute('open') === null) await details.click(); }
     assert.equal(await page.getByRole('textbox', { name: '公众号作者', exact: true }).inputValue(), '测试作者');
     // A clean legacy draft must get the same defaults through multi-platform delivery.
-    await primaryTabs.getByRole('tab', { name: /多平台/ }).click();
+    await closeSettings();
     const firstMulti = page.locator('.multi-delivery');
-    await firstMulti.getByRole('checkbox', { name: /百家号/ }).uncheck();
-    await firstMulti.getByRole('checkbox', { name: /小黑盒/ }).check();
+    await chooseOnly(['小黑盒']);
     let preparedDraft: typeof state.drafts[number] | undefined;
     let preparedVersion: string | undefined;
     let defaultSaveRequests = 0;
@@ -182,12 +194,25 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await page.unroute('**/api/drafts/delivery-ui/delivery-batches');
     await firstMulti.getByRole('checkbox', { name: /小黑盒/ }).uncheck();
     await firstMulti.getByRole('checkbox', { name: /百家号/ }).check();
-    await primaryTabs.getByRole('tab', { name: /微信公众号/ }).click();
+    await showSettings("微信公众号");
     // Simulate only the local Chrome transport; never open or write to a real platform account.
     const { token } = await (await fetch(`${origin}/api/publisher/extension/bootstrap`)).json();
     const headers = { 'content-type': 'application/json', 'x-ai-news-extension-token': token };
     const clientId = 'delivery-e2e';
-    const fillOnce = async (buttonName = '送到小黑盒') => {
+    // Exercise the real fill HTTP handler and fake extension transport, while replacing only browser launch/queue dispatch.
+    let xhhBatch: unknown;
+    await page.route('**/api/drafts/delivery-ui/delivery-batches', async route => {
+      if (route.request().method() === 'POST') {
+        const input = route.request().postDataJSON(); assert.deepEqual(input.platforms, ['xiaoheihe']);
+        const filled = await fetch(`${origin}/api/drafts/delivery-ui/fill`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ updatedAt: input.updatedAt }) });
+        assert.equal(filled.status, 200);
+        const result = await filled.json(); assert.equal(result.ok, true);
+        xhhBatch = { id: `fill-${Date.now()}`, createdAt: new Date().toISOString(), expiresAt: new Date().toISOString(), draftUpdatedAt: input.updatedAt, targets: [{ platform: 'xiaoheihe', revisionHash: result.revisionHash, status: 'filled', detail: '隔离测试：默认设置已填入', url: result.pageUrl }] };
+        await route.fulfill({ json: xhhBatch });
+      } else await route.fulfill({ json: { batches: xhhBatch ? [xhhBatch] : [], platforms: [] } });
+    });
+    const fillOnce = async () => {
+      await chooseOnly(['小黑盒']);
       await fetch(`${origin}/api/publisher/extension/heartbeat`, { method: 'POST', headers, body: JSON.stringify({ clientId, version: '0.1.24' }) });
       const receive = async () => {
         const deadline = Date.now() + 20_000;
@@ -206,15 +231,15 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
         throw new Error('No extension job was queued');
       };
       const job = receive();
-      await page.getByRole('button', { name: buttonName, exact: true }).click();
+      await channels.getByRole('button', { name: '交付到 1 个平台', exact: true }).click();
       await job;
       await page.getByText('已填好，可以前往检查', { exact: true }).waitFor();
     };
-    await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
+    await showSettings("小黑盒");
     await fillOnce();
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: '交付草稿', exact: true }).click();
-    await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
+    await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', { name: '交付', exact: true }).click();
+    await showSettings("小黑盒");
     await page.getByRole('link', { name: '打开小黑盒检查', exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: '送到小黑盒', exact: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: '重新填入', exact: true }).isVisible(), true);
@@ -222,8 +247,8 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     // A failed status read is neither proof of a local edit nor loss of its receipt.
     await page.route('**/api/drafts/delivery-ui/delivery-status', route => route.fulfill({ status: 503, json: { error: '测试临时断线' } }));
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: '交付草稿', exact: true }).click();
-    await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
+    await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', { name: '交付', exact: true }).click();
+    await showSettings("小黑盒");
     await page.getByText('暂时无法核对交付状态', { exact: true }).waitFor();
     assert.equal(await page.getByText('内容有更新，再送一次即可', { exact: true }).isVisible(), false);
     assert.equal(await page.getByRole('link', { name: '查看上次填入页面', exact: true }).isVisible(), true);
@@ -238,30 +263,34 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     assert.equal(savedAfterFill.title, '填入后继续编辑的标题');
     assert.notEqual(savedAfterFill.status, 'filled');
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: '交付草稿', exact: true }).click();
-    await primaryTabs.getByRole('tab', { name: /小黑盒/ }).click();
-    await page.getByRole('button', { name: '更新到小黑盒', exact: true }).waitFor();
-    await fillOnce('更新到小黑盒');
+    await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', { name: '交付', exact: true }).click();
+    await showSettings("小黑盒");
+    await page.getByText('内容有更新，再送一次即可', { exact: true }).waitFor();
+    await fillOnce();
     for (const width of [1440, 596, 390, 320]) {
       await page.setViewportSize({ width, height: 1000 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       assert.equal(await page.getByRole('link', { name: '打开小黑盒检查', exact: true }).isVisible(), true);
       await page.screenshot({ path: path.join(shots, `xiaoheihe-delivery-${width}.png`) });
     }
-    await primaryTabs.getByRole('tab', { name: /微信公众号/ }).click();
+    await showSettings("微信公众号");
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: 1000 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await page.screenshot({ path: path.join(shots, `delivery-${width}.png`) });
     }
     assert.equal(await page.getByRole('complementary', { name: '草稿库', exact: true }).isVisible(), false);
-    await primaryTabs.getByRole('tab', { name: /多平台/ }).click();
+    await closeSettings();
+    await page.unroute('**/api/drafts/delivery-ui/delivery-batches');
     const panel = page.locator('.multi-delivery');
-    await panel.getByRole('checkbox', {name:/百家号/}).uncheck();
-    await panel.getByRole('checkbox', {name:/知乎/}).check();
-    await panel.getByRole('checkbox', {name:/今日头条/}).check();
+    await chooseOnly(['知乎', '今日头条']);
     await panel.getByText(/头条会打开文章编辑页，当前不会自动填入/).waitFor();
     assert.equal(await panel.getByRole('button', {name:'存入 1 个平台草稿箱'}).isEnabled(), true);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.locator('.utility-drawer-scroll').evaluate(element => element.scrollTo(0, 0));
+      await page.screenshot({ path: path.join(shots, `unified-delivery-${width}.png`) });
+    }
     await page.setViewportSize({ width: 1440, height: 1000 });
     await panel.locator('.social-variants > summary').click();
     await panel.getByRole('textbox', { name: '知乎平台标题', exact: true }).fill('这篇文章在知乎的独立标题');
@@ -276,8 +305,8 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: '交付草稿', exact: true }).click();
-    await primaryTabs.getByRole('tab', { name: /多平台/ }).click();
+    await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', { name: '交付', exact: true }).click();
+    await closeSettings();
     assert.equal(await panel.getByRole('textbox', { name: '知乎平台标题', exact: true }).isVisible(), false, 'advanced metadata stays collapsed by default');
     await panel.locator('.social-variants > summary').click();
     assert.equal(await panel.getByRole('textbox', { name: '知乎平台标题', exact: true }).inputValue(), '这篇文章在知乎的独立标题');
@@ -308,8 +337,8 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await panel.getByRole('status').getByText(/等待同步助手连接/).waitFor();
     assert.equal((await (await fetch(`${origin}/api/drafts/delivery-ui/social-deliveries`)).json()).receipts.length, 0);
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', {name:'交付草稿', exact:true}).click();
-    await primaryTabs.getByRole('tab', {name:/多平台/}).click();
+    await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', { name: '交付', exact: true }).click();
+    await closeSettings();
     await panel.getByRole('status').getByText(/等待同步助手连接/).waitFor();
     await page.route('**/delivery-batches/wait-test/cancel', async route => {
       batch = { id:'wait-test', createdAt:new Date().toISOString(), expiresAt:new Date().toISOString(), targets:[{platform:'zhihu',revisionHash:'test',status:'cancelled',detail:'已取消等待，未发送存稿请求'}, {platform:'baijiahao',revisionHash:'test',status:'reported',detail:'隔离测试：百家号已返回草稿回执'}, {platform:'toutiao',revisionHash:'test',status:'failed',detail:'头条自动存稿尚未接通'}] };
@@ -345,7 +374,7 @@ test("multi-platform setup and per-target failures stay truthful on desktop and 
     await rework.getByText(/最近 30 天保留 1 次返工记录/).waitFor();
     await page.screenshot({ path: path.join(shots, 'rework-records-320.png') });
     await page.getByRole('navigation', { name: '草稿辅助工具' }).getByRole('button', { name: '交付', exact: true }).click();
-    await primaryTabs.getByRole('tab', { name: /多平台/ }).click();
+    await closeSettings();
     await panel.getByRole('link', { name: '连接设置', exact: true }).click();
     await page.getByRole('heading', { name: '连接多平台同步助手', exact: true }).waitFor();
     assert.equal(await page.getByRole('tab', { name: '平台连接', exact: true }).getAttribute('aria-selected'), 'true');

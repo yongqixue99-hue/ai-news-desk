@@ -52,7 +52,6 @@ const isolated = async (run: (page: Page) => Promise<void>) => {
 };
 const openDelivery = async (page: Page) => {
   await page.getByRole("navigation", { name: "草稿辅助工具" }).getByRole("button", { name: "交付", exact: true }).click();
-  await page.getByRole("tablist", { name: "常用发布平台" }).getByRole("tab", { name: /多平台/ }).click();
   return page.locator(".multi-delivery");
 };
 const batch = (status: string, detail: string) => ({ id: "recovery-batch", createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString(), draftUpdatedAt: "test", targets: [{ platform: "zhihu", revisionHash: "test", status, detail }] });
@@ -113,4 +112,31 @@ test("switching drafts clears the previous draft's unsent rework reasons and not
   assert.equal(await rework.getByRole("checkbox", { name: "结构不顺", exact: true }).isChecked(), false);
   assert.equal(await rework.getByRole("textbox", { name: "补充说明", exact: true }).inputValue(), "");
   assert.equal(await rework.getByRole("spinbutton", { name: "人工编辑分钟数（未测量留空）", exact: true }).inputValue(), "");
+}));
+
+
+test("remembered destinations start from the writer in one click without re-selecting or connecting", { timeout: 60_000 }, () => isolated(async page => {
+  let requests = 0;
+  await page.route("**/delivery-batches", async route => {
+    if (route.request().method() === "POST") {
+      requests++;
+      assert.deepEqual(route.request().postDataJSON().platforms, ["wechat", "xiaoheihe"]);
+      await route.fulfill({ json: batch("filled", "隔离示例：已完成交付") });
+    } else await route.fulfill({ json: { batches: [], platforms: [] } });
+  });
+  const panel = await openDelivery(page);
+  assert.equal(await panel.getByRole("checkbox", { name: "百家号", exact: true }).isChecked(), false);
+  assert.equal(await panel.getByRole("checkbox", { name: "小红书", exact: true }).isDisabled(), true);
+  await panel.getByRole("checkbox", { name: "微信公众号", exact: true }).check();
+  await panel.getByRole("checkbox", { name: "小黑盒", exact: true }).check();
+  assert.equal(await panel.getByLabel("关联社区", { exact: true }).isVisible(), false);
+  // Opening and closing settings must not initiate delivery.
+  await page.getByRole("button", { name: "关闭右侧面板", exact: true }).click();
+  assert.equal(requests, 0);
+  await page.getByRole("button", { name: "交付草稿", exact: true }).click();
+  await panel.getByText("隔离示例：已完成交付", { exact: true }).waitFor();
+  assert.equal(requests, 1);
+  await page.getByRole("button", { name: "关闭右侧面板", exact: true }).click();
+  await openDelivery(page);
+  assert.equal(requests, 1, "opening settings cannot replay a consumed delivery request");
 }));

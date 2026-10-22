@@ -1,21 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ExternalLink, RefreshCw, Send, LoaderCircle, Check, CircleAlert } from "lucide-react";
 import { api, deliveryBatchApi, socialDeliveryApi } from "../api";
 import { socialPlatforms, socialTitleProblem, type SocialDeliveryReceipt } from "../../server/social-delivery-types";
 import { socialArticleTitle } from "../../server/social-metadata";
 import { deliveryPlatforms, deliveryTargetActive, retryableDeliveryPlatforms, type DeliveryPlatform, type DeliveryBatch, type DeliveryBatchView } from "../../server/delivery-batch-types";
 import type { ArticleDraft } from "../types";
+import { readDeliverySelection, rememberDeliverySelection } from "../delivery-selection";
 
 type Target = DeliveryPlatform;
 const names: Record<Target, string> = { wechat: "微信公众号", xiaoheihe: "小黑盒", zhihu: "知乎", baijiahao: "百家号", toutiao: "今日头条" };
-const preferenceKey = "newsdesk.social-platforms.v1";
-const initialSelection = (): Target[] => {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(preferenceKey) || "null");
-    if (Array.isArray(value)) return deliveryPlatforms.filter(p => value.includes(p.id)).map(p => p.id);
-  } catch { /* Storage can be unavailable in the desktop webview. */ }
-  return ["baijiahao"];
-};
 interface Props {
   draft: ArticleDraft; dirty: boolean; disabled: boolean;
   prepare: (platforms: DeliveryPlatform[]) => Promise<ArticleDraft | undefined>;
@@ -23,9 +16,13 @@ interface Props {
   onOpenSettings: () => void;
   onDelivered: (latest: ArticleDraft, sent: ArticleDraft) => void;
   onChange: (patch: Partial<ArticleDraft>) => void;
+  sendRequested?: boolean;
+  onRequestConsumed?: () => void;
+  renderSettings?: (platform: DeliveryPlatform) => ReactNode;
+  settingsSummary?: (platform: DeliveryPlatform) => string;
 }
 export function MultiDeliveryPanel(props: Props) {
-  const [selected, setSelected] = useState<Target[]>(initialSelection);
+  const [selected, setSelected] = useState<Target[]>(readDeliverySelection);
   const [connections, setConnections] = useState<DeliveryBatchView["platforms"]>([]);
   const [receipts, setReceipts] = useState<SocialDeliveryReceipt[]>([]);
   const [revisions, setRevisions] = useState<Record<string, string>>({});
@@ -98,7 +95,7 @@ export function MultiDeliveryPanel(props: Props) {
     timer = setTimeout(() => void poll(), 1_000);
     return () => { active = false; clearTimeout(timer); };
   }, [waiting, refresh, refreshConnections]);
-  useEffect(() => { try { localStorage.setItem(preferenceKey, JSON.stringify(selected)); } catch { /* Optional UI preference. */ } }, [selected]);
+  useEffect(() => { rememberDeliverySelection(undefined, selected); }, [selected]);
   useEffect(() => {
     if (!batch || batch.targets.some(deliveryTargetActive) || !sentDraft.current || acknowledged.current === batch.id) return;
     const sent = sentDraft.current; let active = true;
@@ -146,6 +143,11 @@ export function MultiDeliveryPanel(props: Props) {
     try { await socialDeliveryApi.resolve(props.draft.id, receipt.id, resolution); await refresh(); }
     catch (error) { setError(error instanceof Error ? error.message : String(error)); }
   };
+  useEffect(() => {
+    if (!props.sendRequested) return;
+    props.onRequestConsumed?.();
+    if (selected.length) { if (automaticCount) void run(); else void open(); }
+  }, [props.sendRequested]);
   return <section className="multi-delivery">
     <div className="social-heading"><strong>选择交付平台</strong><button type="button" aria-label="刷新平台账号与回执" disabled={refreshing || submitting} onClick={() => { void refresh(); void refreshConnections(); }}><RefreshCw size={14} className={refreshing ? "spin" : ""} /></button></div>
     <div className="social-targets">{deliveryPlatforms.map(platform => {
@@ -153,10 +155,13 @@ export function MultiDeliveryPanel(props: Props) {
       const rule = socialPlatforms.find(item => item.id === platform.id);
       const problem = selected.includes(platform.id) && rule?.enabled ? socialTitleProblem(rule.id, socialArticleTitle(props.draft, rule.id)) : "";
       return <label key={platform.id} className={selected.includes(platform.id) ? "selected" : ""}>
-        <input type="checkbox" checked={selected.includes(platform.id)} disabled={busy} onChange={event => setSelected(current => event.target.checked ? [...current, platform.id] : current.filter(item => item !== platform.id))} />
-        <span className="social-platform-copy"><span className="social-platform-name"><b>{platform.name}</b><em>{rule ? platform.automatic ? `标题 ${rule.titleMin}–${rule.titleMax} 字` : "仅打开入口" : platform.id === "wechat" ? "核对草稿箱" : "填入编辑页"}</em></span><small>{platform.automatic ? connection?.detail || connectionError || "正在检测连接…" : "自动存稿尚未接通 · 标题 2–30 字"}</small>{problem ? <small className="social-error">{problem}</small> : null}</span>
+        <input type="checkbox" aria-label={platform.name} checked={selected.includes(platform.id)} disabled={busy} onChange={event => setSelected(current => event.target.checked ? [...current, platform.id] : current.filter(item => item !== platform.id))} />
+        <span className="social-platform-copy"><span className="social-platform-name"><b>{platform.name}</b><em>{platform.automatic ? "已实现 · 未验收" : "仅打开入口"}</em></span><small>{platform.automatic ? connection?.detail || connectionError || "交付时自动检查连接" : "自动存稿尚未接通"}</small>{problem ? <small className="social-error">{problem}</small> : null}</span>
       </label>;
-    })}</div>
+    })}<label className="unavailable"><input type="checkbox" disabled aria-label="小红书" /><span className="social-platform-copy"><span className="social-platform-name"><b>小红书</b><em>未接通</em></span><small>尚无自动存稿适配</small></span></label></div>
+    <button type="button" className="primary-button full" disabled={props.disabled || busy || opening || !selected.length} onClick={() => automaticCount ? void run() : void open()}>{busy || opening ? <LoaderCircle className="spin" size={15} /> : automaticCount ? <Send size={15} /> : <ExternalLink size={15} />}{submitting ? "保存并开始交付…" : waiting ? "交付处理中…" : opening ? "正在打开…" : automaticCount ? selected.includes("xiaoheihe") ? `交付到 ${automaticCount} 个平台` : `存入 ${automaticCount} 个平台草稿箱` : selected.length ? "打开今日头条编辑页" : "先选择交付平台"}</button>
+    <p className="social-hint">{selected.length ? "记住所选平台，下次从顶部直接交付。最终发布由你在平台完成。" : "首次选择一次，之后沿用。"}</p>
+    {selected.filter(id => id === "xiaoheihe" || id === "wechat").map(id => <details className="delivery-channel-settings" key={id}><summary><strong>{names[id]}设置</strong><span>{props.settingsSummary?.(id) || "沿用本稿设置"}</span></summary>{props.renderSettings?.(id)}</details>)}
     {selected.some(id => socialPlatforms.some(platform => platform.id === id && platform.enabled)) ? <details className="social-variants"><summary>平台标题与封面 <span>默认沿用原稿</span></summary><p className="social-hint">随草稿自动保存，原稿标题与正文保留。</p>{socialPlatforms.filter(platform => platform.enabled && selected.includes(platform.id)).map(platform => {
       const metadata = props.draft.socialMetadata?.[platform.id] ?? {};
       const change = (patch: Partial<typeof metadata>) => props.onChange({ socialMetadata: { ...props.draft.socialMetadata, [platform.id]: { ...metadata, ...patch } } });
@@ -166,7 +171,6 @@ export function MultiDeliveryPanel(props: Props) {
         {metadata.title || metadata.coverPlacementId ? <button type="button" className="social-open" onClick={() => change({ title: "", coverPlacementId: "" })}>恢复原稿设置</button> : null}
       </fieldset>;
     })}</details> : null}
-    <button type="button" className="primary-button full" disabled={props.disabled || busy || opening || !selected.length} onClick={() => automaticCount ? void run() : void open()}>{busy || opening ? <LoaderCircle className="spin" size={15} /> : automaticCount ? <Send size={15} /> : <ExternalLink size={15} />}{submitting ? "保存并开始交付…" : waiting ? "交付处理中…" : opening ? "正在打开…" : automaticCount ? selected.includes("xiaoheihe") ? `交付到 ${automaticCount} 个平台` : `存入 ${automaticCount} 个平台草稿箱` : "打开今日头条编辑页"}</button>
     {props.dirty && automaticCount > 0 ? <p className="social-hint">交付时自动保存当前修改</p> : null}
     <div className="social-toolbar"><button className="social-open" type="button" disabled={opening || !selected.length} onClick={() => void open()}><ExternalLink size={13} />{opening ? "正在打开…" : "打开所选平台 / 登录"}</button><a href="#schedule" onClick={event => { event.preventDefault(); props.onOpenSettings(); }}>连接设置</a></div>
     {selected.includes("toutiao") ? <p className="social-hint social-limit-note">头条会打开文章编辑页，当前不会自动填入。页面自动保存需另行核验，暂不计入存稿数量。</p> : null}
