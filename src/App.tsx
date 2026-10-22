@@ -105,13 +105,14 @@ function App() {
   }, [activeDraftId, state?.drafts]);
 
   const [quickDraftRequested, setQuickDraftRequested] = useState(false);
+  const [referenceDraftId, setReferenceDraftId] = useState<string>();
   const consumeQuickDraftRequest = useCallback(() => setQuickDraftRequested(false), []);
   // One entry for starting an article from anywhere in the app.
   const startWriting = useCallback(async (start: WriteStart) => {
     if (start === "topics") { navigate("today"); return; }
-    if (start === "link") { setQuickDraftRequested(true); navigate("workbench"); return; }
     try {
       const draft = await api.createBlankDraft();
+      setReferenceDraftId(start === "link" ? draft.id : undefined);
       setState(current => current ? { ...current, drafts: [draft, ...current.drafts] } : current);
       setActiveDraftId(draft.id);
       navigate("drafts");
@@ -1310,6 +1311,7 @@ function App() {
       {page === "drafts" ? (
         <Suspense fallback={<PageLoading label="正在打开文章编辑器…" />}>
           <DraftWorkspace
+            openReferencesFor={referenceDraftId}
             drafts={state.drafts}
             completion={completionAvailability(state.settings, state.aiSettings)}
             completionEnabled={state.settings.inlineCompletionEnabled !== false}

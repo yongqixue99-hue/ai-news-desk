@@ -46,6 +46,10 @@ const communityPreview = process.env.AI_NEWS_DESK_PREVIEW_COMMUNITY === "1";
 const full = process.env.AI_NEWS_DESK_PREVIEW_MATRIX === "1" || workbenchPreview || communityPreview ? discoveryFixture(now) : undefined;
 if (full) {
   state = full.state; today = full.today;
+  if (process.env.AI_NEWS_DESK_PREVIEW_WRITING === "1") full.draft.references = [
+    { id: "example-link", kind: "link", title: "示例产品：任务历史导出说明", url: "https://example.com/releases/export", author: "示例产品团队", text: "此处为隔离验收资料：用户可导出任务记录，保留笔记和原始链接。实际支持范围需以原文为准。", capturedAt: now, readStatus: "read" },
+    { id: "example-note", kind: "note", title: "这篇想回答的问题", text: "导出后能带走哪些资料？\n先解释实际用途，再写限制。", capturedAt: now },
+  ];
   if (workbenchPreview) {
     state.runs[0]!.origin = "collection";
     state.runs[0]!.candidates.forEach((candidate, index) => { candidate.selected = index < 2; });

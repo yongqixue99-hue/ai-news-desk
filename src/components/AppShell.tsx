@@ -44,7 +44,7 @@ const mobileNavigation = [writing, today, workbench, community];
 export type WriteStart = "blank" | "link" | "topics";
 const writeStarts: Array<{ id: WriteStart; label: string; hint: string; icon: LucideIcon }> = [
   { id: "blank", label: "从空白开始", hint: "直接写，不调用模型", icon: FilePenLine },
-  { id: "link", label: "粘贴链接或截图", hint: "保存来源，生成可改的初稿", icon: Link2 },
+  { id: "link", label: "粘贴链接或截图", hint: "资料放在旁边，直接开始写", icon: Link2 },
   { id: "topics", label: "从今日选题挑", hint: "看看今天有什么值得写", icon: CalendarDays },
 ];
 

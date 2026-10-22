@@ -1,6 +1,7 @@
 import { normalizeXiaoheiheOptions, reserveXiaoheiheDefaults, xiaoheiheSelection } from "./xiaoheihe-publishing.js";
 import { normalizeWeChatMetadata } from "./wechat-metadata.js";
 import { normalizeSocialMetadata } from "./social-metadata.js";
+import { normalizeDraftReferences } from "./draft-references.js";
 import { writingPreferencePlan } from "./writing-preference-retrieval.js";
 import { reviewDraftQuality, bindReviewedParagraph } from "./draft-quality-review.js";
 import { confirmDraftInState } from "./draft-confirmation.js";
@@ -181,6 +182,7 @@ app.patch(
         target.xiaoheiheOptions = normalizeXiaoheiheOptions(body.xiaoheiheOptions);
       }
       target.images = target.images.map(placement => ({ ...placement, image: normalizeLegacyUserUpload(placement.image) }));
+      if (body.references !== undefined) target.references = normalizeDraftReferences(body.references, target.images);
       if (body.wechatMetadata !== undefined) target.wechatMetadata = normalizeWeChatMetadata(body.wechatMetadata);
       if (body.socialMetadata !== undefined) target.socialMetadata = normalizeSocialMetadata(body.socialMetadata);
       if (body.imagePostImageIds !== undefined && (!Array.isArray(body.imagePostImageIds) || body.imagePostImageIds.some(id => typeof id !== "string" || !target.images.some(image => image.id === id)) || new Set(body.imagePostImageIds).size !== body.imagePostImageIds.length || body.imagePostImageIds.length > 18)) throw new Error("图集包含无效、重复或过多图片，请重新选择");

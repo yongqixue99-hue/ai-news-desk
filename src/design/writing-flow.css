@@ -1,0 +1,23 @@
+.draft-references { padding: 18px 20px; border-bottom: 1px solid var(--line, #e5e5e5); }
+.reference-hint { margin: 8px 0 14px; color: var(--muted, #71717a); font-size: 12px; line-height: 1.6; }
+.reference-input { border: 1px solid var(--line, #e5e5e5); border-radius: 8px; overflow: hidden; background: #fff; }
+.reference-input textarea { display: block; box-sizing: border-box; width: 100%; min-height: 88px; resize: vertical; padding: 12px; border: 0; background: transparent; font: inherit; font-size: 13px; }
+.reference-input-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px; }
+.reference-input-actions button, .reference-read-state button { display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; font-size: 12px; }
+.reference-list { display: grid; gap: 12px; margin-top: 16px; }
+.reference-item { min-width: 0; padding-bottom: 12px; border-bottom: 1px solid var(--line, #e5e5e5); }
+.reference-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.reference-item-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.reference-item-heading strong { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.reference-item-heading button { flex-shrink: 0; padding: 3px; }
+.reference-item > a { display: inline-flex; gap: 5px; max-width: 100%; font-size: 12px; overflow-wrap: anywhere; margin: 5px 0; }
+.reference-item > small { display: block; font-size: 11px; color: var(--muted, #71717a); }
+.reference-item img { max-width: 100%; max-height: 220px; object-fit: contain; border-radius: 4px; }
+.reference-item details { margin-top: 7px; font-size: 12px; }
+.reference-item summary { cursor: pointer; }
+.reference-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; line-height: 1.8; margin-top: 8px; }
+.reference-read-state { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted, #71717a); }
+.reference-error { color: #b42318; font-size: 12px; }
+.reference-input-actions button:not(.primary-button), .reference-read-state button { border: 0; border-radius: 5px; color: var(--muted, #71717a); background: transparent; }
+.reference-item-heading button { border: 0; border-radius: 4px; color: var(--muted, #71717a); background: transparent; }
+.reference-item-heading button:hover, .reference-input-actions button:not(.primary-button):hover { background: #f5f2f0; color: #b93228; }

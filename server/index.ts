@@ -5,6 +5,7 @@ import { primaryDeliveryStatus, wechatPreflight, resolveWeChatAttempt } from "./
 import { normalizeWeChatMetadata } from "./wechat-metadata.js";
 import { normalizeSocialMetadata } from "./social-metadata.js";
 import { registerDraftLibraryRoutes } from "./draft-library-routes.js";
+import { registerDraftReferenceRoutes } from "./draft-reference-routes.js";
 import { registerAiStyleScoreRoutes } from "./ai-style-score-routes.js";
 import { registerSocialDeliveryRoutes, startSocialBridge, socialDeliveryServices } from "./social-delivery-routes.js";
 import { createDeliveryBatchDesk, pendingDeliveryBatchJobs } from "./delivery-batch-desk.js";
@@ -340,6 +341,7 @@ app.use("/materials", express.static(workflowMaterialsRoot, { fallthrough: false
 registerSocialDeliveryRoutes(app);
 registerCommunityRoutes(app);
 registerDraftLibraryRoutes(app);
+registerDraftReferenceRoutes(app, { readState });
 registerAiStyleScoreRoutes(app);
 
 const httpRouteRuntime: HttpRouteRuntime = {

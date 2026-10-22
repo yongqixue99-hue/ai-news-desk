@@ -1065,7 +1065,21 @@ export interface XiaoheihePublishOptions {
   coverPlacementId?: string;
 }
 
+/** Private working material, kept separate from verified sources and published content. */
+export interface DraftReference {
+  id: string;
+  kind: "link" | "note" | "screenshot";
+  title: string;
+  url?: string;
+  text?: string;
+  author?: string;
+  capturedAt: string;
+  imagePlacementId?: string;
+  readStatus?: "saved" | "read" | "unavailable";
+}
+
 export interface ArticleDraft {
+  references?: DraftReference[];
   socialMetadata?: SocialDraftMetadata;
   deliveryBatches?: import("./delivery-batch-types.js").DeliveryBatch[];
   xiaoheiheOptions?: XiaoheihePublishOptions;
@@ -1182,6 +1196,7 @@ export interface DraftGenerationAttempt {
 export type DraftSaveMode = "auto" | "manual";
 
 export interface DraftRevisionSnapshot {
+  references?: DraftReference[];
   socialMetadata?: SocialDraftMetadata;
   xiaoheiheOptions?: XiaoheihePublishOptions;
   wechatMetadata?: WeChatDraftMetadata;

@@ -610,6 +610,7 @@ export const api = {
   }),
   draft: (draftId: string) => request<ArticleDraft>(`/api/drafts/${encodeURIComponent(draftId)}`),
   createBlankDraft: () => request<ArticleDraft>("/api/drafts", { method: "POST", body: "{}" }),
+  readDraftReference: (draftId: string, url: string) => request<Pick<import("../server/types").DraftReference, "title" | "text" | "author" | "readStatus">>(`/api/drafts/${encodeURIComponent(draftId)}/references/read`, { method: "POST", body: JSON.stringify({ url }) }),
   trashDrafts: (drafts: DraftLibrarySelection[]) => request<{ draftIds: string[] }>("/api/draft-trash", { method: "POST", body: JSON.stringify({ drafts }) }),
   draftTrash: () => request<TrashedDraftSummary[]>("/api/draft-trash"),
   restoreTrashedDraft: (draftId: string) => request<ArticleDraft>(`/api/draft-trash/${encodeURIComponent(draftId)}/restore`, { method: "POST", body: "{}" }),

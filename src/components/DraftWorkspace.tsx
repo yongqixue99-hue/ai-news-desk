@@ -11,6 +11,9 @@ import type { DraftLibrarySelection, DraftTrashSelection } from "../../server/dr
 import { socialPlatforms } from "../../server/social-delivery-types";
 import { EditObservationForm } from "./EditObservationForm";
 import { DraftQualityPanel } from "./DraftQualityPanel";
+import { DraftReferencesPanel } from "./DraftReferencesPanel";
+import { addDraftReference, referenceUrl } from "../../server/draft-references";
+import type { DraftReference } from "../../server/types";
 import { AiStyleScorePanel } from "./AiStyleScorePanel";
 import { confirmationTextDiff } from "../confirmation-diff";
 import { draftDocumentKey } from "../../server/draft-document.js";
@@ -104,6 +107,7 @@ import type {
 } from "../types";
 
 interface DraftWorkspaceProps {
+  openReferencesFor?: string;
   completion?: CompletionAvailability;
   completionEnabled?: boolean;
   onToggleCompletion?: (enabled: boolean) => Promise<void>;
@@ -237,6 +241,7 @@ const editableDraft = (draft: ArticleDraft | undefined) => {
 
 
 export function DraftWorkspace({
+  openReferencesFor,
   completion,
   completionEnabled,
   onToggleCompletion,
@@ -289,6 +294,21 @@ export function DraftWorkspace({
   const [compactLayout, setCompactLayout] = useState(isCompactViewport);
   const [draftLibraryOpen, setDraftLibraryOpen] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
   const [utilityTab, setUtilityTab] = useState<UtilityTab | null>(null);
+  const [readingReferences, setReadingReferences] = useState<string[]>([]);
+  const referenceEpoch = useRef(0);
+  const openedReferencesFor = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    referenceEpoch.current += 1;
+    setReadingReferences([]);
+    return () => { referenceEpoch.current += 1; };
+  }, [selected?.id]);
+  useEffect(() => {
+    if (openReferencesFor && selected?.id === openReferencesFor && openedReferencesFor.current !== openReferencesFor) {
+      openedReferencesFor.current = openReferencesFor;
+      setDraftLibraryOpen(false);
+      setUtilityTab("sources");
+    }
+  }, [openReferencesFor, selected?.id]);
   const [publisherStatus, setPublisherStatus] = useState(initialPublisherStatus);
   const [deliverySnapshot, setDeliverySnapshot] = useState<DraftDeliverySnapshot<Awaited<ReturnType<typeof api.primaryDeliveryStatus>>>>();
   const currentDeliverySnapshot = currentDraftDeliverySnapshot(editing, deliverySnapshot);
@@ -749,6 +769,42 @@ export function DraftWorkspace({
     setDirty(true);
     setSaveError("");
     setPreflight(undefined);
+  };
+
+  const readReference = async (reference: DraftReference) => {
+    const current = editingRef.current;
+    if (!current || !reference.url || readingReferences.includes(reference.id)) return;
+    const draftId = current.id, epoch = referenceEpoch.current;
+    setReadingReferences(ids => [...ids, reference.id]);
+    let patch: Partial<DraftReference>;
+    try { patch = await api.readDraftReference(draftId, reference.url); }
+    catch { patch = { readStatus: "unavailable" }; }
+    const latest = editingRef.current;
+    if (referenceEpoch.current !== epoch || latest?.id !== draftId) return;
+    updateEditing({ references: (latest.references ?? []).map(item => item.id === reference.id && item.url === reference.url ? { ...item, ...patch } : item) });
+    setReadingReferences(ids => ids.filter(id => id !== reference.id));
+  };
+
+  const addReference = (input: string) => {
+    const text = input.trim(), current = editingRef.current;
+    if (!text || !current) return;
+    const isLink = /^https?:\/\/\S+$/iu.test(text);
+    const url = isLink ? referenceUrl(text) : undefined;
+    const reference: DraftReference = { id: `ref_${crypto.randomUUID()}`, capturedAt: new Date().toISOString(),
+      kind: isLink ? "link" : "note", title: url ? new URL(url).hostname : text.split("\n")[0].slice(0, 80),
+      ...(url ? { url, readStatus: "saved" } : { text }) };
+    const next = addDraftReference(current, reference);
+    updateEditing({ references: next.references });
+    if (url && next.references?.some(item => item.id === reference.id)) void readReference(reference);
+  };
+
+  const uploadReference = async (file: File) => {
+    const draftId = editingRef.current?.id;
+    const placement = await uploadImage(file);
+    const current = editingRef.current;
+    if (!current || current.id !== draftId) return;
+    const next = addDraftReference(current, { id: `ref_${crypto.randomUUID()}`, kind: "screenshot", title: file.name || "资料截图", capturedAt: new Date().toISOString(), imagePlacementId: placement.id });
+    updateEditing({ references: next.references });
   };
 
   const prepareMultiDelivery = async (platforms: DeliveryPlatform[]) => {
@@ -1781,7 +1837,9 @@ export function DraftWorkspace({
               ) : null}
 
               {utilityTab === "sources" ? (
-                <><DraftQualityPanel draft={editing} dirty={dirty} onReviewed={reviewed => {
+                <><DraftReferencesPanel key={editing.id} draft={editing} onAdd={addReference} onUpload={uploadReference} onRead={readReference} reading={readingReferences}
+                  onRemove={id => updateEditing({ references: (editingRef.current?.references ?? []).filter(reference => reference.id !== id) })} />
+                <DraftQualityPanel draft={editing} dirty={dirty} onReviewed={reviewed => {
                   persistedUpdatedAt.current = reviewed.updatedAt;
                   if (dirtyRef.current) return;
                   editingRef.current = reviewed; setEditing(reviewed); setLastSavedAt(reviewed.updatedAt);

@@ -49,6 +49,7 @@ export interface DraftRecoveryStorage {
 
 type DraftRecoveryContent = Pick<
   ArticleDraft,
+  | "references"
   | "xiaoheiheOptions"
   | "wechatMetadata"
   | "socialMetadata"
@@ -81,6 +82,7 @@ const RECOVERY_KEY_PREFIX = "ai-news-desk:draft-recovery:v1:";
 export const draftRecoveryKey = (draftId: string) => `${RECOVERY_KEY_PREFIX}${draftId}`;
 
 export const editableDraftContent = (draft: ArticleDraft): DraftRecoveryContent => ({
+  references: draft.references,
   xiaoheiheOptions: draft.xiaoheiheOptions,
   wechatMetadata: draft.wechatMetadata,
   socialMetadata: draft.socialMetadata,
@@ -115,7 +117,7 @@ export const mergeSavedDraftMetadata = (
 };
 
 const deliveredDocument = (draft: ArticleDraft) => {
-  const { status: _status, ...content } = editableDraftContent(draft);
+  const { status: _status, references: _references, ...content } = editableDraftContent(draft);
   return JSON.stringify(content);
 };
 export const isDeliveryAcknowledgement = (latest: ArticleDraft, sent: ArticleDraft) => latest.id === sent.id && deliveredDocument(latest) === deliveredDocument(sent);
