@@ -14,6 +14,7 @@ const MAX_REVISIONS_PER_DRAFT = 30;
 const clone = <T>(value: T): T => structuredClone(value);
 
 export const snapshotDraft = (draft: ArticleDraft): DraftRevisionSnapshot => ({
+  references: draft.references ? clone(draft.references) : undefined,
   socialMetadata: draft.socialMetadata ? clone(draft.socialMetadata) : undefined,
   xiaoheiheOptions: draft.xiaoheiheOptions ? clone(draft.xiaoheiheOptions) : undefined,
   wechatMetadata: draft.wechatMetadata ? clone(draft.wechatMetadata) : undefined,
@@ -118,6 +119,7 @@ export const restoreDraftRevision = (
 ) => {
   appendDraftRevision(state, draft, "restore-backup", now);
   const snapshot = clone(revision.snapshot);
+  draft.references = snapshot.references;
   draft.socialMetadata = snapshot.socialMetadata;
   draft.wechatMetadata = snapshot.wechatMetadata;
   draft.xiaoheiheOptions = snapshot.xiaoheiheOptions;
