@@ -203,7 +203,7 @@ export function SchedulePage({ initialPlatform, settings, runs, health, onSettin
         <div className="platform-settings-layout">
           <nav className="platform-settings-nav" aria-label="选择连接平台">
             <button type="button" aria-pressed={platform === "wechat"} onClick={() => setPlatform("wechat")}><MessageSquareText size={18} /><span>微信公众号<small>{wechatConnection ? wechatConnection.ok ? "接口已连接" : "连接需处理" : settings.wechat.appSecretConfigured ? "已保存 · 待测试" : "尚未配置"}</small></span></button>
-            <button type="button" aria-pressed={platform === "social"} onClick={() => setPlatform("social")}><PanelsTopLeft size={18} /><span>知乎与百家号<small>多平台同步助手</small></span></button>
+            <button type="button" aria-pressed={platform === "social"} onClick={() => setPlatform("social")}><PanelsTopLeft size={18} /><span>头条、知乎与百家号<small>多平台同步助手</small></span></button>
             <button type="button" aria-pressed={platform === "xiaoheihe"} onClick={() => setPlatform("xiaoheihe")}><CircleUserRound size={18} /><span>小黑盒<small>兼容通道 · {publisher?.ok ? "已连接" : "待连接"}</small></span></button>
           </nav>
           <div className="platform-settings-content">

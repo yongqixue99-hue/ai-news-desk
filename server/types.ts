@@ -1,3 +1,4 @@
+import type { DeliveryFieldChecks } from "./delivery-verification.js";
 import type { AiRunTrace } from "./ai-run-observability.js";
 import type {
   EvidenceBundle,
@@ -932,7 +933,7 @@ export type SocialDraftMetadata = Partial<Record<import("./social-delivery-types
 /** Hashes recorded before the write allow read-only recovery after a lost response. */
 export interface WeChatWriteCheckpoint {
   remoteContentFingerprint: string;
-  remoteFingerprintVersion: "v2";
+  remoteFingerprintVersion: "v2" | "v3";
   contentHash: string;
   sentDigest: string;
   imageCount: number;
@@ -953,6 +954,7 @@ export interface WeChatSyncAttempt {
 }
 
 export interface WeChatDraftSyncReceipt {
+  fieldChecks?: DeliveryFieldChecks;
   schemaVersion: "wechat-draft-receipt/v1";
   appId?: string;
   verification?: "verified" | "pending";
@@ -961,7 +963,7 @@ export interface WeChatDraftSyncReceipt {
   remoteFingerprint?: string;
   remoteContentFingerprint?: string;
   /** Missing on legacy receipts, whose fingerprint compared text and images only. */
-  remoteFingerprintVersion?: "v1" | "v2";
+  remoteFingerprintVersion?: "v1" | "v2" | "v3";
   sentDigest?: string;
   draftId: string;
   mediaId: string;
@@ -1234,6 +1236,7 @@ export interface PublisherStep {
 }
 
 export interface PublisherResult {
+  fieldChecks?: DeliveryFieldChecks;
   localDraftUpdatedAt?: string;
   at: string;
   ok: boolean;

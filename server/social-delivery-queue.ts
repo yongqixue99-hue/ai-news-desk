@@ -86,6 +86,7 @@ export const createSocialDeliveryQueue = (dependencies: Dependencies) => {
         await change(draftId, batch.id, target.platform, { status: "waiting-connection", detail: "等待同步助手连接；网站已登录则无需重登" }); return;
       }
       const account = connection.accounts.find(account => account.id === target.platform);
+      if (account?.authState === "unavailable") { await change(draftId, batch.id, target.platform, { status: "blocked", detail: account.detail }); return; }
       if (!account?.authenticated || !account.accountId || !account.username) {
         await change(draftId, batch.id, target.platform, { status: account?.authState === "signed-out" ? "waiting-login" : "waiting-connection", detail: account?.detail || "等待识别平台账号" }); return;
       }

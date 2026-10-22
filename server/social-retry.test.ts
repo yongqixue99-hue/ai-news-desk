@@ -8,9 +8,12 @@ test("retry selects only failed supported channels, preserving reported and ambi
     { platform: "baijiahao", status: "blocked", revisionHash: "1", detail: "" },
     { platform: "toutiao", status: "blocked", revisionHash: "1", detail: "" },
   ] };
-  assert.deepEqual(retryableSocialPlatforms(batch), ["baijiahao"]);
+  assert.deepEqual(retryableSocialPlatforms(batch), ["baijiahao", "toutiao"]);
   for (const status of ["unknown", "sending", "waiting-login"] as const) {
     batch.targets[1].status = status;
+    assert.deepEqual(retryableSocialPlatforms(batch), ["toutiao"]);
+    batch.targets[2].status = status;
     assert.deepEqual(retryableSocialPlatforms(batch), []);
+    batch.targets[2].status = "blocked";
   }
 });

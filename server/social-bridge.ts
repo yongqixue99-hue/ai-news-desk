@@ -7,6 +7,8 @@ export class SocialBridge {
   private server?: WebSocketServer;
   private socket?: WebSocket;
   private token = "";
+  private connectionGeneration = 0;
+  get generation() { return this.connectionGeneration; }
   private extensionId = "";
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   constructor(readonly port = 19527, private readonly timeoutMs = 180_000) {}
@@ -25,6 +27,7 @@ export class SocialBridge {
     this.server = server;
     server.on("connection", socket => {
       this.socket = socket;
+      this.connectionGeneration++;
       socket.on("message", bytes => {
         try {
           const message = JSON.parse(bytes.toString());
@@ -38,7 +41,7 @@ export class SocialBridge {
       });
       socket.on("error", () => socket.close());
       socket.on("close", () => {
-        if (this.socket === socket) { this.socket = undefined; this.rejectPending(); }
+        if (this.socket === socket) { this.socket = undefined; this.connectionGeneration++; this.rejectPending(); }
       });
     });
     await new Promise<void>((resolve, reject) => {
@@ -51,6 +54,7 @@ export class SocialBridge {
     this.pending.clear();
   }
   async stop() {
+    this.connectionGeneration++;
     this.rejectPending();
     this.socket?.terminate(); this.socket = undefined;
     const server = this.server; this.server = undefined; this.token = "";
@@ -60,7 +64,7 @@ export class SocialBridge {
     if (!this.connected) return Promise.reject(new Error("文章同步助手尚未连接，请在 Chrome 中开启同步桥接"));
     const id = randomUUID();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("同步助手响应超时，请到平台核对后再决定是否重试")); }, method === "syncArticle" || method === "uploadImage" ? this.timeoutMs : Math.min(this.timeoutMs, 15_000));
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("同步助手响应超时，请到平台核对后再决定是否重试")); }, method === "syncArticle" || method === "uploadImage" ? this.timeoutMs : Math.min(this.timeoutMs, method === "listPlatforms" ? 90_000 : 15_000));
       this.pending.set(id, { resolve, reject, timer });
       this.socket!.send(JSON.stringify({ id, method, token: this.token, params }), error => {
         if (error) { clearTimeout(timer); this.pending.delete(id); reject(new Error("发送中断，请核对平台记录")); }

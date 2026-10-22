@@ -5,9 +5,9 @@ import type { ArticleDraft, WorkflowState } from "./types.js";
 export interface DeliveryDriver {
   revision: (draft: ArticleDraft, state: WorkflowState) => string;
   inspect: (draft: ArticleDraft, state: WorkflowState, signal?: AbortSignal) => Promise<{ ready: boolean; status?: "waiting-connection" | "waiting-login" | "failed"; detail: string; accountBinding?: string }>;
-  deliver: (draft: ArticleDraft, state: WorkflowState, target: DeliveryBatchTarget, signal?: AbortSignal) => Promise<Pick<DeliveryBatchTarget, "status" | "detail" | "receiptId" | "url">>;
+  deliver: (draft: ArticleDraft, state: WorkflowState, target: DeliveryBatchTarget, signal?: AbortSignal) => Promise<Pick<DeliveryBatchTarget, "status" | "detail" | "receiptId" | "url" | "fieldChecks">>;
   /** Must only inspect durable evidence; it must never submit another remote write. */
-  recover: (draft: ArticleDraft, target: DeliveryBatchTarget, error?: unknown) => Promise<Pick<DeliveryBatchTarget, "status" | "detail" | "receiptId" | "url"> | undefined>;
+  recover: (draft: ArticleDraft, target: DeliveryBatchTarget, error?: unknown) => Promise<Pick<DeliveryBatchTarget, "status" | "detail" | "receiptId" | "url" | "fieldChecks"> | undefined>;
 }
 interface Dependencies {
   read: () => Promise<WorkflowState>;

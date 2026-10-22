@@ -1,3 +1,4 @@
+import { wechatDeliveryChecks } from "./delivery-verification.js";
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import { evaluateDraftReadiness } from "./draft-readiness.js";
@@ -92,10 +93,10 @@ const imageFingerprint = (asset: WeChatImageAsset) =>
   createHash("sha256").update(asset.bytes).digest("hex");
 
 /** Compare readable content and image order, not styles rewritten by the platform. */
-export const wechatRemoteFingerprint = (article: WeChatDraftArticlePayload, includeDigest = true, version: "v1" | "v2" = "v2") => {
+export const wechatRemoteFingerprint = (article: WeChatDraftArticlePayload, includeDigest = true, version: "v1" | "v2" | "v3" = "v3") => {
   const $ = cheerio.load(article.content || "");
   const text = deliveryText;
-  const semantic = version === "v2" ? deliveryContent(article.content) : undefined;
+  const semantic = version !== "v1" ? deliveryContent(article.content) : undefined;
   return createHash("sha256").update(JSON.stringify({
     title: text(article.title), author: text(article.author),
     ...(includeDigest ? { digest: text(article.digest) } : {}),
@@ -104,6 +105,7 @@ export const wechatRemoteFingerprint = (article: WeChatDraftArticlePayload, incl
     images: $("img").map((_i, element) => ($(element).attr("src") || "").replace(/^http:/u, "https:")).get(),
     cover: article.thumb_media_id,
     source: text(article.content_source_url),
+    ...(version === "v3" ? { comments: article.need_open_comment, fanComments: article.only_fans_can_comment } : {}),
   })).digest("hex");
 };
 
@@ -181,6 +183,7 @@ export const createWeChatDraftDesk = (
     if (input.previousReceipt?.mediaId && dependencies.gateway.getDraft) {
       existingRemote = await dependencies.gateway.getDraft(input.previousReceipt.mediaId);
       const version = input.previousReceipt.remoteFingerprintVersion ?? "v1";
+      if (version !== "v3" && (existingRemote.need_open_comment !== 0 || existingRemote.only_fans_can_comment !== 0)) throw new Error("微信草稿留言权限与默认设置不一致，本次未覆盖，请先核对平台修改");
       if (input.previousReceipt.remoteFingerprint && wechatRemoteFingerprint(existingRemote, true, version) !== input.previousReceipt.remoteFingerprint) {
         throw new Error("微信后台草稿已被修改，本次未覆盖。请先打开公众号草稿箱核对，或使用复制排版合并修改");
       }
@@ -204,7 +207,8 @@ export const createWeChatDraftDesk = (
         operation: "unchanged",
         ...(existingRemote && (input.previousReceipt.remoteFingerprint || input.previousReceipt.remoteContentFingerprint) ? {
           verification: "verified" as const, verifiedAt: syncedAt, verificationDetail: undefined,
-          remoteFingerprint: wechatRemoteFingerprint(existingRemote), remoteContentFingerprint: wechatRemoteFingerprint(existingRemote, false), remoteFingerprintVersion: "v2" as const,
+          remoteFingerprint: wechatRemoteFingerprint(existingRemote), remoteContentFingerprint: wechatRemoteFingerprint(existingRemote, false), remoteFingerprintVersion: "v3" as const,
+          fieldChecks: wechatDeliveryChecks({ ...existingRemote, digest }, existingRemote, syncedAt),
         } : {}),
         syncedAt,
         localDraftUpdatedAt: input.draft.updatedAt,
@@ -241,7 +245,7 @@ export const createWeChatDraftDesk = (
     await dependencies.beforeCommit?.();
     const remoteContentFingerprint = wechatRemoteFingerprint(article, false);
     await dependencies.beforeRemoteWrite?.(existingMediaId ? "updated" : "created", existingMediaId, {
-      remoteContentFingerprint, remoteFingerprintVersion: "v2", contentHash: sourceHash, sentDigest: digest,
+      remoteContentFingerprint, remoteFingerprintVersion: "v3", contentHash: sourceHash, sentDigest: digest,
       imageCount: usedPlacements.length, coverPlacementId, localDraftUpdatedAt: input.draft.updatedAt,
     });
     let mediaId = existingMediaId;
@@ -257,18 +261,20 @@ export const createWeChatDraftDesk = (
     let verification: "verified" | "pending" = "pending";
     let verificationDetail = "微信已返回草稿编号，尚未完成内容回读";
     let remoteFingerprint: string | undefined;
+    let fieldChecks = wechatDeliveryChecks(article, undefined, syncedAt);
     if (dependencies.gateway.getDraft) {
       try {
         const remote = await dependencies.gateway.getDraft(mediaId);
+        fieldChecks = wechatDeliveryChecks(article, remote, syncedAt);
         if (wechatRemoteFingerprint(remote, false) === remoteContentFingerprint && (!article.digest || remote.digest === article.digest)) {
           verification = "verified";
           remoteFingerprint = wechatRemoteFingerprint(remote);
-          verificationDetail = "已回读核对标题、正文、图片顺序与封面";
+          verificationDetail = "已回读核对正文、图片、封面和全部发送设置";
         } else verificationDetail = "微信已保存，但回读内容与发送版本不一致，请打开草稿箱核对";
       } catch (error) { verificationDetail = `微信已返回草稿编号，回读未完成：${error instanceof Error ? error.message : "网络错误"}。再次同步将先核对原稿，不会重复新建`; }
     }
     return {
-      verification, verificationDetail, remoteFingerprint, remoteContentFingerprint, remoteFingerprintVersion: "v2", sentDigest: digest,
+      fieldChecks, verification, verificationDetail, remoteFingerprint, remoteContentFingerprint, remoteFingerprintVersion: "v3", sentDigest: digest,
       ...(verification === "verified" ? { verifiedAt: syncedAt } : {}),
       schemaVersion: "wechat-draft-receipt/v1",
       draftId: input.draft.id,
@@ -286,16 +292,18 @@ export const createWeChatDraftDesk = (
     const checkpoint = attempt.checkpoint;
     if (!appId || attempt.appId !== appId || !["sending", "unknown"].includes(attempt.status)
       || !attempt.mediaId || !dependencies.gateway.getDraft || !checkpoint
-      || checkpoint.remoteFingerprintVersion !== "v2" || !/^[a-f0-9]{64}$/u.test(checkpoint.remoteContentFingerprint)
+      || !(["v2", "v3"] as string[]).includes(checkpoint.remoteFingerprintVersion) || !/^[a-f0-9]{64}$/u.test(checkpoint.remoteContentFingerprint)
       || !/^[a-f0-9]{64}$/u.test(checkpoint.contentHash) || !/^[a-f0-9]{64}$/u.test(attempt.revisionHash)) return undefined;
     try {
       const remote = await dependencies.gateway.getDraft(attempt.mediaId);
-      if (wechatRemoteFingerprint(remote, false) !== checkpoint.remoteContentFingerprint
+      if (wechatRemoteFingerprint(remote, false, checkpoint.remoteFingerprintVersion) !== checkpoint.remoteContentFingerprint
+        || remote.need_open_comment !== 0 || remote.only_fans_can_comment !== 0
         || (checkpoint.sentDigest && remote.digest !== checkpoint.sentDigest)) return undefined;
       const verifiedAt = now.toISOString();
       return { schemaVersion: "wechat-draft-receipt/v1", draftId, appId, mediaId: attempt.mediaId, operation: attempt.operation,
         revisionHash: attempt.revisionHash, ...checkpoint, syncedAt: attempt.startedAt,
-        verification: "verified", verifiedAt, remoteFingerprint: wechatRemoteFingerprint(remote),
+        verification: "verified", verifiedAt, fieldChecks: wechatDeliveryChecks({ ...remote, digest: checkpoint.sentDigest }, remote, verifiedAt),
+        remoteFingerprintVersion: "v3", remoteContentFingerprint: wechatRemoteFingerprint(remote, false), remoteFingerprint: wechatRemoteFingerprint(remote),
         verificationDetail: "已回读核对上次发送结果，保留原草稿，未重复上传或写入" };
     } catch { return undefined; }
   };

@@ -38,3 +38,13 @@
 .delivery-channel-settings .xhh-delivery, .delivery-channel-settings .wechat-primary { padding: 10px 0; }
 .delivery-channel-settings .xhh-delivery-heading { margin-bottom: 12px; }
 .delivery-channel-settings .xhh-receipt { margin-top: 10px; }
+
+/* Field evidence is available beside the receipt, without another authoring step. */
+.multi-delivery .social-target-result.reported > svg { color: #987432; }
+.delivery-field-checks { margin: 8px 0; font-size: 11px; }
+.delivery-field-checks summary { cursor: pointer; color: var(--color-text-secondary, #6f716b); }
+.delivery-field-checks ul { list-style: none; padding: 4px 0; margin: 0; }
+.delivery-field-checks li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.delivery-field-checks li[data-status="different"] { color: #b74430; }
+.delivery-field-checks li[data-status="matched"] { color: #527b5d; }
+.delivery-field-checks small { overflow-wrap: anywhere; }

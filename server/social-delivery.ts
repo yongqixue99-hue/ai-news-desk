@@ -1,3 +1,4 @@
+import { socialDeliveryChecks } from "./delivery-verification.js";
 import { createHash, randomUUID } from "node:crypto";
 import * as cheerio from "cheerio";
 import { bodyHtmlWithRequiredImageAttribution } from "./article-html.js";
@@ -21,6 +22,7 @@ export const socialDraftUrl = (platform: SocialPlatform, input: unknown) => {
     const url = new URL(String(input));
     if (url.protocol !== "https:" || url.username || url.password || url.port) return undefined;
     if (platform === "zhihu" && url.hostname === "zhuanlan.zhihu.com" && /^\/p\/\d+\/edit\/?$/.test(url.pathname)) return url.href;
+    if (platform === "toutiao" && url.hostname === "mp.toutiao.com" && /^\/profile_v[34]\/graphic\/publish\/?$/.test(url.pathname) && url.searchParams.getAll("pgc_id").length === 1 && /^[1-9]\d*$/.test(url.searchParams.get("pgc_id") ?? "")) return url.href;
     if (platform === "baijiahao" && url.hostname === "baijiahao.baidu.com" && url.pathname === "/builder/rc/edit" && /^\d+$/.test(url.searchParams.get("article_id") ?? "")) return url.href;
   } catch { /* Untrusted link. */ }
   return undefined;
@@ -29,17 +31,21 @@ export const socialAccounts = (input: unknown): SocialAccount[] => {
   const list = Array.isArray(input) ? input.map(record) : [];
   return socialPlatforms.map(platform => {
     const account = list.find(entry => entry.id === platform.id);
+    const supportsDraft = platform.id !== "toutiao" || Array.isArray(account?.capabilities) && account.capabilities.includes("article") && account.capabilities.includes("draft");
+    const discovering = account?.capabilityPending === true;
+    const unavailable = Boolean(account && !supportsDraft && !discovering);
     const authenticated = account?.isAuthenticated === true;
     const username = text(account?.username).trim();
-    const authState = !platform.enabled ? "unavailable" : authenticated ? "signed-in" : account?.isAuthenticated === false ? "signed-out" : "unknown";
-    return { id: platform.id, available: platform.enabled && Boolean(account), authenticated, authState, username, accountId: text(account?.userId),
-      detail: !platform.enabled ? "可打开编辑页；自动存稿尚未接通"
+    const authState = !platform.enabled || unavailable ? "unavailable" : discovering ? "unknown" : authenticated ? "signed-in" : account?.isAuthenticated === false ? "signed-out" : "unknown";
+    return { id: platform.id, available: platform.enabled && Boolean(account) && supportsDraft, authenticated, authState, username, accountId: text(account?.userId),
+      detail: discovering ? "正在后台检测头条草稿能力，其他平台继续交付" : unavailable ? "当前同步助手未提供头条草稿能力，请更新助手" : !platform.enabled ? "可打开编辑页；自动存稿尚未接通"
         : authState === "unknown" ? "登录状态待检测，已登录账号无需重登" : !authenticated ? "等待在 Chrome 登录，完成后自动继续"
           : !username || !text(account?.userId) ? "助手未返回完整账号标识，暂不能投递" : `已登录 · ${username}` };
   });
 };
 interface Dependencies {
   bridge: Bridge;
+  platformMetadata?: () => Promise<unknown>;
   read: () => Promise<WorkflowState>;
   update: <T>(mutate: (state: WorkflowState) => T) => Promise<T>;
   quality: (draft: ArticleDraft, deliveryTitle?: string) => Promise<void>;
@@ -68,6 +74,13 @@ export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
       const title = socialArticleTitle(draft, platform);
       const titleProblem = socialTitleProblem(platform, title);
       if (titleProblem) throw new Error(titleProblem);
+      let adapterVersion = "unknown";
+      if (platform === "toutiao") {
+        const available = await (dependencies.platformMetadata?.() ?? dependencies.bridge.request("listPlatforms"));
+        const metadata = Array.isArray(available) ? available.map(record).find(entry => entry.id === platform) : undefined;
+        if (!Array.isArray(metadata?.capabilities) || !metadata.capabilities.includes("article") || !metadata.capabilities.includes("draft")) throw new Error("当前同步助手未提供头条草稿能力，请更新助手后重试");
+        adapterVersion = typeof metadata.version === "string" ? metadata.version.replace(/[^a-zA-Z0-9._/+-]/gu, "").slice(0, 80) || "unknown" : "unknown";
+      }
       const initialAccount = await account(platform);
       if (!expectedAccount || !expectedAccountId || initialAccount.name !== expectedAccount || initialAccount.id !== expectedAccountId) throw new Error("登录账号已变化，请刷新后核对目标账号");
       const revisionHash = socialRevisionHash(draft, platform);
@@ -97,7 +110,7 @@ export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
         const asset = assets[index]!;
         const response = record(await dependencies.bridge.request("uploadImage", { platform, imageData: Buffer.from(asset.bytes).toString("base64"), mimeType: asset.contentType }));
         const url = new URL(String(response.url ?? ""));
-        const hosts = platform === "zhihu" ? ["zhimg.com"] : ["baidu.com", "bdstatic.com", "bcebos.com"];
+        const hosts = platform === "zhihu" ? ["zhimg.com"] : platform === "toutiao" ? ["toutiaoimg.com", "pstatp.com", "byteimg.com"] : ["baidu.com", "bdstatic.com", "bcebos.com"];
         if (url.protocol !== "https:" || url.username || url.password || url.port || !hosts.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))) throw new Error("图片上传未返回目标平台的图片地址");
         uploaded.set(required[index]!.id, url.href);
       }
@@ -109,7 +122,7 @@ export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
       const currentReadiness = evaluateDraftReadiness({ ...current, title, images: current.images.filter(item => required.some(placement => placement.id === item.id)) }, platform);
       if (!currentReadiness.ready) throw new Error(currentReadiness.blockers.join("；"));
       const now = new Date().toISOString();
-      attempt = { id: randomUUID(), platform, account: expectedAccount, accountId: expectedAccountId, title, revisionHash, createdAt: now, updatedAt: now, status: "sending", detail: "已发送请求，等待助手回执", finalPublishAttempted: false };
+      attempt = { id: randomUUID(), platform, account: expectedAccount, accountId: expectedAccountId, title, revisionHash, createdAt: now, updatedAt: now, status: "sending", detail: "已发送请求，等待助手回执", fieldChecks: socialDeliveryChecks(platform, adapterVersion, now), finalPublishAttempted: false };
       // Persist before the remote mutation. Interrupted tasks remain blocked across restarts.
       await dependencies.update(state => {
         signal?.throwIfAborted();
@@ -118,13 +131,13 @@ export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
         (current.socialDeliveries ??= []).unshift(attempt!);
       });
       signal?.throwIfAborted();
-      const response = record(await dependencies.bridge.request("syncArticle", { platforms: [platform], article: { title, content: $("article").html(), cover: cover ? uploaded.get(cover.id) : undefined } }));
+      const response = record(await dependencies.bridge.request("syncArticle", { platforms: [platform], draftOnly: true, article: { title, content: $("article").html(), cover: cover ? uploaded.get(cover.id) : undefined } }));
       const returnedAccount = await account(platform);
       const results = Array.isArray(response.results) ? response.results.map(record) : [];
       const result = results.find(entry => entry.platform === platform);
       const url = socialDraftUrl(platform, result?.postUrl);
-      if (result?.success !== true || result.draftOnly !== true || !url || !text(result.postId) || (platform === "zhihu" ? new URL(url).pathname.split("/")[2] !== text(result.postId) : new URL(url).searchParams.get("article_id") !== text(result.postId)) || returnedAccount.id !== expectedAccountId || returnedAccount.name !== expectedAccount) throw new Error("助手未返回完整且匹配账号的草稿回执，请到平台核对后处理");
-      attempt = { ...attempt, status: "reported", postId: text(result.postId), url, detail: "助手报告草稿已创建；请打开核对正文、图片和账号。尚未公开发布。", updatedAt: new Date().toISOString() };
+      if (result?.success !== true || result.draftOnly !== true || !url || !text(result.postId) || (platform === "zhihu" ? new URL(url).pathname.split("/")[2] !== text(result.postId) : new URL(url).searchParams.get(platform === "toutiao" ? "pgc_id" : "article_id") !== text(result.postId)) || returnedAccount.id !== expectedAccountId || returnedAccount.name !== expectedAccount) throw new Error("助手未返回完整且匹配账号的草稿回执，请到平台核对后处理");
+      attempt = { ...attempt, status: "reported", postId: text(result.postId), url, detail: "助手已返回草稿编号；正文、图片、封面和平台设置尚未回读核对。尚未公开发布。", updatedAt: new Date().toISOString() };
       await persist(attempt, draftId);
       return attempt;
     } catch (error) {
@@ -145,6 +158,8 @@ export const createSocialDeliveryDesk = (dependencies: Dependencies) => {
     if (!receipt) throw new Error("回执不存在");
     if (active.has(`${draftId}:${receipt.platform}`)) throw new Error("投递仍在执行，请等待结束");
     if (resolution === "not-received" && !["sending", "unknown"].includes(receipt.status)) throw new Error("这个回执不需要重试处理");
+    if (resolution === "reviewed") receipt.acceptance = { reviewedAt: new Date().toISOString(), accountId: receipt.accountId, revisionHash: receipt.revisionHash,
+      adapterVersion: receipt.fieldChecks?.adapterVersion || "unknown", fields: receipt.fieldChecks?.fields.map(field => field.key) || [] };
     receipt.status = resolution;
     receipt.detail = resolution === "reviewed" ? "用户已在平台核对草稿；最终发布仍由用户完成" : "用户确认平台未收到，允许手动重新投递";
     receipt.updatedAt = new Date().toISOString();

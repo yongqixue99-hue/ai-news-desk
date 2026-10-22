@@ -93,11 +93,18 @@ test("a selected cover outside the body is governed and uploaded once before art
   await f.send(); assert.equal(uploads, 1);
 });
 
-test("only verified public adapters are offered, even when helper lists Toutiao", () => {
+test("a listed Toutiao account is not available without its explicit draft capability", () => {
   const accounts = socialAccounts([{ id: "toutiao", isAuthenticated: true, username: "作者" }, { id: "zhihu", isAuthenticated: true, username: "作者" }]);
   assert.equal(accounts.find(item => item.id === "toutiao")?.available, false);
   assert.equal(accounts.find(item => item.id === "zhihu")?.available, true);
   assert.equal(socialAccounts({ id: "zhihu" })[0]?.authenticated, false);
+});
+test("pending discovery or a missing auth response does not claim a missing Toutiao adapter", () => {
+  const pending = socialAccounts([{ id: "toutiao", capabilityPending: true }]).find(account => account.id === "toutiao")!;
+  assert.equal(pending.authState, "unknown"); assert.equal(pending.available, false);
+  assert.match(pending.detail, /后台检测/u);
+  const known = socialAccounts([{ id: "toutiao", capabilities: ["article", "draft"] }]).find(account => account.id === "toutiao")!;
+  assert.equal(known.authState, "unknown"); assert.equal(known.available, true); assert.equal(known.authenticated, false);
 });
 test("draft links must point to approved editors, never published articles or arbitrary URLs", () => {
   for (const value of ["javascript:alert(1)", "https://evil.test/", "https://zhuanlan.zhihu.com/p/123", "https://zhuanlan.zhihu.com.evil.test/p/123/edit", "https://user@zhuanlan.zhihu.com/p/123/edit"]) assert.equal(socialDraftUrl("zhihu", value), undefined);
@@ -150,8 +157,12 @@ test("editorial failure and unknown images block transport", async () => {
   f.setQuality(async () => {}); f.state.drafts[0]!.bodyHtml += '<img src="https://example.com/a.jpg">';
   await assert.rejects(f.send(), /素材管理/); assert.equal(f.calls.includes("syncArticle"), false);
 });
-test("unverified platform cannot bypass the UI; no remote methods are called", async () => {
-  const f = fixture(); await assert.rejects(f.desk.deliver("d", "toutiao", "作者", f.state.drafts[0]!.updatedAt, "uid-1"), /尚未接通/); assert.equal(f.calls.length, 0);
+test("a missing Toutiao adapter cannot bypass capability inspection or cause a remote write", async () => {
+  const f = fixture();
+  const original = f.dependencies.bridge.request;
+  f.dependencies.bridge.request = async (method, params) => method === "listPlatforms" ? (f.calls.push(method), []) : original(method, params);
+  await assert.rejects(f.desk.deliver("d", "toutiao", "作者", f.state.drafts[0]!.updatedAt, "uid-1"), /草稿能力/);
+  assert.deepEqual(f.calls, ["listPlatforms"]);
 });
 test("manual review preserves prior receipt; new revision creates separate history", async () => {
   const f = fixture(); const receipt = await f.send(); f.state.drafts[0]!.title = "新版本";
